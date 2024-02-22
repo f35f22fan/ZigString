@@ -1,0 +1,27 @@
+// because zon file is really just a zig struct
+// comments are really done in the same way using 2 forward slashes
+.{
+    // the name of your project
+    .name = "app",
+    // the version of your project
+    .version = "0.0.1",
+
+    // the actual packages you need as dependencies of your project
+    .dependencies = .{
+        .ziglyph = .{
+            .url = "https://codeberg.org/dude_the_builder/ziglyph/archive/v0.11.1.tar.gz",
+            .hash = "1220dee955839b7f267c1bb21e0ee60888c08f408c30f0722b243cabcc8cce8b7508",
+        },
+        .zigstr = .{
+            .url = "https://codeberg.org/dude_the_builder/zigstr/archive/v0.11.2.tar.gz",
+            .hash = "12208129a4af2c2954a9d2049072fe98e35763c7e8a33aa34e3204caa5fa792f8b5f",
+        },
+        // // the name of the package
+        // .zap = .{
+        //     // the url to the release of the module
+        //     .url = "https://github.com/zigzap/zap/archive/refs/tags/v0.1.7-pre.tar.gz",
+        //     // the hash of the module, this is not the checksum of the tarball
+        //     .hash = "1220002d24d73672fe8b1e39717c0671598acc8ec27b8af2e1caf623a4fd0ce0d1bd",
+        // },
+    },
+}
