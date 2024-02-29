@@ -236,17 +236,42 @@ pub fn main() !u8 {
 
     //try FindTagValue(a);
 
-    try FindBackwards(a);
+    //try FindBackwards(a);
 
-    if (true) {
+    if (true) { // iterate properly?
+        const raw_str = "Jos\u{65}\u{301}.";
+        var s = try String.From(a, raw_str);
+        defer s.deinit();
+        try s.printCodePoints();
+
+        // var from = Index.strStart();
+        // while (from.next(s)) |index| {
+        //    try out.print("[iterate] {}\n", .{index.cp});
+        // }
+
+        const from: usize = 4;
+        var iter = try s.iterator(from);
+        while (iter.next()) |index| {
+            try out.print("main() index cp={},gr={},from={}\n",
+            .{index.cp, index.gr, from});
+        }
+    }
+
+    if (false) {
         var s = try String.From(a, JoseStr);
         try s.append("[ADDITIONAL STRING]");
         var buf = try s.toString();
         defer buf.deinit();
         try out.print("String.Append(gr={}) :\"{s}\"\n",
         .{s.grapheme_count, buf.items});
+    }
 
-        
+    if (false) {
+        var s = try String.From(a, "   hola!");
+        try s.trimLeft();
+        var buf = try s.toString();
+        defer buf.deinit();
+        try out.print("String.trimLeft(): \"{s}\"\n", .{buf.items});
     }
 
     if (false) {

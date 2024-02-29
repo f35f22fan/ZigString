@@ -30,13 +30,14 @@ pub const Index = struct {
     }
 
     pub fn next(self: Index, s: String) ?Index {
-        const from_index = self.cp + 1;
-        if (from_index >= s.codepoints.items.len)
+        const next_index = self.cp + 1;
+        if (next_index >= s.codepoints.items.len)
             return null;
 
-        for (s.graphemes.items[from_index..], from_index..) |b, i| {
-            if (b == 1) {
-                return Index{ .cp = i, .gr = self.gr + 1 };
+        const slice = s.graphemes.items[next_index..];
+        for (slice, next_index..) |bit, index| {
+            if (bit == 1) {
+                return Index{ .cp = index, .gr = self.gr + 1 };
             }
         }
 
@@ -58,11 +59,38 @@ pub const Index = struct {
 
         return null;
     }
+};
 
-    /// It is more obvious to the reader what Index.strStart()
-    /// does, as opposed to Index{}.
-    pub inline fn strStart() Index {
-        return Index{}; // defaults to cp=0, gr=0
+pub const Iterator = struct {
+    item: ?Index = null,
+    s: String,
+    first_run: bool = true,
+
+// rewrite Iterator to clearly state when 1st item must be included.
+    pub fn next(self: *Iterator) ?Index {
+        if (self.item) |item| {
+            if (self.first_run) {
+                self.first_run = false;
+                return item;
+            }
+            self.item = item.next(self.s);
+        } else {
+            self.item = String.strStart();
+        }
+
+        if (self.first_run)
+            self.first_run = false;
+        
+        return self.item;
+    }
+
+    pub fn prev(self: *Iterator) ?Index {
+        if (self.item) |item| {
+            self.item = item.prev(self.s);
+        } else {
+            self.item = self.s.strEnd();
+        }
+        return self.item;
     }
 };
 
@@ -157,11 +185,11 @@ pub fn endsWithStr(self: String, needles: String) bool {
     return self.endsWithSlice(needles.codepoints.items);
 }
 
-pub fn equals(self: String, other: String) bool {
-    if (self.codepoints.items.len != other.codepoints.items.len)
+pub fn equals(self: String, slice: CodePointSlice) bool {
+    if (self.codepoints.items.len != slice.len)
         return false;
     
-    for (self.codepoints.items, other.codepoints.items) |l, r| {
+    for (self.codepoints.items, slice) |l, r| {
         if (l != r)
             return false;
     }
@@ -169,14 +197,18 @@ pub fn equals(self: String, other: String) bool {
     return true;
 }
 
+pub fn equalsStr(self: String, other: String) bool {
+    return self.equals(other.codepoints.items);
+}
+
 pub fn findCodePointIndex(self: String, grapheme_index: usize) ?usize {
-    var current_gi: usize = 0;
+    var count: usize = 0;
     for (self.graphemes.items, 0..) |bit, cp_index| {
-        if (current_gi == grapheme_index)
+        if (bit == 1)
+            count += 1;
+
+        if (count == grapheme_index+1)
             return cp_index;
-        if (bit == 1) {
-            current_gi += 1;
-        }
     }
 
     //out.print("{s}() found nothing!, current_gi={}, input_index={}\n", .{ @src().fn_name, current_gi, grapheme_index }) catch {};
@@ -335,15 +367,6 @@ pub fn findOneSimdFromEnd(self: String, needle: CodePoint, start: ?usize, compti
     return null;
 }
 
-// pub fn format(self: String, comptime fmt: []const u8,
-// options: std.fmt.FormatOptions, writer: anytype) !void {
-//     _ = fmt;
-//     _ = options;
-//     const buf = try self.toString();
-//     defer buf.deinit();
-//     _ = try writer.print("{s}", .{buf.items});
-// }
-
 pub fn From(a: Allocator, input: []const u8) !String {
     var obj = String{};
     obj.a = a;
@@ -356,7 +379,36 @@ pub fn From(a: Allocator, input: []const u8) !String {
 
 /// This operation is O(n)
 pub fn getGraphemeIndex(codepoint_pos: usize, slice: GraphemeSlice) ?usize {
-    return countGraphemesSimd(slice[0 .. codepoint_pos + 1]);
+    return countGraphemesSimd(slice[0..codepoint_pos+1]);
+}
+
+pub fn grIsAnyCp(self: String, index: Index, slice: CodePointSlice) bool {
+    const items = self.codepoints.items;
+    const graphemes = self.graphemes.items;
+    for (slice) |cp| {
+        if (items[index.cp] != cp or graphemes[index.cp] != 1) {
+            continue;
+        }
+
+// Here we're just making sure this grapheme is 1 codepoint length
+// to respect grapheme cluster boundaries.
+        const at_end = index.cp == items.len - 1;
+        if (at_end or graphemes[index.cp + 1] == 1)
+            return true;
+    }
+
+    return false;
+}
+
+pub fn iterator(self: String, from_gr: ?usize) !Iterator {
+    if (from_gr) |from| {
+        const index = self.seek(from) orelse String.strStart();
+        //  try out.print("String.iterator() index cp={}, gr={}, from={}\n",
+        //  .{index.cp, index.gr, from});
+        return Iterator {.s = self, .item = index};
+    } else {
+        return Iterator {.s = self };
+    }
 }
 
 /// The type of `from_index` is `Index` object of wanted grapheme.
@@ -553,6 +605,16 @@ pub fn remove(self: *String, start_index: ?Index, gr_count_to_remove: usize) !vo
     self.grapheme_count -= gr_so_far;
 }
 
+pub fn removeLowLevel(self: *String, from_cp: usize, cp_count: usize) !void {
+    var new_cps: []const CodePoint = &[_]CodePoint{};
+    try self.codepoints.replaceRange(from_cp, cp_count, new_cps);
+
+    const new_grs: []const u1 = &[_]u1{};
+    try self.graphemes.replaceRange(from_cp, cp_count, new_grs);
+    
+    self.grapheme_count -= cp_count;
+}
+
 pub fn replace(self: *String, start_index: ?Index, gr_count_to_remove: usize, replacement: []const u8) !void {
     try self.remove(start_index, gr_count_to_remove);
     try self.insert(start_index, replacement);
@@ -595,6 +657,10 @@ pub fn strEnd(self: String) Index {
     return Index{ .cp = self.codepoints.items.len, .gr = self.grapheme_count };
 }
 
+pub fn strStart() Index {
+    return Index {};
+}
+
 /// returns `Index` after the last grapheme minus `skip_graphemes`, exec is O(n)
 pub fn fromEnd(self: String, skip_graphemes: ?usize) ?Index {
     if (skip_graphemes) |skip| {
@@ -612,14 +678,20 @@ pub fn trim(self: *String) !void {
 }
 
 pub fn trimLeft(self: *String) !void {
-    const cp: CodePoint = ' ';// whitespace
-    _ = self;
-    _ = cp;
-    // const start = Index.strStart();
-    // while (start.next(self.*)) |addr| {
-    //     _ = addr;
-    // }
-    
+    const cp_to_remove = [_]CodePoint{' ', '\t', '\n', '\r'};
+    const str = self.*;
+    var from = Index.strStart();
+    var found: usize = 0;
+    while (from.next(str)) |index| {
+        if (self.grIsAnyCp(index, &cp_to_remove)) {
+            found += 1;
+        } else {
+            break;
+        }
+    }
+
+    if (found > 0)
+        try self.removeLowLevel(from.cp, found);
 }
 
 pub fn utf8_from_cp(a: Allocator, cp: CodePoint) !ArrayList(u8) {
