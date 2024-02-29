@@ -176,9 +176,9 @@ pub fn endsWithSlice(self: String, needles: CodePointSlice) bool {
     const items = self.codepoints.items;
     if (items.len < needles.len or !std.mem.endsWith(CodePoint, items, needles))
         return false;
+
     const start_index: usize = items.len - needles.len;
-    if (self.graphemes.items[start_index] != 1)
-        return false;
+    return self.graphemes.items[start_index] == 1;
 }
 
 pub fn endsWithStr(self: String, needles: String) bool {
