@@ -243,18 +243,25 @@ pub fn main() !u8 {
         var s = try String.From(a, raw_str);
         defer s.deinit();
         try s.printCodePoints();
-
-        // var from = Index.strStart();
-        // while (from.next(s)) |index| {
-        //    try out.print("[iterate] {}\n", .{index.cp});
-        // }
-
-        const from: usize = 4;
-        var iter = try s.iterator(from);
-        while (iter.next()) |index| {
-            try out.print("main() index cp={},gr={},from={}\n",
-            .{index.cp, index.gr, from});
+        const from: usize = 2;
+        var it = try s.iterator(from);
+        while (it.next()) |index| {
+            try out.print("main() iteration from={}, now={}\n",
+            .{from, index});
         }
+
+        try out.print("main iteration done.\n", .{});
+        const str_ext = try String.From(a, "my file.desktop");
+        const ext = ".desKtop";
+        const result = try str_ext.endsWith(ext);
+        try out.print("ends with {s}: {}\n", .{ext, result});
+
+        const str1 = try String.From(a, ".desktop");
+        const str2 = try String.From(a, ".desKtop");
+        const yes = str1.equalsStr(str2, String.CaseSensitive.Yes);
+        const no = str1.equalsStr(str2, String.CaseSensitive.No);
+        try out.print("'{}'=='{}' CaseSensitive.Yes: {}, No: {}\n",
+        .{str1, str2, yes, no});
     }
 
     if (false) {

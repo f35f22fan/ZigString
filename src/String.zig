@@ -18,6 +18,11 @@ pub const String = @This();
 pub const Error = error{ NotFound, BadArg };
 const SimdVecLen: u16 = 32;
 
+pub const CaseSensitive = enum(u8) {
+    Yes,
+    No,
+};
+
 pub const Index = struct {
     cp: usize = 0,
     gr: usize = 0,
@@ -185,20 +190,32 @@ pub fn endsWithStr(self: String, needles: String) bool {
     return self.endsWithSlice(needles.codepoints.items);
 }
 
-pub fn equals(self: String, slice: CodePointSlice) bool {
+pub fn equals(self: String, input: []const u8, cs: CaseSensitive) !bool {
+    const list = try toCodePoints(self.a, input);
+    defer list.deinit();
+    return self.equalsSlice(list.items, cs);
+}
+
+pub fn equalsSlice(self: String, slice: CodePointSlice, cs: CaseSensitive) bool {
     if (self.codepoints.items.len != slice.len)
         return false;
-    
+    const do_convert = cs == CaseSensitive.No;
+
     for (self.codepoints.items, slice) |l, r| {
-        if (l != r)
-            return false;
+        if (do_convert) {
+            if (letter.toUpper(l) != letter.toUpper(r))
+                return false;
+        } else {
+            if (l != r)
+                return false;
+        }
     }
 
     return true;
 }
 
-pub fn equalsStr(self: String, other: String) bool {
-    return self.equals(other.codepoints.items);
+pub fn equalsStr(self: String, other: String, cs: CaseSensitive) bool {
+    return self.equalsSlice(other.codepoints.items, cs);
 }
 
 pub fn findCodePointIndex(self: String, grapheme_index: usize) ?usize {
@@ -365,6 +382,16 @@ pub fn findOneSimdFromEnd(self: String, needle: CodePoint, start: ?usize, compti
     }
 
     return null;
+}
+
+/// format implements the `std.fmt` format interface for printing types.
+pub fn format(self: String, comptime fmt: []const u8,
+options: std.fmt.FormatOptions, writer: anytype) !void {
+    _ = fmt;
+    _ = options;
+    const buf = self.toString() catch return;
+    defer buf.deinit();
+    _ = try writer.print("{s}", .{buf.items});
 }
 
 pub fn From(a: Allocator, input: []const u8) !String {
@@ -629,8 +656,7 @@ pub fn reset(self: *String, str: []const u8) !void {
     try self.init(str, true);
 }
 
-/// returns an `Index` object for grapheme at
-/// index `grapheme_index`
+/// Returns an `Index` object for grapheme at index `grapheme_index`
 pub fn seek(self: String, grapheme_index: usize) ?Index {
     if (grapheme_index == 0)
         return Index{};
@@ -639,13 +665,19 @@ pub fn seek(self: String, grapheme_index: usize) ?Index {
 }
 
 pub fn startsWith(self: String, phrase: []const u8) !bool {
-    const needles = try String.From(self.a, phrase);
+    const needles = try String.toCodePoints(self.a, phrase);
     defer needles.deinit();
-    return self.startsWithStr(needles);
+    return self.startsWithSlice(needles.items);
 }
 
 pub fn startsWithSlice(self: String, needles: CodePointSlice) bool {
-    return std.mem.startsWith(CodePoint, self.codepoints.items, needles);
+    if (!std.mem.startsWith(CodePoint, self.codepoints.items, needles)) {
+        return false;
+    }
+
+    // make sure it ends on a grapheme boundary:
+    const remaining = self.graphemes.items[(needles.len - 1)..];
+    return remaining.len == 0 or remaining[0] == 1;
 }
 
 pub fn startsWithStr(self: String, needles: String) bool {
@@ -668,6 +700,22 @@ pub fn fromEnd(self: String, skip_graphemes: ?usize) ?Index {
             return self.seek(self.grapheme_count - skip);
     }
     return Index{ .cp = self.codepoints.items.len, .gr = self.grapheme_count };
+}
+
+pub fn toUpper(self: *String) void {
+    toUpper3(self.codepoints.items);
+}
+
+pub fn toUpper2(self: String) ![]u8 {
+    const buf = try self.toString();
+    defer buf.deinit();
+    return try zgl.toUpperStr(self.a, buf.items);
+}
+
+pub fn toUpper3(list: *CodePointSlice) void {
+    for (list) |*v| {
+        v.* = letter.toUpper(v.*);
+    }
 }
 
 pub fn trim(self: *String) !void {
