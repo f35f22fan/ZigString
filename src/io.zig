@@ -20,5 +20,5 @@ pub fn getEnv(a: Allocator, folder: Folder) ![]const u8 {
 pub fn readFile(a: Allocator, full_path: []const u8) ![]u8 {
     const file = try std.fs.openFileAbsolute(full_path, .{});
     defer file.close();
-    return try file.reader().readAllAlloc(a, std.math.maxInt(usize));
+    return file.reader().readAllAlloc(a, std.math.maxInt(usize));
 }

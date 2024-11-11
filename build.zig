@@ -16,10 +16,10 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const exe = b.addExecutable(.{
-        .name = "app",
+        .name = "ZigString",
         // In this case the main source file is merely a path, however, in more
         // complicated build scripts, this could be a generated file.
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -29,14 +29,15 @@ pub fn build(b: *std.Build) void {
         .target = target,
     });
     // for exe, lib, tests, etc.
-    exe.addModule("ziglyph", ziglyph.module("ziglyph"));
-    //exe.emit_asm = .emit;
+    exe.root_module.addImport("ziglyph", ziglyph.module("ziglyph"));
+
+    //const zg = b.dependency("zg", .{});
 
     const zigstr = b.dependency("zigstr", .{
         .target = target,
         .optimize = optimize,
     });
-    exe.addModule("zigstr", zigstr.module("zigstr"));
+    exe.root_module.addImport("zigstr", zigstr.module("zigstr"));
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
@@ -69,17 +70,25 @@ pub fn build(b: *std.Build) void {
 
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
-    const unit_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/main.zig" },
+    const tests1 = b.addTest(.{
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
-
-    const run_unit_tests = b.addRunArtifact(unit_tests);
-
-    // Similar to creating the run step earlier, this exposes a `test` step to
+    const run1 = b.addRunArtifact(tests1);
+       // Similar to creating the run step earlier, this exposes a `test` step to
     // the `zig build --help` menu, providing a way for the user to request
     // running the unit tests.
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_unit_tests.step);
+    test_step.dependOn(&run1.step);
+
+    const tests2 = b.addTest(.{
+        .root_source_file = b.path("src/tests.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    tests2.root_module.addImport("ziglyph", ziglyph.module("ziglyph"));
+    const run2 = b.addRunArtifact(tests2);
+    const test_step2 = b.step("test2", "Run unit tests");
+    test_step2.dependOn(&run2.step);
 }
