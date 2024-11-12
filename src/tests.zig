@@ -6,7 +6,7 @@ const alloc = std.testing.allocator;
 
 const String = @import("String.zig").String;
 const Index = String.Index;
-const CodePoint = String.CodePoint;
+const Codepoint = String.Codepoint;
 // Don't change this string, many tests depend on it:
 const JoseStr = "Jos\u{65}\u{301} se fu\u{65}\u{301} a Sevilla sin pararse";
 
@@ -234,29 +234,69 @@ test "FindInsertRemove" {
 }
 
 test "Split" {
-    const main_str = try String.From(alloc, JoseStr);
-    defer main_str.deinit();
-    try main_str.printGraphemes(std.debug);
-    try main_str.printCodePoints(std.debug);
+    // const JoseStr2 = "Jos\u{65}\u{301} se\nfu\u{65}\u{301} a\r\nSevilla sin pararse";
+    // const main_str = try String.From(alloc, JoseStr2);
+    // defer main_str.deinit();
+    // try main_str.printGraphemes(std.debug);
 
-    const index = main_str.indexOfCp(" ", Index.strStart(), String.CaseSensitive.Yes)
-        orelse return String.Error.Index;
-    std.debug.print("{s}(): {?}\n", .{@src().fn_name, index});
+    // const array = try main_str.split(" ", String.CaseSensitive.Yes, String.KeepEmptyParts.No);
+    // defer {
+    //     for (array.items) |item| {
+    //         item.deinit();
+    //     }
+    //     array.deinit();
+    // }
 
-    const from = Index {.cp=index.cp+1, .gr=index.gr+1};
-    const index2 = main_str.indexOfCp(" ", from, String.CaseSensitive.Yes);
-    std.debug.print("{s}(): {?}\n", .{@src().fn_name, index2});
+    // for (array.items) |s| {
+    //     std.debug.print("split string: \"{}\"\n", .{s});
+    // }
 
-    const array = try main_str.split(" ", String.CaseSensitive.Yes, String.KeepEmptyParts.No);
+    // var correct = ArrayList(String).init(alloc);
+    // defer {
+    //     for (correct.items) |item| {
+    //         item.deinit();
+    //     }
+    //     correct.deinit();
+    // }
+    // try correct.append(try String.From(alloc, "Jos\u{65}\u{301}"));
+    // try correct.append(try String.From(alloc, "se"));
+    // try correct.append(try String.From(alloc, "fu\u{65}\u{301}"));
+    // try correct.append(try String.From(alloc, "a"));
+    // try correct.append(try String.From(alloc, "Sevilla"));
+    // try correct.append(try String.From(alloc, "sin"));
+    // try correct.append(try String.From(alloc, "pararse"));
+    
+    // try expect(array.items.len == correct.items.len);
+    
+    // for (array.items, correct.items) |a, b| {
+    //     try expect(a.equalsStr(b, String.CaseSensitive.Yes));
+    // }
+
+    //=========== another one
+    const blender_cstr =
+"Comment[zh_TW]=3D 模型、動畫、算圖和後製\r\n"
+//\\Keywords=3d;cg;modeling;animation;painting;sculpting;texturing;video editing;video tracking;rendering;render engine;cycles;python;
+//\\Exec=blender %f
+//\\Icon=blender
+;
+
+    var blender_str = try String.From(alloc, blender_cstr);
+    defer blender_str.deinit();
+    try blender_str.printGraphemes(std.debug);
+    // try blender_str.trim();
+    // try blender_str.printGraphemes(std.debug);
+
+    var blender_arr = try blender_str.split("=", String.CaseSensitive.Yes, String.KeepEmptyParts.No);
     defer {
-        std.debug.print("Calling defer\n", .{});
-        for (array.items) |item| {
+        for (blender_arr.items) |*item| {
             item.deinit();
         }
-        array.deinit();
+        blender_arr.deinit();
     }
 
-    for (array.items) |s| {
-        std.debug.print("split string: \"{}\"\n", .{s});
+    for (blender_arr.items) |*item| {
+        //try item.trim();
+        std.debug.print("\"{}\"\n", .{item});
     }
+    
 }

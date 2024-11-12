@@ -79,7 +79,7 @@ pub fn build(b: *std.Build) void {
        // Similar to creating the run step earlier, this exposes a `test` step to
     // the `zig build --help` menu, providing a way for the user to request
     // running the unit tests.
-    const test_step = b.step("test", "Run unit tests");
+    const test_step = b.step("test2", "Run unit tests");
     test_step.dependOn(&run1.step);
 
     const tests2 = b.addTest(.{
@@ -89,6 +89,6 @@ pub fn build(b: *std.Build) void {
     });
     tests2.root_module.addImport("ziglyph", ziglyph.module("ziglyph"));
     const run2 = b.addRunArtifact(tests2);
-    const test_step2 = b.step("test2", "Run unit tests");
+    const test_step2 = b.step("test", "Run unit tests");
     test_step2.dependOn(&run2.step);
 }
