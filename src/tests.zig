@@ -9,6 +9,7 @@ const Index = String.Index;
 const Codepoint = String.Codepoint;
 // Don't change this string, many tests depend on it:
 const JoseStr = "Jos\u{65}\u{301} se fu\u{65}\u{301} a Sevilla sin pararse";
+const theme = String.Theme.Dark;
 
 test "Append Test" {
     const additional = "[Ещё]";
@@ -234,69 +235,39 @@ test "FindInsertRemove" {
 }
 
 test "Split" {
-    // const JoseStr2 = "Jos\u{65}\u{301} se\nfu\u{65}\u{301} a\r\nSevilla sin pararse";
-    // const main_str = try String.From(alloc, JoseStr2);
-    // defer main_str.deinit();
-    // try main_str.printGraphemes(std.debug);
-
-    // const array = try main_str.split(" ", String.CaseSensitive.Yes, String.KeepEmptyParts.No);
-    // defer {
-    //     for (array.items) |item| {
-    //         item.deinit();
-    //     }
-    //     array.deinit();
-    // }
-
-    // for (array.items) |s| {
-    //     std.debug.print("split string: \"{}\"\n", .{s});
-    // }
-
-    // var correct = ArrayList(String).init(alloc);
-    // defer {
-    //     for (correct.items) |item| {
-    //         item.deinit();
-    //     }
-    //     correct.deinit();
-    // }
-    // try correct.append(try String.From(alloc, "Jos\u{65}\u{301}"));
-    // try correct.append(try String.From(alloc, "se"));
-    // try correct.append(try String.From(alloc, "fu\u{65}\u{301}"));
-    // try correct.append(try String.From(alloc, "a"));
-    // try correct.append(try String.From(alloc, "Sevilla"));
-    // try correct.append(try String.From(alloc, "sin"));
-    // try correct.append(try String.From(alloc, "pararse"));
-    
-    // try expect(array.items.len == correct.items.len);
-    
-    // for (array.items, correct.items) |a, b| {
-    //     try expect(a.equalsStr(b, String.CaseSensitive.Yes));
-    // }
-
-    //=========== another one
-    const blender_cstr =
-"Comment[zh_TW]=3D 模型、動畫、算圖和後製\r\n"
-//\\Keywords=3d;cg;modeling;animation;painting;sculpting;texturing;video editing;video tracking;rendering;render engine;cycles;python;
-//\\Exec=blender %f
-//\\Icon=blender
-;
-
-    var blender_str = try String.From(alloc, blender_cstr);
-    defer blender_str.deinit();
-    try blender_str.printGraphemes(std.debug);
-    try blender_str.printCodepoints(std.debug);
-    // try blender_str.trim();
-
-    var blender_arr = try blender_str.split("=", String.CaseSensitive.Yes, String.KeepEmptyParts.No);
+    const main_str = try String.From(alloc, JoseStr);
+    defer main_str.deinit();
+    try main_str.printGraphemes(std.debug, theme);
+    const lines = try main_str.split(" ", String.CaseSensitive.Yes, String.KeepEmptyParts.No);
     defer {
-        for (blender_arr.items) |*item| {
+        for (lines.items) |item| {
             item.deinit();
         }
-        blender_arr.deinit();
+        lines.deinit();
     }
 
-    for (blender_arr.items) |*item| {
-        //try item.trim();
-        std.debug.print("\"{}\"\n", .{item});
+    for (lines.items) |s| {
+        try s.print(std.debug, theme, "Split string: ");
     }
+
+    var correct = ArrayList(String).init(alloc);
+    defer {
+        for (correct.items) |item| {
+            item.deinit();
+        }
+        correct.deinit();
+    }
+    try correct.append(try String.From(alloc, "Jos\u{65}\u{301}"));
+    try correct.append(try String.From(alloc, "se"));
+    try correct.append(try String.From(alloc, "fu\u{65}\u{301}"));
+    try correct.append(try String.From(alloc, "a"));
+    try correct.append(try String.From(alloc, "Sevilla"));
+    try correct.append(try String.From(alloc, "sin"));
+    try correct.append(try String.From(alloc, "pararse"));
     
+    try expect(lines.items.len == correct.items.len);
+    
+    for (lines.items, correct.items) |a, b| {
+        try expect(a.equalsStr(b, String.CaseSensitive.Yes));
+    }
 }

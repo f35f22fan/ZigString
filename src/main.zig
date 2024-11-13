@@ -6,7 +6,7 @@ const expectError = std.testing.expectError;
 var out = std.io.getStdOut().writer();
 
 const String = @import("String.zig").String;
-const CodePoint = String.CodePoint;
+const Codepoint = String.Codepoint;
 const Index = String.Index;
 
 const ziglyph = @import("ziglyph");
@@ -25,7 +25,7 @@ inline fn getTime() i128 {
     return std.time.microTimestamp();
 }
 
-fn FindOneSimd(a: Allocator, haystack: String, needle: CodePoint, from: usize, correct: ?usize, comptime depth: u16) !usize {
+fn FindOneSimd(a: Allocator, haystack: String, needle: Codepoint, from: usize, correct: ?usize, comptime depth: u16) !usize {
     const start_time = getTime();
     const result = haystack.findOneSimd(needle, from, depth);
     const done_in = getTime() - start_time;
@@ -38,9 +38,9 @@ fn FindOneSimd(a: Allocator, haystack: String, needle: CodePoint, from: usize, c
     return if (result) |t| t else Error.NotFound;
 }
 
-fn FindOneLinear(a: Allocator, haystack: String, needle: CodePoint) !String.Index {
+fn FindOneLinear(a: Allocator, haystack: String, needle: Codepoint) !String.Index {
     const start_time = getTime();
-    const result = std.mem.indexOfScalar(CodePoint, haystack.codepoints.items, needle);
+    const result = std.mem.indexOfScalar(Codepoint, haystack.codepoints.items, needle);
     const done_in = getTime() - start_time;
     var buf = try String.utf8_from_cp(a, needle);
     defer buf.deinit();
@@ -133,7 +133,7 @@ pub fn main() !u8 {
     }
 
     if (false) {
-        const needles: String.CodePointSlice = &[_]CodePoint{ 's', 'e' };
+        const needles: String.CodePointSlice = &[_]Codepoint{ 's', 'e' };
         const needles_raw = "se";
         const from = [_]usize{ 0, 2, 33 };
         const correct = [_]usize{ 5, 5, 31 };
@@ -197,6 +197,7 @@ const COLOR_GREEN = "\x1B[32m";
 const COLOR_RED = "\x1B[0;91m";
 const COLOR_YELLOW = "\x1B[93m";
 const COLOR_MAGENTA = "\x1B[35m";
+const COLOR_CYAN = "\x1B[36m";
 const BLINK_START = "\x1B[5m";
 const BLINK_END = "\x1B[25m";
 const BOLD_START = "\x1B[1m";
