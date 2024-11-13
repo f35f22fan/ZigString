@@ -223,8 +223,8 @@ pub fn endsWithStr(self: String, needles: String, cs: CaseSensitive) bool {
     return self.endsWithSlice(needles.codepoints.items, cs);
 }
 
-pub fn equals(self: String, input: []const u8, cs: CaseSensitive) !bool {
-    const list = try toCodePoints(self.a, input);
+pub fn equals(self: String, input: []const u8, cs: CaseSensitive) bool {
+    const list = toCodePoints(self.a, input) catch return false;
     defer list.deinit();
     return self.equalsSlice(list.items, cs);
 }
@@ -880,11 +880,10 @@ pub fn size(self: String) usize {
 pub fn split(self: String, sep: []const u8, cs: CaseSensitive, kep: KeepEmptyParts) !ArrayList(String) {
     var array = std.ArrayList(String).init(self.a);
     errdefer array.deinit();
-    //const empty = [_]u8{' ', '\t', '\n', '\r'};
 
     var from = Index.strStart();
     while (self.indexOfCp(sep, from, cs)) |found| {
-        std.debug.print("{s}(): found={}\n", .{ @src().fn_name, found });
+        //std.debug.print("{s}(): found={}\n", .{ @src().fn_name, found });
         const s = try self.mid(from.gr, @intCast(found.gr - from.gr));
         from = Index{ .cp = found.cp + 1, .gr = found.gr + 1 };
 
@@ -961,8 +960,6 @@ pub fn strStart() Index {
 pub fn substring(self: String, start: usize, count: isize) !String {
     const how_many_gr: usize = if (count == -1) self.grapheme_count - start else @intCast(count);
     const index = self.graphemeAddress(start) orelse return Error.Index;
-    // std.debug.print("{s}:{} addr.cp={} .gr={} of={}\n",
-    //     .{@src().fn_name, @src().line, index.cp, index.gr, start});
     if (index.gr + how_many_gr > self.grapheme_count) {
         return Error.Index;
     }
@@ -984,7 +981,9 @@ pub fn substring(self: String, start: usize, count: isize) !String {
     const end: usize = index.cp + cp_to_copy;
     try s.codepoints.appendSlice(self.codepoints.items[index.cp..end]);
     try s.graphemes.appendSlice(self.graphemes.items[index.cp..end]);
-    s.grapheme_count = countGraphemes(s.graphemes.items);
+    const cg = countGraphemes(s.graphemes.items);
+    //std.debug.print("gr_sofar={}, countGraphemes()={}\n", .{gr_sofar, cg});
+    s.grapheme_count = cg;
 
     return s;
 }

@@ -5,8 +5,10 @@ const expectEqualStrings = std.testing.expectEqualStrings;
 const alloc = std.testing.allocator;
 
 const String = @import("String.zig").String;
-const Index = String.Index;
+const CaseSensitive = String.CaseSensitive;
 const Codepoint = String.Codepoint;
+const Index = String.Index;
+const KeepEmptyParts = String.KeepEmptyParts;
 // Don't change this string, many tests depend on it:
 const JoseStr = "Jos\u{65}\u{301} se fu\u{65}\u{301} a Sevilla sin pararse";
 const theme = String.Theme.Dark;
@@ -238,7 +240,7 @@ test "Split" {
     const main_str = try String.From(alloc, JoseStr);
     defer main_str.deinit();
     try main_str.printGraphemes(std.debug, theme);
-    const lines = try main_str.split(" ", String.CaseSensitive.Yes, String.KeepEmptyParts.No);
+    const lines = try main_str.split(" ", CaseSensitive.Yes, KeepEmptyParts.No);
     defer {
         for (lines.items) |item| {
             item.deinit();
@@ -270,4 +272,39 @@ test "Split" {
     for (lines.items, correct.items) |a, b| {
         try expect(a.equalsStr(b, String.CaseSensitive.Yes));
     }
+
+    const hello_world = try String.From(alloc, "Hello, World!");
+    defer hello_world.deinit();
+    const hello_split = try hello_world.split(" ", CaseSensitive.Yes, KeepEmptyParts.No);
+    defer {
+        for(hello_split.items) |s| {
+            s.deinit();
+        }
+        hello_split.deinit();
+    }
+
+    var correct2 = ArrayList([]const u8).init(alloc);
+    defer correct2.deinit();
+    try correct2.append("Hello,");
+    try correct2.append("World!");
+
+    for (hello_split.items, correct2.items) |l, r| {
+        try expect(l.equals(r, CaseSensitive.Yes));
+    }
+
+    const start_from: usize = 0;
+    const at = hello_world.indexOf("lo", start_from, CaseSensitive.Yes);
+    if (at) |index| {
+        try expect(index.gr == 3); // .gr=grapheme, .cp=codepoint
+    } else {
+        std.debug.print("IndexOf \"lo\" not found", .{});
+    }
+
+    const sub = try hello_world.substring(3, 5);
+    defer sub.deinit();
+    try expect(sub.equals("lo, W", CaseSensitive.Yes));
+
+    const sub2 = try hello_world.substring(3, -1);
+    defer sub2.deinit();
+    try expect(sub2.equals("lo, World!", CaseSensitive.Yes));
 }
