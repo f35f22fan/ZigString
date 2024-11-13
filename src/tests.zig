@@ -83,7 +83,7 @@ test "Trim Right" {
         // std.debug.print("{s}(): \"{s}\" => \"{s}\"\n", .{@src().fn_name, trim_right_str, buf.items});
         try expectEqualStrings(buf.items, "Привет!");
     }
-
+ 
     const orig_str = "Hi!";
     {
         var str = try String.From(alloc, orig_str);
@@ -283,8 +283,8 @@ test "Split" {
     var blender_str = try String.From(alloc, blender_cstr);
     defer blender_str.deinit();
     try blender_str.printGraphemes(std.debug);
+    try blender_str.printCodepoints(std.debug);
     // try blender_str.trim();
-    // try blender_str.printGraphemes(std.debug);
 
     var blender_arr = try blender_str.split("=", String.CaseSensitive.Yes, String.KeepEmptyParts.No);
     defer {

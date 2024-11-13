@@ -28,6 +28,11 @@ pub const CaseSensitive = enum(u8) {
     No,
 };
 
+const SeeAs = enum(u8) {
+    CodepointOnly,
+    PartOfGrapheme
+};
+
 pub const Index = struct {
     cp: usize = 0,
     gr: usize = 0,
@@ -704,7 +709,7 @@ const print_format_str = "{s}{}{s}{s}|{s}|{s}{s}{s}{s} ";
 const nl_chars = UNDERLINE_START ++ "(LF)" ++ UNDERLINE_END;
 const cr_chars = UNDERLINE_START ++ "(CR)" ++ UNDERLINE_END;
 const crnl_chars = UNDERLINE_START ++ "(CR/LF)" ++ UNDERLINE_END;
-fn printCpBuf(alloc: Allocator, out: anytype, cp_buf: ArrayList(Codepoint), gr_index: isize) !void {
+fn printCpBuf(alloc: Allocator, out: anytype, cp_buf: ArrayList(Codepoint), gr_index: isize, sa: SeeAs) !void {
     if (cp_buf.items.len == 0)
         return;
 
@@ -734,22 +739,22 @@ fn printCpBuf(alloc: Allocator, out: anytype, cp_buf: ArrayList(Codepoint), gr_i
             visible = crnl_chars;
         }
     }
-    out.print(print_format_str, .{ COLOR_BLUE, gr_index, COLOR_DEFAULT, COLOR_GREEN, visible, COLOR_DEFAULT, COLOR_YELLOW, codepoints_str, COLOR_DEFAULT });
-    //codepoints_str.clearRetainingCapacity();
+    const cp_color = if (sa == SeeAs.PartOfGrapheme) COLOR_GREEN else COLOR_MAGENTA;
+    out.print(print_format_str, .{ COLOR_BLUE, gr_index, COLOR_DEFAULT, cp_color, visible, COLOR_DEFAULT, COLOR_YELLOW, codepoints_str, COLOR_DEFAULT });
 }
 
 pub fn printCodepoints(self: String, out: anytype) !void {
-    var temp_str_buf: [32]u8 = undefined;
+    var cp_buf = ArrayList(Codepoint).init(self.a);
+    defer cp_buf.deinit();
+    out.print("Codepoints: ", .{});
     for (self.codepoints.items, 0..) |cp, i| {
         if (i > 255) {
             break;
         }
-        const is_grapheme = (self.graphemes.items[i] == 1);
-        const color = if (is_grapheme) COLOR_MAGENTA else COLOR_RED;
-        const utf8 = try utf8_from_cp(self.a, cp);
-        defer utf8.deinit();
-        const num_as_str = try std.fmt.bufPrint(&temp_str_buf, "{d} ", .{cp});
-        out.print(print_format_str, .{ COLOR_BLUE, i, COLOR_DEFAULT, color, utf8.items, COLOR_DEFAULT, COLOR_YELLOW, num_as_str, COLOR_DEFAULT });
+
+        try cp_buf.append(cp);
+        try printCpBuf(self.a, out, cp_buf, @intCast(i), SeeAs.CodepointOnly);
+        cp_buf.clearRetainingCapacity();
     }
     out.print("\n", .{});
 }
@@ -758,23 +763,22 @@ pub fn printGraphemes(self: String, out: anytype) !void {
     var cp_buf = std.ArrayList(Codepoint).init(self.a);
     defer cp_buf.deinit();
     var gr_index: isize = -1;
-
+    out.print("Graphemes: ", .{});
     for (self.codepoints.items, 0..) |cp, i| {
         if (i > 255) {
             break;
         }
 
         if (self.isGrapheme(i)) {
+            try printCpBuf(self.a, out, cp_buf, gr_index, SeeAs.PartOfGrapheme);
             gr_index += 1;
-            try printCpBuf(self.a, out, cp_buf, gr_index);
             cp_buf.clearRetainingCapacity();
         }
 
         try cp_buf.append(cp);
     }
 
-    gr_index += 1;
-    try printCpBuf(self.a, out, cp_buf, gr_index);
+    try printCpBuf(self.a, out, cp_buf, gr_index, SeeAs.PartOfGrapheme);
     out.print("\n", .{});
 }
 
@@ -1088,6 +1092,7 @@ const COLOR_GREEN = "\x1B[32m";
 const COLOR_RED = "\x1B[0;91m";
 const COLOR_YELLOW = "\x1B[93m";
 const COLOR_MAGENTA = "\x1B[35m";
+const COLOR_CYAN = "\x1B[36m";
 const BLINK_START = "\x1B[5m";
 const BLINK_END = "\x1B[25m";
 const BOLD_START = "\x1B[1m";
