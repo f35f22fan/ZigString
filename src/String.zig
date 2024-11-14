@@ -109,6 +109,46 @@ graphemes: ArrayList(u1) = undefined,
 grapheme_count: usize = 0,
 a: Allocator = undefined,
 
+
+pub fn New(a: Allocator, capacity: usize) !String {
+    var obj = String{};
+    obj.a = a;
+    obj.graphemes = ArrayList(u1).init(a);
+    obj.codepoints = ArrayList(Codepoint).init(a);
+    if (capacity > 0) {
+        try obj.graphemes.ensureTotalCapacity(capacity);
+        try obj.codepoints.ensureTotalCapacity(capacity);
+    }
+
+    return obj;
+}
+
+pub fn From(a: Allocator, input: []const u8) !String {
+    var obj = String{};
+    obj.a = a;
+    obj.graphemes = ArrayList(u1).init(a);
+    obj.codepoints = ArrayList(Codepoint).init(a);
+    try obj.init(input, false);
+
+    return obj;
+}
+
+pub fn append(self: *String, what: []const u8) !void {
+    var input = try String.From(self.a, what);
+    defer input.deinit();
+    try self.appendStr(input);
+}
+
+pub fn appendStr(self: *String, other: String) !void {
+    try self.codepoints.appendSlice(other.codepoints.items);
+    try self.graphemes.appendSlice(other.graphemes.items);
+    self.grapheme_count += other.grapheme_count;
+}
+
+pub fn At(self: String, gr_index: usize) ?Index {
+    return self.graphemeAddress(gr_index);
+}
+
 pub fn clearAndFree(self: *String) void {
     self.codepoints.clearAndFree();
     self.graphemes.clearAndFree();
@@ -158,18 +198,6 @@ fn countGraphemesSimd(slice: GraphemeSlice) usize {
     }
 
     return count;
-}
-
-pub fn append(self: *String, what: []const u8) !void {
-    var input = try String.From(self.a, what);
-    defer input.deinit();
-    try self.appendStr(input);
-}
-
-pub fn appendStr(self: *String, other: String) !void {
-    try self.codepoints.appendSlice(other.codepoints.items);
-    try self.graphemes.appendSlice(other.graphemes.items);
-    self.grapheme_count += other.grapheme_count;
 }
 
 pub fn contains(self: String, str: []const u8) bool {
@@ -445,33 +473,6 @@ pub fn format(self: String, comptime fmt: []const u8, options: std.fmt.FormatOpt
 
 inline fn isGrapheme(self: String, i: usize) bool {
     return self.graphemes.items[i] == 1;
-}
-
-pub fn New(a: Allocator, capacity: usize) !String {
-    var obj = String{};
-    obj.a = a;
-    obj.graphemes = ArrayList(u1).init(a);
-    obj.codepoints = ArrayList(Codepoint).init(a);
-    if (capacity > 0) {
-        try obj.graphemes.ensureTotalCapacity(capacity);
-        try obj.codepoints.ensureTotalCapacity(capacity);
-    }
-
-    return obj;
-}
-
-pub fn From(a: Allocator, input: []const u8) !String {
-    var obj = String{};
-    obj.a = a;
-    obj.graphemes = ArrayList(u1).init(a);
-    obj.codepoints = ArrayList(Codepoint).init(a);
-    try obj.init(input, false);
-
-    return obj;
-}
-
-pub fn At(self: String, gr_index: usize) ?Index {
-    return self.graphemeAddress(gr_index);
 }
 
 /// This operation is O(n)
@@ -888,7 +889,7 @@ pub fn split(self: String, sep: []const u8, cs: CaseSensitive, kep: KeepEmptyPar
         from = Index{ .cp = found.cp + 1, .gr = found.gr + 1 };
 
         if (kep == KeepEmptyParts.No and s.isEmpty()) {
-            try s.print(std.debug, Theme.Dark, "Skipping: ");
+            //try s.print(std.debug, Theme.Dark, "Skipping: ");
             s.deinit();
             continue;
         }

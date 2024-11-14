@@ -1,10 +1,13 @@
 # ZigString
-A string class for the Zig programming language to manipulate UTF-8 strings.
-Uses SIMD or linear operations. Under the hood it works with graphemes only. See src/tests.zig for details.
+A string class for the Zig programming language to manipulate UTF-8 strings.<p/>
+A visible letter/character is a grapheme that might be composed of more than one codepoints (almost always it's one codepoint).<p/>
+Each codepoint takes 21 bits (plus 1 bit to mark if it's also the start of a grapheme) because 21 bits is enough to store every UTF-8 codepoint.
+Internally it uses SIMD or linear operations when needed. Under the hood it works with graphemes only unless otherwise specified. See src/tests.zig for details.<br/>
+Tested on Zig 0.13
 <br/><br/>
 Example:<br/>
 <pre>
-const hello_world = try String.From(alloc, "Hello, World!");
+    const hello_world = try String.From(alloc, "Hello, World!");
     defer hello_world.deinit();
     const hello_split = try hello_world.split(" ", CaseSensitive.Yes, KeepEmptyParts.No);
     defer {
@@ -14,12 +17,8 @@ const hello_world = try String.From(alloc, "Hello, World!");
         hello_split.deinit();
     }
 
-    var correct2 = ArrayList([]const u8).init(alloc);
-    defer correct2.deinit();
-    try correct2.append("Hello,");
-    try correct2.append("World!");
-
-    for (hello_split.items, correct2.items) |l, r| {
+    const correct2 = [_][]const u8 {"Hello,", "World!"};
+    for (hello_split.items, correct2) |l, r| {
         try expect(l.equals(r, CaseSensitive.Yes));
     }
 

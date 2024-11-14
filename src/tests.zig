@@ -11,7 +11,7 @@ const Index = String.Index;
 const KeepEmptyParts = String.KeepEmptyParts;
 // Don't change this string, many tests depend on it:
 const JoseStr = "Jos\u{65}\u{301} se fu\u{65}\u{301} a Sevilla sin pararse";
-const theme = String.Theme.Dark;
+const theme = String.Theme.Light;
 
 test "Append Test" {
     const additional = "[Ещё]";
@@ -239,40 +239,27 @@ test "FindInsertRemove" {
 test "Split" {
     const main_str = try String.From(alloc, JoseStr);
     defer main_str.deinit();
+    // the next 2 functions help the developer to visually dissect a string:
     try main_str.printGraphemes(std.debug, theme);
-    const lines = try main_str.split(" ", CaseSensitive.Yes, KeepEmptyParts.No);
+    try main_str.printCodepoints(std.debug, theme);
+
+    // split(..) returns !ArrayList(String)
+    const words = try main_str.split(" ", CaseSensitive.Yes, KeepEmptyParts.No);
     defer {
-        for (lines.items) |item| {
+        for (words.items) |item| {
             item.deinit();
         }
-        lines.deinit();
+        words.deinit();
     }
 
-    for (lines.items) |s| {
-        try s.print(std.debug, theme, "Split string: ");
+    const correct = [_][]const u8 {"Jos\u{65}\u{301}", "se",
+    "fu\u{65}\u{301}", "a", "Sevilla", "sin", "pararse"};
+    try expect(words.items.len == correct.len);
+    for (words.items, correct) |a, b| {
+        try expect(a.equals(b, String.CaseSensitive.Yes));
     }
 
-    var correct = ArrayList(String).init(alloc);
-    defer {
-        for (correct.items) |item| {
-            item.deinit();
-        }
-        correct.deinit();
-    }
-    try correct.append(try String.From(alloc, "Jos\u{65}\u{301}"));
-    try correct.append(try String.From(alloc, "se"));
-    try correct.append(try String.From(alloc, "fu\u{65}\u{301}"));
-    try correct.append(try String.From(alloc, "a"));
-    try correct.append(try String.From(alloc, "Sevilla"));
-    try correct.append(try String.From(alloc, "sin"));
-    try correct.append(try String.From(alloc, "pararse"));
-    
-    try expect(lines.items.len == correct.items.len);
-    
-    for (lines.items, correct.items) |a, b| {
-        try expect(a.equalsStr(b, String.CaseSensitive.Yes));
-    }
-
+    //============= another test
     const hello_world = try String.From(alloc, "Hello, World!");
     defer hello_world.deinit();
     const hello_split = try hello_world.split(" ", CaseSensitive.Yes, KeepEmptyParts.No);
@@ -283,12 +270,8 @@ test "Split" {
         hello_split.deinit();
     }
 
-    var correct2 = ArrayList([]const u8).init(alloc);
-    defer correct2.deinit();
-    try correct2.append("Hello,");
-    try correct2.append("World!");
-
-    for (hello_split.items, correct2.items) |l, r| {
+    const correct2 = [_][]const u8 {"Hello,", "World!"};
+    for (hello_split.items, correct2) |l, r| {
         try expect(l.equals(r, CaseSensitive.Yes));
     }
 
@@ -307,4 +290,22 @@ test "Split" {
     const sub2 = try hello_world.substring(3, -1);
     defer sub2.deinit();
     try expect(sub2.equals("lo, World!", CaseSensitive.Yes));
+
+    //============= another test
+    const empty_str = try String.From(alloc, "Foo  Bar");
+    defer empty_str.deinit();
+    const empty_arr = try empty_str.split(" ", CaseSensitive.Yes, KeepEmptyParts.Yes);
+    defer {
+        for (empty_arr.items) |item| {
+            item.deinit();
+        }
+        empty_arr.deinit();
+    }
+
+    const correct3 = [_][]const u8 {"Foo", "", "Bar"};
+    try expect(empty_arr.items.len == correct3.len);
+    for (empty_arr.items, correct3) |str_obj, char_arr| {
+        try expect(str_obj.equals(char_arr, CaseSensitive.Yes));
+    }
+
 }
