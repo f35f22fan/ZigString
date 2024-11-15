@@ -24,14 +24,22 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const ziglyph = b.dependency("ziglyph", .{
-        .optimize = optimize,
-        .target = target,
-    });
-    // for exe, lib, tests, etc.
-    exe.root_module.addImport("ziglyph", ziglyph.module("ziglyph"));
+    // const ziglyph = b.dependency("ziglyph", .{
+    //     .optimize = optimize,
+    //     .target = target,
+    // });
+    // exe.root_module.addImport("ziglyph", ziglyph.module("ziglyph"));
 
-    //const zg = b.dependency("zg", .{});
+    const zg = b.dependency("zg", .{});
+    //exe.root_module.addImport("zg", zg.module("zg"));
+    exe.root_module.addImport("code_point", zg.module("code_point"));
+    exe.root_module.addImport("grapheme", zg.module("grapheme"));
+    exe.root_module.addImport("CaseData", zg.module("CaseData"));
+    exe.root_module.addImport("GenCatData", zg.module("GenCatData"));
+    exe.root_module.addImport("PropsData", zg.module("PropsData"));
+    exe.root_module.addImport("Normalize", zg.module("Normalize"));
+    exe.root_module.addImport("Normalize", zg.module("Normalize"));
+    exe.root_module.addImport("CaseFold", zg.module("CaseFold"));
 
     const zigstr = b.dependency("zigstr", .{
         .target = target,
@@ -87,7 +95,16 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    tests2.root_module.addImport("ziglyph", ziglyph.module("ziglyph"));
+    //tests2.root_module.addImport("ziglyph", ziglyph.module("ziglyph"));
+    //tests2.root_module.addImport("zg", zg.module("zg"));
+    tests2.root_module.addImport("code_point", zg.module("code_point"));
+    tests2.root_module.addImport("grapheme", zg.module("grapheme"));
+    tests2.root_module.addImport("CaseData", zg.module("CaseData"));
+    tests2.root_module.addImport("GenCatData", zg.module("GenCatData"));
+    tests2.root_module.addImport("PropsData", zg.module("PropsData"));
+    tests2.root_module.addImport("Normalize", zg.module("Normalize"));
+    tests2.root_module.addImport("Normalize", zg.module("Normalize"));
+    tests2.root_module.addImport("CaseFold", zg.module("CaseFold"));
     const run2 = b.addRunArtifact(tests2);
     const test_step2 = b.step("test", "Run unit tests");
     test_step2.dependOn(&run2.step);

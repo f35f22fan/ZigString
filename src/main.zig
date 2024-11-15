@@ -9,10 +9,6 @@ const String = @import("String.zig").String;
 const Codepoint = String.Codepoint;
 const Index = String.Index;
 
-const ziglyph = @import("ziglyph");
-const Grapheme = ziglyph.Grapheme;
-const GraphemeIterator = Grapheme.GraphemeIterator;
-
 const zigstr = @import("zigstr");
 const io = @import("io.zig");
 
