@@ -24,14 +24,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // const ziglyph = b.dependency("ziglyph", .{
-    //     .optimize = optimize,
-    //     .target = target,
-    // });
-    // exe.root_module.addImport("ziglyph", ziglyph.module("ziglyph"));
-
     const zg = b.dependency("zg", .{});
-    //exe.root_module.addImport("zg", zg.module("zg"));
     exe.root_module.addImport("code_point", zg.module("code_point"));
     exe.root_module.addImport("grapheme", zg.module("grapheme"));
     exe.root_module.addImport("CaseData", zg.module("CaseData"));
@@ -70,42 +63,23 @@ pub fn build(b: *std.Build) void {
         run_cmd.addArgs(args);
     }
 
-    // This creates a build step. It will be visible in the `zig build --help` menu,
-    // and can be selected like this: `zig build run`
-    // This will evaluate the `run` step rather than the default, which is "install".
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    // Creates a step for unit testing. This only builds the test executable
-    // but does not run it.
     const tests1 = b.addTest(.{
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    const run1 = b.addRunArtifact(tests1);
-       // Similar to creating the run step earlier, this exposes a `test` step to
-    // the `zig build --help` menu, providing a way for the user to request
-    // running the unit tests.
-    const test_step = b.step("test2", "Run unit tests");
-    test_step.dependOn(&run1.step);
-
-    const tests2 = b.addTest(.{
         .root_source_file = b.path("src/tests.zig"),
         .target = target,
         .optimize = optimize,
     });
-    //tests2.root_module.addImport("ziglyph", ziglyph.module("ziglyph"));
-    //tests2.root_module.addImport("zg", zg.module("zg"));
-    tests2.root_module.addImport("code_point", zg.module("code_point"));
-    tests2.root_module.addImport("grapheme", zg.module("grapheme"));
-    tests2.root_module.addImport("CaseData", zg.module("CaseData"));
-    tests2.root_module.addImport("GenCatData", zg.module("GenCatData"));
-    tests2.root_module.addImport("PropsData", zg.module("PropsData"));
-    tests2.root_module.addImport("Normalize", zg.module("Normalize"));
-    tests2.root_module.addImport("Normalize", zg.module("Normalize"));
-    tests2.root_module.addImport("CaseFold", zg.module("CaseFold"));
-    const run2 = b.addRunArtifact(tests2);
-    const test_step2 = b.step("test", "Run unit tests");
-    test_step2.dependOn(&run2.step);
+    tests1.root_module.addImport("code_point", zg.module("code_point"));
+    tests1.root_module.addImport("grapheme", zg.module("grapheme"));
+    tests1.root_module.addImport("CaseData", zg.module("CaseData"));
+    tests1.root_module.addImport("GenCatData", zg.module("GenCatData"));
+    tests1.root_module.addImport("PropsData", zg.module("PropsData"));
+    tests1.root_module.addImport("Normalize", zg.module("Normalize"));
+    tests1.root_module.addImport("Normalize", zg.module("Normalize"));
+    tests1.root_module.addImport("CaseFold", zg.module("CaseFold"));
+    const run2 = b.addRunArtifact(tests1);
+    const test_step = b.step("test", "Run unit tests");
+    test_step.dependOn(&run2.step);
 }

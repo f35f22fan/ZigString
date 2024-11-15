@@ -11,7 +11,7 @@ const Index = String.Index;
 const KeepEmptyParts = String.KeepEmptyParts;
 // Don't change this string, many tests depend on it:
 const JoseStr = "Jos\u{65}\u{301} se fu\u{65}\u{301} a Sevilla sin pararse";
-const theme = String.Theme.Light;
+const theme = String.Theme.Dark;
 
 test "Append Test" {
     const additional = "[Ещё]";
@@ -308,4 +308,19 @@ test "Split" {
         try expect(str_obj.equals(char_arr, CaseSensitive.Yes));
     }
 
+}
+
+test "To Upper, To Lower" {
+    const normal = [_][]const u8 {"Hello, World!", "Привет!", "Jos\u{65}\u{301}"};
+    const upper = [_][]const u8 {"HELLO, WORLD!", "ПРИВЕТ!", "JOS\u{45}\u{301}"};
+    const lower = [_][]const u8 {"hello, world!", "привет!", "jos\u{65}\u{301}"};
+
+    for (normal, upper, lower) |n, u, l| {
+        var str = try String.From(alloc, n);
+        defer str.deinit();
+        try str.toUpper();
+        try expect(str.equals(u, CaseSensitive.Yes));
+        try str.toLower();
+        try expect(str.equals(l, CaseSensitive.Yes));
+    }
 }

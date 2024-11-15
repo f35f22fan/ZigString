@@ -6,6 +6,7 @@ const Allocator = std.mem.Allocator;
 
 const zg_codepoint = @import("code_point");
 const zg_grapheme = @import("grapheme");
+const CaseData = @import("CaseData");
 
 pub const Codepoint = u21;
 pub const CodePointSlice = []Codepoint;
@@ -530,7 +531,7 @@ pub fn indexOfCp(self: String, input: []const u8, from: Index, cs: CaseSensitive
     var input_cps = toCodePoints(self.a, input) catch return null;
     defer input_cps.deinit();
     if (cs == CaseSensitive.No) {
-        toUpper3(self.a, input_cps.items);
+        toUpper3(self.a, input_cps.items) catch return null;
     }
     return self.indexOfCp2(input_cps.items, from, cs);
 }
@@ -1000,22 +1001,25 @@ pub fn substring(self: String, start: usize, count: isize) !String {
     return s;
 }
 
-pub fn toUpper(self: *String) void {
-    toUpper3(self.codepoints.items);
+pub fn toLower(self: *String) !void {
+    try toLower3(self.a, self.codepoints.items);
 }
 
-const CaseData = @import("CaseData");
+pub fn toLower3(alloc: Allocator, list: CodePointSlice) !void {
+    const cd = try CaseData.init(alloc);
+    defer cd.deinit();
 
-// pub fn toUpper2(self: String) ![]u8 {
-//     const cd = try CaseData.init(self.a);
-//     defer cd.deinit();
-//     const buf = try self.toString();
-//     defer buf.deinit();
-//     return try cd.toUpperStr(self.a, buf.items);
-// }
+    for (list) |*k| {
+        k.* = cd.toLower(k.*);
+    }
+}
 
-pub fn toUpper3(alloc: Allocator, list: CodePointSlice) void {
-    const cd = CaseData.init(alloc) catch return;
+pub fn toUpper(self: *String) !void {
+    try toUpper3(self.a, self.codepoints.items);
+}
+
+pub fn toUpper3(alloc: Allocator, list: CodePointSlice) !void {
+    const cd = try CaseData.init(alloc);
     defer cd.deinit();
 
     for (list) |*k| {
