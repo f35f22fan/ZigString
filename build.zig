@@ -79,7 +79,25 @@ pub fn build(b: *std.Build) void {
     tests1.root_module.addImport("Normalize", zg.module("Normalize"));
     tests1.root_module.addImport("Normalize", zg.module("Normalize"));
     tests1.root_module.addImport("CaseFold", zg.module("CaseFold"));
-    const run2 = b.addRunArtifact(tests1);
+    const run1 = b.addRunArtifact(tests1);
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run2.step);
+    test_step.dependOn(&run1.step);
+
+    const speed_tests = b.addTest(.{
+        .root_source_file = b.path("src/speed_tests.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    speed_tests.root_module.addImport("zigstr", zigstr.module("zigstr"));
+    speed_tests.root_module.addImport("code_point", zg.module("code_point"));
+    speed_tests.root_module.addImport("grapheme", zg.module("grapheme"));
+    speed_tests.root_module.addImport("CaseData", zg.module("CaseData"));
+    speed_tests.root_module.addImport("GenCatData", zg.module("GenCatData"));
+    speed_tests.root_module.addImport("PropsData", zg.module("PropsData"));
+    speed_tests.root_module.addImport("Normalize", zg.module("Normalize"));
+    speed_tests.root_module.addImport("Normalize", zg.module("Normalize"));
+    speed_tests.root_module.addImport("CaseFold", zg.module("CaseFold"));
+    const speed_run = b.addRunArtifact(speed_tests);
+    const speed_test_step = b.step("speed", "Run unit tests");
+    speed_test_step.dependOn(&speed_run.step);
 }

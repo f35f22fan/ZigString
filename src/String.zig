@@ -9,7 +9,8 @@ const zg_grapheme = @import("grapheme");
 const CaseData = @import("CaseData");
 
 pub const Codepoint = u21;
-pub const CodePointSlice = []Codepoint;
+pub const CodepointSlice = []Codepoint;
+pub const CpSlice = []const Codepoint;
 pub const GraphemeSlice = []const u1;
 pub const String = @This();
 pub const Error = error{ NotFound, BadArg, Index, Alloc };
@@ -106,7 +107,6 @@ graphemes: ArrayList(u1) = undefined,
 grapheme_count: usize = 0,
 a: Allocator = undefined,
 
-
 pub fn New(a: Allocator, capacity: usize) !String {
     var obj = String{};
     obj.a = a;
@@ -201,7 +201,7 @@ pub fn contains(self: String, str: []const u8) bool {
     return self.indexOf(str, null) != null;
 }
 
-pub fn contains2(self: String, str: CodePointSlice) bool {
+pub fn contains2(self: String, str: CodepointSlice) bool {
     return self.indexOf2(str, null) != null;
 }
 
@@ -220,7 +220,7 @@ pub fn endsWith(self: String, phrase: []const u8, cs: CaseSensitive) bool {
     return self.endsWithSlice(needles.items, cs);
 }
 
-pub fn endsWithSlice(self: String, needles: CodePointSlice, cs: CaseSensitive) bool {
+pub fn endsWithSlice(self: String, needles: CodepointSlice, cs: CaseSensitive) bool {
     const start_index: usize = self.codepoints.items.len - needles.len;
     // The starting codepoint must be a grapheme
     if (self.graphemes.items[start_index] != 1) {
@@ -257,7 +257,7 @@ pub fn equals(self: String, input: []const u8, cs: CaseSensitive) bool {
     return self.equalsSlice(list.items, cs);
 }
 
-pub fn equalsSlice(self: String, slice: CodePointSlice, cs: CaseSensitive) bool {
+pub fn equalsSlice(self: String, slice: CodepointSlice, cs: CaseSensitive) bool {
     if (cs == CaseSensitive.Yes) {
         return std.mem.eql(Codepoint, self.codepoints.items, slice);
     }
@@ -282,7 +282,7 @@ pub fn equalsStr(self: String, other: String, cs: CaseSensitive) bool {
     return self.equalsSlice(other.codepoints.items, cs);
 }
 
-fn findCaseInsensitive(alloc: Allocator, graphemes: []u1, haystack: CodePointSlice, needles: CodePointSlice) ?usize {
+fn findCaseInsensitive(alloc: Allocator, graphemes: []u1, haystack: CpSlice, needles: CpSlice) ?usize {
     var index: ?usize = null;
     const till: usize = haystack.len - needles.len + 1;
     const cd = CaseData.init(alloc) catch return null;
@@ -311,7 +311,7 @@ fn findCaseInsensitive(alloc: Allocator, graphemes: []u1, haystack: CodePointSli
     return index;
 }
 
-pub fn findManyLinear(self: String, needles: CodePointSlice, start: ?Index, cs: CaseSensitive) ?Index {
+pub fn findManyLinear(self: String, needles: CpSlice, start: ?Index, cs: CaseSensitive) ?Index {
     const cp_count = self.codepoints.items.len;
     if (needles.len > cp_count) {
         //out.print("needles > cp_count\n", .{}) catch return null;
@@ -346,7 +346,7 @@ pub fn findManyLinear(self: String, needles: CodePointSlice, start: ?Index, cs: 
     return null;
 }
 
-pub fn findManySimd(self: String, needles: CodePointSlice, from_index: ?Index, comptime depth: u16) ?Index {
+pub fn findManySimd(self: String, needles: CpSlice, from_index: ?Index, comptime depth: u16) ?Index {
     const from = from_index orelse Index.strStart();
     const cp_count = self.codepoints.items.len;
     if ((needles.len == 0) or (needles.len > cp_count) or (from.cp >= cp_count)) {
@@ -482,8 +482,12 @@ inline fn isGrapheme(self: String, i: usize) bool {
 }
 
 /// This operation is O(n)
-pub fn graphemeIndex(codepoint_pos: usize, slice: GraphemeSlice) ?usize {
-    return countGraphemes(slice[0 .. codepoint_pos + 1]);
+pub fn graphemeAddressFromCp(self: String, codepoint_index: usize) ?Index {
+    const gr = countGraphemes(self.graphemes.items[0 .. codepoint_index + 1]);
+    if (gr) |g| {
+        return Index {.cp = codepoint_index, .gr = g};
+    }
+    return null;
 }
 
 pub fn graphemeAddress(self: String, grapheme_index: usize) ?Index {
@@ -504,7 +508,7 @@ pub fn graphemeAddress(self: String, grapheme_index: usize) ?Index {
     return null;
 }
 
-pub fn graphemeMatchesAnyCodepoint(self: String, index: Index, slice: CodePointSlice) bool {
+pub fn graphemeMatchesAnyCodepoint(self: String, index: Index, slice: CodepointSlice) bool {
     const codepoints = self.codepoints.items;
     const graphemes = self.graphemes.items;
     for (slice) |cp| {
@@ -522,7 +526,7 @@ pub fn graphemeMatchesAnyCodepoint(self: String, index: Index, slice: CodePointS
     return false;
 }
 
-pub fn graphemesToUtf8(alloc: Allocator, input: CodePointSlice) !ArrayList(u8) {
+pub fn graphemesToUtf8(alloc: Allocator, input: CodepointSlice) !ArrayList(u8) {
     return utf8_from_slice(alloc, input);
 }
 
@@ -536,7 +540,7 @@ pub fn indexOfCp(self: String, input: []const u8, from: Index, cs: CaseSensitive
     return self.indexOfCp2(input_cps.items, from, cs);
 }
 
-pub fn indexOfCp2(self: String, input: CodePointSlice, from: Index, cs: CaseSensitive) ?Index {
+pub fn indexOfCp2(self: String, input: CodepointSlice, from: Index, cs: CaseSensitive) ?Index {
     var grapheme_count: isize = @intCast(from.gr);
     for (self.codepoints.items[from.cp..], 0..) |cp, cp_index| {
         const at = from.cp + cp_index;
@@ -580,7 +584,7 @@ pub fn indexOf2(self: String, input: []const u8, from_index: ?Index, cs: CaseSen
     return self.findManyLinear(needles.items, from, cs);
 }
 
-pub fn indexOf3(self: String, needles: CodePointSlice, from_index: ?Index, cs: CaseSensitive) ?Index {
+pub fn indexOf3(self: String, needles: CodepointSlice, from_index: ?Index, cs: CaseSensitive) ?Index {
     const from = from_index orelse Index.strStart();
     if (cs == CaseSensitive.Yes and self.codepoints.items.len >= SimdVecLen) {
         return self.findManySimd(needles, from, SimdVecLen);
@@ -598,7 +602,7 @@ pub fn lastIndexOf(self: String, needles: []const u8, from_index: ?Index) ?Index
     return self.lastIndexOf2(cp_needles.items, from_index, null);
 }
 
-pub fn lastIndexOf2(self: String, needles: CodePointSlice, start: ?Index, comptime vector_len: ?u16) ?Index {
+pub fn lastIndexOf2(self: String, needles: CodepointSlice, start: ?Index, comptime vector_len: ?u16) ?Index {
     const vec_len = vector_len orelse SimdVecLen;
     const from = start orelse self.strEnd();
     const cp_count = self.codepoints.items.len;
@@ -929,7 +933,7 @@ pub fn startsWith(self: String, phrase: []const u8, cs: CaseSensitive) !bool {
     return self.startsWithSlice(needles.items, cs);
 }
 
-pub fn startsWithSlice(self: String, needles: CodePointSlice, cs: CaseSensitive) bool {
+pub fn startsWithSlice(self: String, needles: CodepointSlice, cs: CaseSensitive) bool {
     if (self.graphemes.items.len > needles.len) {
         // make sure it ends on a grapheme boundary:
         if (self.graphemes.items[needles.len] != 1) {
@@ -1005,7 +1009,7 @@ pub fn toLower(self: *String) !void {
     try toLower3(self.a, self.codepoints.items);
 }
 
-pub fn toLower3(alloc: Allocator, list: CodePointSlice) !void {
+pub fn toLower3(alloc: Allocator, list: CodepointSlice) !void {
     const cd = try CaseData.init(alloc);
     defer cd.deinit();
 
@@ -1018,7 +1022,7 @@ pub fn toUpper(self: *String) !void {
     try toUpper3(self.a, self.codepoints.items);
 }
 
-pub fn toUpper3(alloc: Allocator, list: CodePointSlice) !void {
+pub fn toUpper3(alloc: Allocator, list: CodepointSlice) !void {
     const cd = try CaseData.init(alloc);
     defer cd.deinit();
 
@@ -1107,7 +1111,7 @@ pub fn utf8_from_cp(a: Allocator, cp: Codepoint) !ArrayList(u8) {
     return buf;
 }
 
-pub fn utf8_from_slice(a: Allocator, slice: CodePointSlice) !ArrayList(u8) {
+pub fn utf8_from_slice(a: Allocator, slice: CpSlice) !ArrayList(u8) {
     var buf = ArrayList(u8).init(a);
     errdefer buf.deinit();
     var tmp: [4]u8 = undefined;
