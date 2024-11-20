@@ -5,14 +5,14 @@ var out = std.io.getStdOut().writer();
 const String = @import("String.zig").String;
 const Codepoint = String.Codepoint;
 const Index = String.Index;
+const Context = String.Context;
+
+//const alloc = std.heap.page_allocator;//std.testing.allocator;
 
 
 
 pub fn main() !u8 {
-    // const a = std.heap.page_allocator;
-    // const JoseStr = "Jos\u{65}\u{301} se fu\u{65}\u{301} a Sevilla sin pararse";
-
-    
+   
 
     return 0;
 }

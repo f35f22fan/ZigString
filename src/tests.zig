@@ -15,7 +15,7 @@ const JoseStr = "Jos\u{65}\u{301} se fu\u{65}\u{301} a Sevilla sin pararse";
 const theme = String.Theme.Dark;
 
 test "Append Test" {
-    const ctx = try Context.New(alloc);
+    var ctx = try Context.New(alloc);
     defer ctx.deinit();
     const additional = "[Ещё]";
     var main_str = try String.From(alloc, ctx, JoseStr);
@@ -28,7 +28,7 @@ test "Append Test" {
 }
 
 test "Get Grapheme Address" {
-    const ctx = try Context.New(alloc);
+    var ctx = try Context.New(alloc);
     defer ctx.deinit();
     const main_str = try String.From(alloc, ctx, JoseStr);
     defer main_str.deinit();
@@ -57,7 +57,7 @@ test "Get Grapheme Address" {
 }
 
 test "Trim Left" {
-    const ctx = try Context.New(alloc);
+    var ctx = try Context.New(alloc);
     defer ctx.deinit();
     const trim_left_str = "  \t Привет!";
     var main_str = try String.From(alloc, ctx, trim_left_str);
@@ -83,7 +83,7 @@ test "Trim Left" {
 }
 
 test "Trim Right" {
-    const ctx = try Context.New(alloc);
+    var ctx = try Context.New(alloc);
     defer ctx.deinit();
     const trim_right_str = "Привет! \t  ";
     var main_str = try String.From(alloc, ctx, trim_right_str);
@@ -109,7 +109,7 @@ test "Trim Right" {
 }
 
 test "Substring" {
-    const ctx = try Context.New(alloc);
+    var ctx = try Context.New(alloc);
     defer ctx.deinit();
     const main_str = try String.From(alloc, ctx, "Jos\u{65}\u{301} se fu\u{65}\u{301}");
     defer main_str.deinit();
@@ -141,7 +141,7 @@ test "Substring" {
 }
 
 test "Equals" {
-    const ctx = try Context.New(alloc);
+    var ctx = try Context.New(alloc);
     defer ctx.deinit();
     const c_str = "my file.desktop";
     const filename = try String.From(alloc, ctx, c_str);
@@ -172,7 +172,7 @@ test "FindInsertRemove" {
     // const chinese = try String.From(alloc, "违法和不良信息举报电话");
     // defer chinese.deinit();
     // try chinese.printGraphemes(std.debug);
-    const ctx = try Context.New(alloc);
+    var ctx = try Context.New(alloc);
     defer ctx.deinit();
     const str = "<human><name>Jos\u{65}\u{301}</name><age>27</age></human>\u{65}\u{301}";
     const haystack = try String.From(alloc, ctx, str);
@@ -251,7 +251,7 @@ test "FindInsertRemove" {
 }
 
 test "Split" {
-    const ctx = try Context.New(alloc);
+    var ctx = try Context.New(alloc);
     defer ctx.deinit();
     const main_str = try String.From(alloc, ctx, JoseStr);
     defer main_str.deinit();
@@ -327,7 +327,7 @@ test "Split" {
 }
 
 test "To Upper, To Lower" {
-    const ctx = try Context.New(alloc);
+    var ctx = try Context.New(alloc);
     defer ctx.deinit();
 
     const normal = [_][]const u8 {"Hello, World!", "Привет!", "Jos\u{65}\u{301}"};
@@ -342,4 +342,8 @@ test "To Upper, To Lower" {
         try str.toLower(ctx);
         try expect(str.equals(ctx, l, CaseSensitive.Yes));
     }
+}
+
+test "Case Fold" {
+
 }

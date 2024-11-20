@@ -77,14 +77,13 @@ pub fn build(b: *std.Build) void {
     tests1.root_module.addImport("GenCatData", zg.module("GenCatData"));
     tests1.root_module.addImport("PropsData", zg.module("PropsData"));
     tests1.root_module.addImport("Normalize", zg.module("Normalize"));
-    tests1.root_module.addImport("Normalize", zg.module("Normalize"));
     tests1.root_module.addImport("CaseFold", zg.module("CaseFold"));
     const run1 = b.addRunArtifact(tests1);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run1.step);
 
     const speed_tests = b.addTest(.{
-        .root_source_file = b.path("src/speed_tests.zig"),
+        .root_source_file = b.path("src/test_speed.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -95,9 +94,25 @@ pub fn build(b: *std.Build) void {
     speed_tests.root_module.addImport("GenCatData", zg.module("GenCatData"));
     speed_tests.root_module.addImport("PropsData", zg.module("PropsData"));
     speed_tests.root_module.addImport("Normalize", zg.module("Normalize"));
-    speed_tests.root_module.addImport("Normalize", zg.module("Normalize"));
     speed_tests.root_module.addImport("CaseFold", zg.module("CaseFold"));
     const speed_run = b.addRunArtifact(speed_tests);
     const speed_test_step = b.step("speed", "Run unit tests");
     speed_test_step.dependOn(&speed_run.step);
+
+    const test_irl = b.addTest(.{
+        .root_source_file = b.path("src/test_irl.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    //test_irl.root_module.addImport("zigstr", zigstr.module("zigstr"));
+    test_irl.root_module.addImport("code_point", zg.module("code_point"));
+    test_irl.root_module.addImport("grapheme", zg.module("grapheme"));
+    test_irl.root_module.addImport("CaseData", zg.module("CaseData"));
+    test_irl.root_module.addImport("GenCatData", zg.module("GenCatData"));
+    test_irl.root_module.addImport("PropsData", zg.module("PropsData"));
+    test_irl.root_module.addImport("Normalize", zg.module("Normalize"));
+    test_irl.root_module.addImport("CaseFold", zg.module("CaseFold"));
+    const irl_run = b.addRunArtifact(test_irl);
+    const irl_step = b.step("irl", "Run unit tests");
+    irl_step.dependOn(&irl_run.step);
 }

@@ -8,7 +8,9 @@ const alloc = std.testing.allocator;
 const zigstr = @import("zigstr");
 const io = @import("io.zig");
 
-const CaseData = @import("CaseData");
+const Normalize = @import("Normalize");
+const CaseFold = @import("CaseFold");
+const ScriptsData = @import("ScriptsData");
 
 const String = @import("String.zig").String;
 const CaseSensitive = String.CaseSensitive;
@@ -165,7 +167,7 @@ pub fn test_find_index(ctx: Context, raw_str: []const u8, needles: CpSlice, need
 }
 
 test "From File" {
-    const ctx = try Context.New(alloc);
+    var ctx = try Context.New(alloc);
     defer ctx.deinit();
     const raw_str = try io.readFile(alloc, "/home/fox/Documents/content.xml");
     defer alloc.free(raw_str);
@@ -178,7 +180,7 @@ test "From File" {
 }
 
 test "Speed test 2" {
-    const ctx = try Context.New(alloc);
+    var ctx = try Context.New(alloc);
     defer ctx.deinit();
     const needles = [_]Codepoint{ 's', 'e' };
     const needles_raw = "se";

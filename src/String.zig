@@ -1,3 +1,4 @@
+pub const String = @This();
 const std = @import("std");
 const unicode = std.unicode;
 const ArrayList = std.ArrayList;
@@ -7,12 +8,13 @@ const Allocator = std.mem.Allocator;
 const zg_codepoint = @import("code_point");
 const zg_grapheme = @import("grapheme");
 const CaseData = @import("CaseData");
+const Normalize = @import("Normalize");
+const CaseFold = @import("CaseFold");
 
 pub const Codepoint = u21;
 pub const CodepointSlice = []Codepoint;
 pub const CpSlice = []const Codepoint;
 pub const GraphemeSlice = []const u1;
-pub const String = @This();
 pub const Error = error{ NotFound, BadArg, Index, Alloc };
 const SimdVecLen: u16 = 32;
 
@@ -110,21 +112,33 @@ inline fn getTime() i128 {
 pub const Context = struct {
     grapheme_data: zg_grapheme.GraphemeData,
     cd: CaseData,
+    cf: CaseFold = undefined,
+    cfd: CaseFold.FoldData,
+    normalize: Normalize = undefined,
+    norm_data: Normalize.NormData = undefined,
 
     pub fn New(alloc: Allocator) !Context {
-        const ctx = Context {
+        var ctx = Context {
             .grapheme_data = try zg_grapheme.GraphemeData.init(alloc),
             .cd = try CaseData.init(alloc),
+            .cfd = try CaseFold.FoldData.init(alloc),
         };
+
+        try Normalize.NormData.init(&ctx.norm_data, alloc);
+        ctx.normalize = Normalize{ .norm_data = &ctx.norm_data };
+        ctx.cf = CaseFold {.fold_data = &ctx.cfd};
 
         return ctx;
     }
 
-    pub fn deinit(self: Context) void {
+    pub fn deinit(self: *Context) void {
         self.grapheme_data.deinit();
         self.cd.deinit();
+        self.cfd.deinit();
+        self.norm_data.deinit();
     }
 };
+
 
 codepoints: ArrayList(Codepoint) = undefined,
 graphemes: ArrayList(u1) = undefined,
@@ -544,18 +558,17 @@ pub fn graphemesToUtf8(alloc: Allocator, input: CodepointSlice) !ArrayList(u8) {
 pub fn indexOfCp(self: String, ctx: Context, input: []const u8, from: Index, cs: CaseSensitive) ?Index {
     var input_cps = toCodePoints(self.a, input) catch return null;
     defer input_cps.deinit();
-    if (cs == CaseSensitive.No) {
-        toUpper2(ctx, input_cps.items) catch return null;
-    }
     return self.indexOfCp2(ctx, input_cps.items, from, cs);
 }
 
 pub fn indexOfCp2(self: String, ctx: Context, input: CodepointSlice, from: Index, cs: CaseSensitive) ?Index {
+    if (cs == CaseSensitive.No) {
+        toUpper2(ctx, input) catch return null;
+    }
     var grapheme_count: isize = @intCast(from.gr);
     for (self.codepoints.items[from.cp..], 0..) |cp, cp_index| {
         const at = from.cp + cp_index;
-        const is_grapheme = (self.graphemes.items[at] == 1);
-        if (!is_grapheme) {
+        if (!self.isGrapheme(at)) {
             continue;
         }
         grapheme_count += 1;
@@ -925,7 +938,7 @@ pub fn split(self: String, ctx: Context, sep: []const u8, cs: CaseSensitive, kep
         }
     }
 
-    if (from.cp - 1 < self.codepoints.items.len) {
+    if (from.cp < self.codepoints.items.len) {
         const s = try self.mid(from.gr, -1);
         if (kep == KeepEmptyParts.No and s.isEmpty()) {
             try s.print(std.debug, Theme.Dark, "Skipping2: ");
@@ -985,7 +998,7 @@ pub fn strStart() Index {
 
 pub fn substring(self: String, start: usize, count: isize) !String {
     const how_many_gr: usize = if (count == -1) self.grapheme_count - start else @intCast(count);
-    const index = self.graphemeAddress(start) orelse return Error.Index;
+    const index = self.graphemeAddress(start) orelse return Error.NotFound;
     if (index.gr + how_many_gr > self.grapheme_count) {
         return Error.Index;
     }
