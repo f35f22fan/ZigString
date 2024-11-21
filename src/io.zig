@@ -3,14 +3,14 @@ const Allocator = std.mem.Allocator;
 
 pub const Error = error{NotFound};
 
-const Folder = enum(u8) {
-    home,
-    config,
+pub const Folder = enum(u8) {
+    Home,
+    Config,
 };
 
 pub fn getEnv(a: Allocator, folder: Folder) ![]const u8 {
     const var_name = switch (folder) {
-        Folder.home => "HOME",
+        Folder.Home => "HOME",
         else => return Error.NotFound,
     };
 

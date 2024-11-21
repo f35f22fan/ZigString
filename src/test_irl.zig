@@ -41,9 +41,17 @@ const UNDERLINE_END = "\x1B[0m";
 
 
 test "Desktop File" {
-    var ctx = try Context.New(alloc);
-    defer ctx.deinit();
+    var dctx = try DesktopFile.DContext.NewAlloc(alloc);
+    defer dctx.deinit();
 
-    var df = try DesktopFile.New(alloc, ctx, "/home/fox/Desktop/Firefox.desktop");
+    const home_cstr = try io.getEnv(alloc, io.Folder.Home);
+    defer alloc.free(home_cstr);
+    
+    var fullpath = try String.From(dctx.ctx, home_cstr);
+    //defer fullpath.deinit();
+    
+    try fullpath.append("/Desktop/Firefox.desktop");
+
+    var df = try DesktopFile.New(dctx, fullpath);
     defer df.deinit();
 }

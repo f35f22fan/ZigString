@@ -18,10 +18,10 @@ test "Append Test" {
     var ctx = try Context.New(alloc);
     defer ctx.deinit();
     const additional = "[Ещё]";
-    var main_str = try String.From(alloc, ctx, JoseStr);
+    var main_str = try String.From(ctx, JoseStr);
     defer main_str.deinit();
     const chained = JoseStr ++ additional;
-    try main_str.append(ctx, additional);
+    try main_str.append(additional);
     var utf8_buf = try main_str.toString();
     defer utf8_buf.deinit();
     try expectEqualStrings(utf8_buf.items, chained);
@@ -30,7 +30,7 @@ test "Append Test" {
 test "Get Grapheme Address" {
     var ctx = try Context.New(alloc);
     defer ctx.deinit();
-    const main_str = try String.From(alloc, ctx, JoseStr);
+    const main_str = try String.From(ctx, JoseStr);
     defer main_str.deinit();
     // std.debug.print("String cp count: {}, gr count={}\n", .{main_str.codepoints.items.len,
     //     main_str.grapheme_count});
@@ -60,7 +60,7 @@ test "Trim Left" {
     var ctx = try Context.New(alloc);
     defer ctx.deinit();
     const trim_left_str = "  \t Привет!";
-    var main_str = try String.From(alloc, ctx, trim_left_str);
+    var main_str = try String.From(ctx, trim_left_str);
     defer main_str.deinit();
     {
         try main_str.trimLeft();
@@ -72,7 +72,7 @@ test "Trim Left" {
 
     const orig_str = "Hi!";
     {
-        var trim_nothing_str = try String.From(alloc, ctx, orig_str);
+        var trim_nothing_str = try String.From(ctx, orig_str);
         defer trim_nothing_str.deinit();
         try trim_nothing_str.trimLeft();
         const buf = try trim_nothing_str.toString();
@@ -86,7 +86,7 @@ test "Trim Right" {
     var ctx = try Context.New(alloc);
     defer ctx.deinit();
     const trim_right_str = "Привет! \t  ";
-    var main_str = try String.From(alloc, ctx, trim_right_str);
+    var main_str = try String.From(ctx, trim_right_str);
     defer main_str.deinit();
     {
         try main_str.trimRight();
@@ -98,7 +98,7 @@ test "Trim Right" {
  
     const orig_str = "Hi!";
     {
-        var str = try String.From(alloc, ctx, orig_str);
+        var str = try String.From(ctx, orig_str);
         defer str.deinit();
         try str.trimRight();
         const buf = try str.toString();
@@ -111,7 +111,7 @@ test "Trim Right" {
 test "Substring" {
     var ctx = try Context.New(alloc);
     defer ctx.deinit();
-    const main_str = try String.From(alloc, ctx, "Jos\u{65}\u{301} se fu\u{65}\u{301}");
+    const main_str = try String.From(ctx, "Jos\u{65}\u{301} se fu\u{65}\u{301}");
     defer main_str.deinit();
      {
         const sub = try main_str.substring(4, 6);
@@ -144,26 +144,26 @@ test "Equals" {
     var ctx = try Context.New(alloc);
     defer ctx.deinit();
     const c_str = "my file.desktop";
-    const filename = try String.From(alloc, ctx, c_str);
+    const filename = try String.From(ctx, c_str);
     defer filename.deinit();
     const ext = ".desKtop";
     {
-        const result = filename.endsWith(ctx, ext, String.CaseSensitive.Yes);
+        const result = filename.endsWith(ext, String.CaseSensitive.Yes);
         try expect(!result);
         //std.debug.print("\"{s}\" ends with {s}(cs.Yes): {}\n", .{ c_str, ext, result });
     }
     {
-        const result = filename.endsWith(ctx, ext, String.CaseSensitive.No);
+        const result = filename.endsWith(ext, String.CaseSensitive.No);
         try expect(result);
         //std.debug.print("\"{s}\" ends with {s}(cs.No): {}\n", .{ c_str, ext, result });
     }
 
-    const str1 = try String.From(alloc, ctx, ".desktop");
+    const str1 = try String.From(ctx, ".desktop");
     defer str1.deinit();
-    const str2 = try String.From(alloc, ctx, ".desKtop");
+    const str2 = try String.From(ctx, ".desKtop");
     defer str2.deinit();
-    const cs = str1.equalsStr(ctx, str2, String.CaseSensitive.Yes);
-    const ncs = str1.equalsStr(ctx, str2, String.CaseSensitive.No);
+    const cs = str1.equalsStr(str2, String.CaseSensitive.Yes);
+    const ncs = str1.equalsStr(str2, String.CaseSensitive.No);
     //std.debug.print("'{}' equals '{}': CaseSensitive: {}, NonCaseSensitive: {}\n", .{ str1, str2, cs, ncs });
     try expect (!cs and ncs);
 }
@@ -175,92 +175,92 @@ test "FindInsertRemove" {
     var ctx = try Context.New(alloc);
     defer ctx.deinit();
     const str = "<human><name>Jos\u{65}\u{301}</name><age>27</age></human>\u{65}\u{301}";
-    const haystack = try String.From(alloc, ctx, str);
+    const haystack = try String.From(ctx, str);
     defer haystack.deinit();
     const cs = String.CaseSensitive.No  ;
     {
-        const index = haystack.indexOf(ctx, "<human>", 0, cs) orelse return String.Error.NotFound;
+        const index = haystack.indexOf("<human>", 0, cs) orelse return String.Error.NotFound;
         try expect(index.cp == 0 and index.gr == 0);
-        const index2 = haystack.indexOf(ctx, "</human>", 0, cs) orelse return String.Error.NotFound;
+        const index2 = haystack.indexOf("</human>", 0, cs) orelse return String.Error.NotFound;
         try expect(index2.cp == 38 and index2.gr == 37);
     }
 
     {
         const str_to_find = try String.toCodePoints(alloc, "</age>");
         defer str_to_find.deinit();
-        const index = haystack.indexOf3(ctx, str_to_find.items, haystack.graphemeAddress(0), cs)
+        const index = haystack.indexOf3(str_to_find.items, haystack.graphemeAddress(0), cs)
             orelse return String.Error.NotFound;
         try expect(index.cp == 32 and index.gr == 31);
     }
     
     const initial_str = "Jos\u{65}\u{301} no se va";
     {
-        var s = try String.From(alloc, ctx, initial_str);
+        var s = try String.From(ctx, initial_str);
         defer s.deinit();
-        try s.remove(ctx, "os\u{65}\u{301}");
+        try s.remove("os\u{65}\u{301}");
         const buf = try s.toString();
         defer buf.deinit();
         try expectEqualStrings(buf.items, "J no se va");
     }
     {
-        var s = try String.From(alloc, ctx, initial_str);
+        var s = try String.From(ctx, initial_str);
         defer s.deinit();
         const needles = "no";
-        const from = s.indexOf(ctx, needles, 0, cs);
+        const from = s.indexOf(needles, 0, cs);
         try s.removeByIndex(from, 200);
         const buf = try s.toString();
         defer buf.deinit();
         try expectEqualStrings(buf.items, "Jos\u{65}\u{301} ");
     }
     {
-        var s = try String.From(alloc, ctx, initial_str);
+        var s = try String.From(ctx, initial_str);
         defer s.deinit(); 
-        try s.insert(ctx, s.At(5), "举报");
+        try s.insert(s.At(5), "举报");
         const buf = try s.toString();
         defer buf.deinit();
         try expectEqualStrings("José 举报no se va", buf.items);
     }
     {
-        var s = try String.From(alloc, ctx, initial_str);
+        var s = try String.From(ctx, initial_str);
         defer s.deinit();
-        const start_from = s.indexOf(ctx, "no", 0, cs);
-        try s.replace(ctx, start_from, 2, "si\u{301}");
+        const start_from = s.indexOf("no", 0, cs);
+        try s.replace(start_from, 2, "si\u{301}");
         const buf = try s.toString();
         defer buf.deinit();
         try expectEqualStrings("José sí se va", buf.items);
     }
     {
-        var s = try String.From(alloc, ctx, initial_str);
+        var s = try String.From(ctx, initial_str);
         defer s.deinit();
-        var jo_str = try String.From(alloc, ctx, "JO");
+        var jo_str = try String.From(ctx, "JO");
         defer jo_str.deinit();
-        try expect(s.startsWithStr(ctx, jo_str, String.CaseSensitive.Yes) == false);
-        try expect(s.startsWithStr(ctx, jo_str, String.CaseSensitive.No));
+        try expect(s.startsWithStr(jo_str, String.CaseSensitive.Yes) == false);
+        try expect(s.startsWithStr(jo_str, String.CaseSensitive.No));
 
-        var foo = try String.From(alloc, ctx, "Foo");
+        var foo = try String.From(ctx, "Foo");
         defer foo.deinit();
         const foo_buf = try foo.toString();
         defer foo_buf.deinit();
 
-        try expect(s.startsWithStr(ctx, foo, String.CaseSensitive.Yes) == false);
+        try expect(s.startsWithStr(foo, String.CaseSensitive.Yes) == false);
         
         const str_end = "se va";
-        try expect(s.endsWith(ctx, str_end, String.CaseSensitive.Yes));
-        try expect(s.endsWithStr(ctx, foo, String.CaseSensitive.Yes) == false);
+        try expect(s.endsWith(str_end, String.CaseSensitive.Yes));
+        try expect(s.endsWithStr(foo, String.CaseSensitive.Yes) == false);
     }
 }
 
 test "Split" {
     var ctx = try Context.New(alloc);
     defer ctx.deinit();
-    const main_str = try String.From(alloc, ctx, JoseStr);
+    const main_str = try String.From(ctx, JoseStr);
     defer main_str.deinit();
     // the next 2 functions help the developer to visually dissect a string:
-    try main_str.printGraphemes(ctx, std.debug, theme);
-    try main_str.printCodepoints(ctx, std.debug, theme);
+    try main_str.printGraphemes(std.debug, theme);
+    try main_str.printCodepoints(std.debug, theme);
 
     // split(..) returns !ArrayList(String)
-    const words = try main_str.split(ctx, " ", CaseSensitive.Yes, KeepEmptyParts.No);
+    const words = try main_str.split(" ", CaseSensitive.Yes, KeepEmptyParts.No);
     defer {
         for (words.items) |item| {
             item.deinit();
@@ -272,13 +272,13 @@ test "Split" {
     "fu\u{65}\u{301}", "a", "Sevilla", "sin", "pararse"};
     try expect(words.items.len == correct.len);
     for (words.items, correct) |a, b| {
-        try expect(a.equals(ctx, b, String.CaseSensitive.Yes));
+        try expect(a.equals(b, String.CaseSensitive.Yes));
     }
 
     //============= another test
-    const hello_world = try String.From(alloc, ctx, "Hello, World!");
+    const hello_world = try String.From(ctx, "Hello, World!");
     defer hello_world.deinit();
-    const hello_split = try hello_world.split(ctx, " ", CaseSensitive.Yes, KeepEmptyParts.No);
+    const hello_split = try hello_world.split(" ", CaseSensitive.Yes, KeepEmptyParts.No);
     defer {
         for(hello_split.items) |s| {
             s.deinit();
@@ -288,11 +288,11 @@ test "Split" {
 
     const correct2 = [_][]const u8 {"Hello,", "World!"};
     for (hello_split.items, correct2) |l, r| {
-        try expect(l.equals(ctx, r, CaseSensitive.Yes));
+        try expect(l.equals(r, CaseSensitive.Yes));
     }
 
     const start_from: usize = 0;
-    const at = hello_world.indexOf(ctx, "lo", start_from, CaseSensitive.Yes);
+    const at = hello_world.indexOf("lo", start_from, CaseSensitive.Yes);
     if (at) |index| {
         try expect(index.gr == 3); // .gr=grapheme, .cp=codepoint
     } else {
@@ -301,16 +301,16 @@ test "Split" {
 
     const sub = try hello_world.substring(3, 5);
     defer sub.deinit();
-    try expect(sub.equals(ctx, "lo, W", CaseSensitive.Yes));
+    try expect(sub.equals("lo, W", CaseSensitive.Yes));
 
     const sub2 = try hello_world.substring(3, -1);
     defer sub2.deinit();
-    try expect(sub2.equals(ctx, "lo, World!", CaseSensitive.Yes));
+    try expect(sub2.equals("lo, World!", CaseSensitive.Yes));
 
     //============= another test
-    const empty_str = try String.From(alloc, ctx, "Foo  Bar");
+    const empty_str = try String.From(ctx, "Foo  Bar");
     defer empty_str.deinit();
-    const empty_arr = try empty_str.split(ctx, " ", CaseSensitive.Yes, KeepEmptyParts.Yes);
+    const empty_arr = try empty_str.split(" ", CaseSensitive.Yes, KeepEmptyParts.Yes);
     defer {
         for (empty_arr.items) |item| {
             item.deinit();
@@ -321,7 +321,7 @@ test "Split" {
     const correct3 = [_][]const u8 {"Foo", "", "Bar"};
     try expect(empty_arr.items.len == correct3.len);
     for (empty_arr.items, correct3) |str_obj, char_arr| {
-        try expect(str_obj.equals(ctx, char_arr, CaseSensitive.Yes));
+        try expect(str_obj.equals(char_arr, CaseSensitive.Yes));
     }
 
 }
@@ -335,15 +335,12 @@ test "To Upper, To Lower" {
     const lower = [_][]const u8 {"hello, world!", "привет!", "jos\u{65}\u{301}"};
 
     for (normal, upper, lower) |n, u, l| {
-        var str = try String.From(alloc, ctx, n);
+        var str = try String.From(ctx, n);
         defer str.deinit();
-        try str.toUpper(ctx);
-        try expect(str.equals(ctx, u, CaseSensitive.Yes));
-        try str.toLower(ctx);
-        try expect(str.equals(ctx, l, CaseSensitive.Yes));
+        try str.toUpper();
+        try expect(str.equals(u, CaseSensitive.Yes));
+        try str.toLower();
+        try expect(str.equals(l, CaseSensitive.Yes));
     }
 }
 
-test "Case Fold" {
-
-}

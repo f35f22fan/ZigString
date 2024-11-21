@@ -86,9 +86,9 @@ fn FindManySimd(haystack: String, needles: CpSlice, from: ?Index, comptime depth
     return result;
 }
 
-fn FindManyLinear(ctx: Context, haystack: String, needles: CpSlice, from: ?Index, correct: ?usize) !String.Index {
+fn FindManyLinear(haystack: String, needles: CpSlice, from: ?Index, correct: ?usize) !String.Index {
     const start_time = getTime();
-    const result = haystack.findManyLinear(ctx, needles, from, CaseSensitive.Yes) orelse return Error.NotFound;
+    const result = haystack.findManyLinear(needles, from, CaseSensitive.Yes) orelse return Error.NotFound;
     const done_in = getTime() - start_time;
     const print_color = getFgColor(result.gr, correct);
     std.debug.print("{s}FoundAt={?}, From={?}, Time={}{s} [{s}]{s}\n", .{ print_color, result, from, done_in, TimeExt, @src().fn_name, COLOR_DEFAULT });
@@ -119,7 +119,7 @@ fn FindBackwards() !void {
     const ctx = try Context.New(alloc);
     defer ctx.deinit();
     const str = "<human><age>27</age><name>Jos\u{65}\u{301}</name></human>";
-    const haystack = try String.From(alloc, ctx, str);
+    const haystack = try String.From(ctx, str);
     defer haystack.deinit();
 
     {
@@ -145,13 +145,13 @@ pub fn test_find_index(ctx: Context, raw_str: []const u8, needles: CpSlice, need
         std.debug.print("raw_str.len={} bytes\n", .{raw_str.len});
     }
     const start_time = getTime();
-    var haystack: String = try String.From(alloc, ctx, raw_str);
+    var haystack: String = try String.From(ctx, raw_str);
     defer haystack.deinit();
     const done_in = getTime() - start_time;
     std.debug.print("String(graphemes={}, cp={}) init done in {}{s}\n\n", .{ haystack.grapheme_count, haystack.codepoints.items.len, done_in, TimeExt });
     if (raw_str.len <= short_string_len) {
-        try haystack.printGraphemes(ctx, std.debug, theme);
-        try haystack.printCodepoints(ctx, std.debug, theme);
+        try haystack.printGraphemes(std.debug, theme);
+        try haystack.printCodepoints(std.debug, theme);
     }
 
     const depth: u16 = 32;
@@ -161,7 +161,7 @@ pub fn test_find_index(ctx: Context, raw_str: []const u8, needles: CpSlice, need
         const from = froms[i];
         const from_i = haystack.graphemeAddress(from);
         _ = try FindManySimd(haystack, needles, from_i, depth, correct);
-        _ = try FindManyLinear(ctx, haystack, needles, from_i, correct);
+        _ = try FindManyLinear(haystack, needles, from_i, correct);
         _ = try FindManyLinearZigstr(raw_str, needles_raw, from, correct);
     }
 }
