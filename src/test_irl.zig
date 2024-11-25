@@ -39,19 +39,43 @@ const BOLD_END = "\x1B[0m";
 const UNDERLINE_START = "\x1B[4m";
 const UNDERLINE_END = "\x1B[0m";
 
+fn ticker(step: u8) !void {
+    _ = step;
+    String.ctx = try Context.New(alloc);
+    defer String.ctx.deinit();   
+    var s = try String.From("Hello, World!");
+    try s.append("...From another thread");
+    defer s.deinit();
+    std.debug.print("{s}():==================== {}\n", .{@src().fn_name, s});
+    // while (true) {
+    //     std.time.sleep(1 * std.time.ns_per_s);
+    //     tick += @as(isize, step);
+    // }
+}
+
+var tick: isize = 0;
+
 
 test "Desktop File" {
-    var dctx = try DesktopFile.DContext.NewAlloc(alloc);
+    String.ctx = try Context.New(alloc);
+    defer String.ctx.deinit();
+
+    // const thread = try std.Thread.spawn(.{}, ticker, .{@as(u8, 1)});
+    // thread.join();
+
+    // if (true)
+    //     return;
+
+    var dctx = try DesktopFile.DContext.New(alloc);
     defer dctx.deinit();
 
     const home_cstr = try io.getEnv(alloc, io.Folder.Home);
     defer alloc.free(home_cstr);
     
-    var fullpath = try String.From(dctx.ctx, home_cstr);
-    //defer fullpath.deinit();
-    
+    var fullpath = try String.From(home_cstr);
+    defer fullpath.deinit();
     try fullpath.append("/Desktop/Firefox.desktop");
-
-    var df = try DesktopFile.New(dctx, fullpath);
+    try fullpath.print(std.debug, "Fullpath: ");
+    var df = try DesktopFile.New(dctx, try fullpath.Clone());
     defer df.deinit();
 }

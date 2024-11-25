@@ -76,7 +76,7 @@ fn FindManySimd(haystack: String, needles: CpSlice, from: ?Index, comptime depth
     const result = haystack.findManySimd(needles, from, depth) orelse {
         const buf = try String.utf8_from_slice(alloc, needles);
         defer buf.deinit();
-        std.debug.print("{s} not found '{s}' from={?}, haystack.cp_count={}\n", .{ @src().fn_name, buf.items, from, haystack.codepoints.items.len });
+        std.debug.print("{s} not found '{s}' from={?}, haystack.cp_count={}\n", .{ @src().fn_name, buf.items, from, haystack.size_cp()});
         return Error.NotFound;
     };
     const done_in = getTime() - start_time;
@@ -116,10 +116,11 @@ fn FindManyLinearZigstr(haystack: []const u8, needles: []const u8, from: usize, 
 }
 
 fn FindBackwards() !void {
-    const ctx = try Context.New(alloc);
-    defer ctx.deinit();
+    String.ctx = try Context.New(alloc);
+    defer String.ctx.deinit();
+    
     const str = "<human><age>27</age><name>Jos\u{65}\u{301}</name></human>";
-    const haystack = try String.From(ctx, str);
+    const haystack = try String.From(str);
     defer haystack.deinit();
 
     {
@@ -133,7 +134,7 @@ fn FindBackwards() !void {
     }
 }
 
-pub fn test_find_index(ctx: Context, raw_str: []const u8, needles: CpSlice, needles_raw: []const u8, froms: []const usize, answers: ?[]const usize) !void {
+pub fn test_find_index(raw_str: []const u8, needles: CpSlice, needles_raw: []const u8, froms: []const usize, answers: ?[]const usize) !void {
     std.debug.print("="**70++"\n", .{});
     const short_string_len: usize = 255;
     const needles_buf = try String.utf8_from_slice(alloc, needles);
@@ -145,10 +146,11 @@ pub fn test_find_index(ctx: Context, raw_str: []const u8, needles: CpSlice, need
         std.debug.print("raw_str.len={} bytes\n", .{raw_str.len});
     }
     const start_time = getTime();
-    var haystack: String = try String.From(ctx, raw_str);
+    var haystack: String = try String.From(raw_str);
     defer haystack.deinit();
     const done_in = getTime() - start_time;
-    std.debug.print("String(graphemes={}, cp={}) init done in {}{s}\n\n", .{ haystack.grapheme_count, haystack.codepoints.items.len, done_in, TimeExt });
+    std.debug.print("String(graphemes={}, cp={}) init done in {}{s}\n\n",
+    .{ haystack.size(), haystack.size_cp(), done_in, TimeExt });
     if (raw_str.len <= short_string_len) {
         try haystack.printGraphemes(std.debug, theme);
         try haystack.printCodepoints(std.debug, theme);
@@ -167,25 +169,27 @@ pub fn test_find_index(ctx: Context, raw_str: []const u8, needles: CpSlice, need
 }
 
 test "From File" {
-    var ctx = try Context.New(alloc);
-    defer ctx.deinit();
+    String.ctx = try Context.New(alloc);
+    defer String.ctx.deinit();
+
     const raw_str = try io.readFile(alloc, "/home/fox/Documents/content.xml");
     defer alloc.free(raw_str);
     const needles_raw = "Это подтверждается разговором арестованного Иисуса";
-    const needles = try String.toCodePoints(alloc, needles_raw);
+    const needles = try String.toCodepoints(alloc, needles_raw);
     defer needles.deinit();
     const from = [_]usize{0};
     const correct = [_]usize{966438};
-    try test_find_index(ctx, raw_str, needles.items, needles_raw, from[0..], correct[0..]);
+    try test_find_index(raw_str, needles.items, needles_raw, from[0..], correct[0..]);
 }
 
 test "Speed test 2" {
-    var ctx = try Context.New(alloc);
-    defer ctx.deinit();
+    String.ctx = try Context.New(alloc);
+    defer String.ctx.deinit();
+
     const needles = [_]Codepoint{ 's', 'e' };
     const needles_raw = "se";
     const from = [_]usize{ 0, 2, 31 };
     const correct = [_]usize{ 5, 5, 31 };
-    try test_find_index(ctx, JoseStr, &needles, needles_raw, &from, &correct);
+    try test_find_index(JoseStr, &needles, needles_raw, &from, &correct);
 }
 

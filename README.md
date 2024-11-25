@@ -7,9 +7,10 @@ Tested on Zig 0.14dev
 <br/><br/>
 Example:<br/>
 <pre>
-    var ctx = try Context.New(alloc);
-    defer ctx.deinit();
-    const hello_world = try String.From(ctx, "Hello, World!");
+    String.ctx = try Context.New(alloc);
+    defer String.ctx.deinit();
+
+    const hello_world = try String.From("Hello, World!");
     defer hello_world.deinit();
     const hello_split = try hello_world.split(" ", CaseSensitive.Yes, KeepEmptyParts.No);
     defer {
