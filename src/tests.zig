@@ -21,11 +21,11 @@ test "Append Test" {
     const additional = "[Ещё]";
     var main_str = try String.From(JoseStr);
     defer main_str.deinit();
-    const chained = JoseStr ++ additional;
+    const correct_cstr = JoseStr ++ additional;
     try main_str.append(additional);
-    var utf8_buf = try main_str.toString();
-    defer utf8_buf.deinit();
-    try expectEqualStrings(utf8_buf.items, chained);
+    var test_buf = try main_str.toString();
+    defer test_buf.deinit();
+    try expectEqualStrings(test_buf.items, correct_cstr);
 }
 
 test "Get Grapheme Address" {
@@ -65,7 +65,7 @@ test "Trim Left" {
     const trim_left_str = "  \t Привет!";
     var main_str = try String.From(trim_left_str);
     defer main_str.deinit();
-    {
+    { // trim tabs and empty spaces
         try main_str.trimLeft();
         const buf = try main_str.toString();
         defer buf.deinit();
@@ -74,11 +74,11 @@ test "Trim Left" {
     }
 
     const orig_str = "Hi!";
-    {
-        var trim_nothing_str = try String.From(orig_str);
-        defer trim_nothing_str.deinit();
-        try trim_nothing_str.trimLeft();
-        const buf = try trim_nothing_str.toString();
+    { // trim nothing from left
+        var s = try String.From(orig_str);
+        defer s.deinit();
+        try s.trimLeft();
+        const buf = try s.toString();
         defer buf.deinit();
         // std.debug.print("{s}(): \"{s}\" => \"{s}\"\n", .{@src().fn_name, orig_str, buf.items});
         try expectEqualStrings(orig_str, buf.items);
@@ -102,10 +102,10 @@ test "Trim Right" {
  
     const orig_str = "Hi!";
     {
-        var str = try String.From(orig_str);
-        defer str.deinit();
-        try str.trimRight();
-        const buf = try str.toString();
+        var s = try String.From(orig_str);
+        defer s.deinit();
+        try s.trimRight();
+        const buf = try s.toString();
         defer buf.deinit();
         // std.debug.print("{s}(): \"{s}\" => \"{s}\"\n", .{@src().fn_name, orig_str, buf.items});
         try expectEqualStrings(orig_str, buf.items);

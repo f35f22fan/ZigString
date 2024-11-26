@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const expect = std.testing.expect;
@@ -63,19 +64,15 @@ test "Desktop File" {
     // const thread = try std.Thread.spawn(.{}, ticker, .{@as(u8, 1)});
     // thread.join();
 
-    // if (true)
-    //     return;
-
-    var dctx = try DesktopFile.DContext.New(alloc);
-    defer dctx.deinit();
-
-    const home_cstr = try io.getEnv(alloc, io.Folder.Home);
-    defer alloc.free(home_cstr);
+    // const home_cstr = try io.getEnv(alloc, io.Folder.Home);
+    // defer alloc.free(home_cstr);
     
-    var fullpath = try String.From(home_cstr);
-    defer fullpath.deinit();
-    try fullpath.append("/Desktop/Firefox.desktop");
-    try fullpath.print(std.debug, "Fullpath: ");
-    var df = try DesktopFile.New(dctx, try fullpath.Clone());
-    defer df.deinit();
+    // var fullpath = try String.From(home_cstr);
+    // defer fullpath.deinit();
+    // try fullpath.append("/Desktop/Firefox.desktop");
+    // try fullpath.print(std.debug, "Fullpath: ");
+    // var df = try DesktopFile.New(dctx, try fullpath.Clone());
+    // defer df.deinit();
+    var df2 = try DesktopFile.NewCstr(alloc, "/usr/share/applications/chromium-browser.desktop");
+    defer df2.deinit();
 }

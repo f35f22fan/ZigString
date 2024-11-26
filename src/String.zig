@@ -1,5 +1,6 @@
 pub const String = @This();
 const std = @import("std");
+const builtin = @import("builtin");
 const unicode = std.unicode;
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
@@ -113,7 +114,7 @@ pub const Context = struct {
     a: Allocator = undefined,
     grapheme_data: zg_grapheme.GraphemeData = undefined,
     cd: CaseData = undefined,
-    cf: CaseFold = undefined,
+    //cf: CaseFold = undefined,
     //cfd: CaseFold.FoldData,
     // normalize: Normalize = undefined,
     // norm_data: Normalize.NormData = undefined,
@@ -282,6 +283,29 @@ pub fn contains2(self: String, str: CodepointSlice) bool {
 pub fn containsStr(self: String, needles: String) bool {
     const sdn = needles.d orelse return false;
     return self.indexOf2(sdn.codepoints.items, null) != null;
+}
+
+pub fn countGraphemesRaw(alloc: Allocator, input: []const u8) usize {
+    const gd = zg_grapheme.GraphemeData.init(alloc) catch return 0;
+    defer gd.deinit();
+    var gr_iter = zg_grapheme.Iterator.init(input, &gd);
+    var grapheme_count: usize = 0;
+    while (gr_iter.next()) |grapheme| {
+        _ = grapheme;
+        grapheme_count += 1;
+    }
+
+    return grapheme_count;
+}
+
+pub fn dup_as_cstr(self: String) ![]u8 {
+    return self.dup_as_cstr_alloc(ctx.a);
+}
+
+pub fn dup_as_cstr_alloc(self: String, a: Allocator) ![]u8 {
+    const buf = try self.toString();
+    defer buf.deinit();
+    return a.dupe(u8, buf.items);
 }
 
 pub fn endsWith(self: String, phrase: []const u8, cs: CaseSensitive) bool {
@@ -937,19 +961,6 @@ pub fn printFind(self: String, needles: []const u8, from: usize, cs: CaseSensiti
     return index;
 }
 
-pub fn countGraphemesRaw(alloc: Allocator, input: []const u8) usize {
-    const gd = zg_grapheme.GraphemeData.init(alloc) catch return 0;
-    defer gd.deinit();
-    var gr_iter = zg_grapheme.Iterator.init(input, &gd);
-    var grapheme_count: usize = 0;
-    while (gr_iter.next()) |grapheme| {
-        _ = grapheme;
-        grapheme_count += 1;
-    }
-
-    return grapheme_count;
-}
-
 pub fn remove(self: *String, needles: []const u8) !void {
     const from = self.indexOf(needles, 0, CaseSensitive.Yes);
     const count = countGraphemesRaw(ctx.a, needles);
@@ -1300,17 +1311,18 @@ pub fn toCodepoints(a: Allocator, input: []const u8) !ArrayList(Codepoint) {
     return buf;
 }
 
-const COLOR_BLUE = "\x1B[34m";
-const COLOR_DEFAULT = "\x1B[0m";
-const COLOR_GREEN = "\x1B[32m";
-const COLOR_RED = "\x1B[0;91m";
-const COLOR_YELLOW = "\x1B[93m";
-const COLOR_MAGENTA = "\x1B[35m";
-const COLOR_CYAN = "\x1B[36m";
-const COLOR_BLACK = "\x1B[38;5;16m";
-const BLINK_START = "\x1B[5m";
-const BLINK_END = "\x1B[25m";
-const BOLD_START = "\x1B[1m";
-const BOLD_END = "\x1B[0m";
-const UNDERLINE_START = "\x1B[4m";
-const UNDERLINE_END = "\x1B[0m";
+const posix = (builtin.target.os.tag == .linux );
+pub const COLOR_BLUE = if (posix) "\x1B[34m" else "";
+pub const COLOR_DEFAULT = if (posix) "\x1B[0m" else "";
+pub const COLOR_GREEN = if (posix) "\x1B[32m" else "";
+pub const COLOR_RED = if (posix) "\x1B[0;91m" else "";
+pub const COLOR_YELLOW = if (posix) "\x1B[93m" else "";
+pub const COLOR_MAGENTA = if (posix) "\x1B[35m" else "";
+pub const COLOR_CYAN = if (posix) "\x1B[36m" else "";
+pub const COLOR_BLACK = if (posix) "\x1B[38;5;16m" else "";
+pub const BLINK_START = if (posix) "\x1B[5m" else "";
+pub const BLINK_END = if (posix) "\x1B[25m" else "";
+pub const BOLD_START = if (posix) "\x1B[1m" else "";
+pub const BOLD_END = if (posix) "\x1B[0m" else "";
+pub const UNDERLINE_START = if (posix) "\x1B[4m" else "";
+pub const UNDERLINE_END = if (posix) "\x1B[0m" else "";

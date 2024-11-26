@@ -4,7 +4,8 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const expect = std.testing.expect;
 const expectEqualStrings = std.testing.expectEqualStrings;
-const StringHashMap = std.StringHashMap;
+const KVHash = std.StringHashMap(String);
+const GroupHash = std.StringHashMap(KVHash);
 
 const zigstr = @import("zigstr");
 const io = @import("io.zig");
@@ -23,57 +24,28 @@ const Error = String.Error;
 const Index = String.Index;
 const KeepEmptyParts = String.KeepEmptyParts;
 
+groups: GroupHash = undefined,
 comment: ?String = null,
 fullpath: ?String = null,
 name: ?String = null,
 exec: ?String = null,
-generic_names: StringHashMap(String) = undefined,
 icon: ?String = null,
-dctx: DContext = undefined,
+alloc: Allocator = undefined,
 
 const CstrName = "Name";
 const CstrExec = "Exec";
 const CstrIcon = "Icon";
 const CstrGenericName = "GenericName";
 
-pub const DContext = struct {
-    altor: Allocator = undefined,
-    keyIcon: String = undefined,
-    keyExec: String = undefined,
-    keyName: String = undefined,
-    keyGenericName: String = undefined,
-
-    pub fn New(a: Allocator) !DContext {
-        var dctx = DContext{};
-        dctx.altor = a;
-        try dctx.init();
-        return dctx;
-    }
-
-    fn init(self: *DContext) !void {
-        self.keyName = try String.From(CstrName);
-        self.keyIcon = try String.From(CstrIcon);
-        self.keyExec = try String.From(CstrExec);
-        self.keyGenericName = try String.From(CstrGenericName);
-    }
-
-    pub fn deinit(self: DContext) void {
-        self.keyExec.deinit();
-        self.keyIcon.deinit();
-        self.keyName.deinit();
-        self.keyGenericName.deinit();
-    }
-};
-
-pub fn NewCstr(dctx: DContext, fullpath: []const u8) !DesktopFile {
-    return New(dctx, try String.From(fullpath));
+pub fn NewCstr(a: Allocator, fullpath: []const u8) !DesktopFile {
+    return New(a, try String.From(fullpath));
 }
 
-pub fn New(dctx: DContext, fullpath: String) !DesktopFile {
+pub fn New(a: Allocator, fullpath: String) !DesktopFile {
     var df = DesktopFile{
-        .generic_names = std.StringHashMap(String).init(dctx.altor),
+        .alloc = a,
+        .groups = GroupHash.init(a),
     };
-    df.dctx = dctx;
     df.fullpath = fullpath;
     try df.init();
 
@@ -81,42 +53,64 @@ pub fn New(dctx: DContext, fullpath: String) !DesktopFile {
 }
 
 pub fn deinit(self: *DesktopFile) void {
-    if (self.comment)|k|
+
+    var groups_iter = self.groups.iterator();
+    while (groups_iter.next()) |group_kv|
+    {
+        const name = group_kv.key_ptr;
+        self.alloc.free(name.*);
+        var value = group_kv.value_ptr;
+        var iter = value.iterator();
+        while (iter.next()) |kv| {
+            self.alloc.free(kv.key_ptr.*);
+            kv.value_ptr.deinit();
+        }
+        value.deinit();
+    }
+
+    self.groups.deinit();
+    
+    if (self.fullpath) |k| {
         k.deinit();
-    if (self.fullpath)|k|
-        k.deinit();
-    if (self.name)|k|
-        k.deinit();
-    if (self.exec)|k|
-        k.deinit();
-    if (self.icon)|k|
-        k.deinit();
-    self.generic_names.deinit();
+    }
 }
 
-fn splitKey(key: String) !?struct{String, String} {
+fn put(a: Allocator, key: String, value: String, dest: *KVHash) !void {
+    std.debug.print("{s}(): key=\"{s}\", value=\"{}\"\n", .{ @src().fn_name, key, value });
+    if (key.isEmpty()) {
+        const cstr_key = try a.dupe(u8, "");
+        
+        try dest.put(cstr_key, value);
+    } else {
+        const cstr_key = try key.dup_as_cstr_alloc(a);
+        try dest.put(cstr_key, value);
+    }
+}
+
+fn splitKey(key: String) !?struct { String, String } {
     const index = key.indexOfCp("[", Index.strStart(), CaseSensitive.Yes) orelse return null;
-    return .{ try key.between(0, index.gr), try key.between(index.gr+1, key.size()-2) };
+    return .{ try key.between(0, index.gr), try key.between(index.gr + 1, key.size() - 1) };
 }
 
 pub fn init(self: *DesktopFile) !void {
     const fp = self.fullpath orelse return String.Error.NotFound;
     const path_buf = try fp.toString();
     defer path_buf.deinit();
-    const data_cstr = try io.readFile(self.dctx.altor, path_buf.items);
-    
+    const data_cstr = try io.readFile(self.alloc, path_buf.items);
+
     const data_str = try String.From(data_cstr);
-    self.dctx.altor.free(data_cstr);
+    self.alloc.free(data_cstr);
     defer data_str.deinit();
     var lines = try data_str.split("\n", CaseSensitive.Yes, KeepEmptyParts.No);
     defer {
         for (lines.items) |line| {
-            //line.print(std.debug, null) catch {};
             line.deinit();
         }
         lines.deinit();
     }
-    //std.debug.print("{s}:{}(), lines: {}\n", .{@src().fn_name, @src().line, lines.items.len});
+
+    var current_hash_opt: ?*KVHash = null;
+
     for (lines.items) |line| {
         if (line.startsWithChar("#")) {
             try line.print(std.debug, "Comment: ");
@@ -124,15 +118,21 @@ pub fn init(self: *DesktopFile) !void {
         }
         if (line.startsWithChar("[")) {
             if (line.endsWithChar("]")) {
-                const name = try line.between(1, line.size() - 2);
-                //try name.print(std.debug, "New group: ");
-                defer name.deinit();
+                const group_name = try line.between(1, line.size() - 1);
+                try group_name.print(std.debug, "Group name: ");
+                defer group_name.deinit();
+                const name_cstr = try group_name.dup_as_cstr();
+                const h = KVHash.init(self.alloc);
+                try self.groups.put(name_cstr, h);
+                current_hash_opt = self.groups.getPtr(name_cstr) orelse break;
                 continue;
             } else {
                 std.debug.print("{s}: Line doesn't end with ]\n", .{@src().fn_name});
                 continue;
             }
         }
+        //try line.print(std.debug, "Line: ");
+        var current_hash: *KVHash = current_hash_opt orelse break;
         var kv = try line.split("=", CaseSensitive.Yes, KeepEmptyParts.Yes);
         defer {
             for (kv.items) |s| {
@@ -140,48 +140,13 @@ pub fn init(self: *DesktopFile) !void {
             }
             kv.deinit();
         }
-        
-        //var key = kv.items[0];
-        var key = try kv.items[0].Clone();
-        var lang: String = undefined;
-        var found = false;
-        if (key.endsWithChar("]")) {
-            if (try splitKey(key)) |pair| {
-            //  if (both) |pair| {
-                found = true;
-                key.deinit();
-                key = pair[0];
-                lang = pair[1];
-            }
-        }
 
-        if (found)
-            lang.deinit();
+        const key = try kv.items[0].Clone();
         defer key.deinit();
         const value = if (kv.items.len == 2) try kv.items[1].Clone() else String.New();
-        std.debug.print("key=\"{}\" => \"{}\", count: {}\n", .{key, value, kv.items.len});
-        if (key.eqStr(self.dctx.keyName)) {
-            try value.print(std.debug, "Found name: ");
-            if (self.name)|k|
-                k.deinit();
-            self.name = value;
-        } else if (key.eqStr(self.dctx.keyExec)) {
-            try value.print(std.debug, "Found exec: ");
-            if (self.exec)|k|
-                k.deinit();
-            self.exec = value;
-        } else if (key.eqStr(self.dctx.keyIcon)) {
-            try value.print(std.debug, "Found icon: ");
-            if (self.icon)|k|
-                k.deinit();
-            self.icon = value;
-        // } else if (key.eqStr(self.dctx.keyGenericName)) {
-        //     try value.print(std.debug, "Found generic name: ");
-        //     if (self.generic_name)|k|
-        //         k.deinit();     
-        //     self.generic_name = value;
-        } else {
-            value.deinit();
-        }
+        const final_key = try key.dup_as_cstr_alloc(self.alloc);
+        std.debug.print("\"{s}\"=>\"{s}{}{s}\"\n",
+        .{final_key, String.COLOR_BLUE, value, String.COLOR_DEFAULT});
+        try current_hash.put(final_key, value);
     }
 }
