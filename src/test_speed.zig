@@ -15,9 +15,10 @@ const ScriptsData = @import("ScriptsData");
 const String = @import("String.zig").String;
 const CaseSensitive = String.CaseSensitive;
 const Codepoint = String.Codepoint;
-const CodepointSlice = String.CodepointSlice;
-const Context = String.Context;
+const ConstCpSlice = String.ConstCpSlice;
 const CpSlice = String.CpSlice;
+const Context = String.Context;
+
 const Error = String.Error;
 const Index = String.Index;
 const KeepEmptyParts = String.KeepEmptyParts;
@@ -71,7 +72,7 @@ fn FindOneLinear(haystack: String, needle: Codepoint) !String.Index {
     return result;
 }
 
-fn FindManySimd(haystack: String, needles: CpSlice, from: ?Index, comptime depth: u16, correct: ?usize) !String.Index {
+fn FindManySimd(haystack: String, needles: ConstCpSlice, from: ?Index, comptime depth: u16, correct: ?usize) !String.Index {
     const start_time = getTime();
     const result = haystack.findManySimd(needles, from, depth) orelse {
         const buf = try String.utf8_from_slice(alloc, needles);
@@ -86,7 +87,7 @@ fn FindManySimd(haystack: String, needles: CpSlice, from: ?Index, comptime depth
     return result;
 }
 
-fn FindManyLinear(haystack: String, needles: CpSlice, from: ?Index, correct: ?usize) !String.Index {
+fn FindManyLinear(haystack: String, needles: ConstCpSlice, from: ?Index, correct: ?usize) !String.Index {
     const start_time = getTime();
     const result = haystack.findManyLinear(needles, from, CaseSensitive.Yes) orelse return Error.NotFound;
     const done_in = getTime() - start_time;
@@ -134,7 +135,7 @@ fn FindBackwards() !void {
     }
 }
 
-pub fn test_find_index(raw_str: []const u8, needles: CpSlice, needles_raw: []const u8, froms: []const usize, answers: ?[]const usize) !void {
+pub fn test_find_index(raw_str: []const u8, needles: ConstCpSlice, needles_raw: []const u8, froms: []const usize, answers: ?[]const usize) !void {
     std.debug.print("="**70++"\n", .{});
     const short_string_len: usize = 255;
     const needles_buf = try String.utf8_from_slice(alloc, needles);

@@ -13,8 +13,8 @@ const Normalize = @import("Normalize");
 const CaseFold = @import("CaseFold");
 
 pub const Codepoint = u21;
-pub const CodepointSlice = []Codepoint;
-pub const CpSlice = []const Codepoint;
+pub const CpSlice = []Codepoint;
+pub const ConstCpSlice = []const Codepoint;
 pub const GraphemeSlice = []const u1;
 pub const Error = error{ NotFound, BadArg, Index, Alloc };
 const SimdVecLen: u16 = 32;
@@ -120,13 +120,13 @@ pub const Context = struct {
     // norm_data: Normalize.NormData = undefined,
 
     pub fn New(alloc: Allocator) !Context {
-        return Context {
+        return Context{
             .a = alloc,
             .grapheme_data = try zg_grapheme.GraphemeData.init(alloc),
             .cd = try CaseData.init(alloc),
             // .cfd = try CaseFold.FoldData.init(alloc),
         };
- 
+
         // try Normalize.NormData.init(&ctx.norm_data, alloc);
         // ctx.normalize = Normalize{ .norm_data = &ctx.norm_data };
         // ctx.cf = CaseFold {.fold_data = &ctx.cfd};
@@ -142,7 +142,7 @@ pub const Context = struct {
     }
 };
 
-pub threadlocal var ctx: Context = undefined;  
+pub threadlocal var ctx: Context = undefined;
 
 const Data = struct {
     codepoints: ArrayList(Codepoint) = undefined,
@@ -150,7 +150,7 @@ const Data = struct {
     grapheme_count: usize = 0,
 
     pub fn Clone(self: Data) !Data {
-        return Data {
+        return Data{
             .codepoints = try self.codepoints.clone(),
             .graphemes = try self.graphemes.clone(),
             .grapheme_count = self.grapheme_count,
@@ -174,7 +174,7 @@ pub fn From(input: []const u8) !String {
 fn initEmpty(self: *String) void {
     if (self.d != null)
         return;
-    self.d = Data {
+    self.d = Data{
         .graphemes = ArrayList(u1).init(ctx.a),
         .codepoints = ArrayList(Codepoint).init(ctx.a),
         .grapheme_count = 0,
@@ -209,7 +209,33 @@ pub fn At(self: String, gr_index: usize) ?Index {
 }
 
 pub fn between(self: String, start: usize, end: usize) !String {
-    return self.substring(start, @intCast(end-start));
+    return self.substring(start, @intCast(end - start));
+}
+
+pub fn isBetween(self: String, l: []const u8, r: []const u8) ?String {
+    if (l.len > 1 or r.len > 1) {
+        const a = toCodepoints(ctx.a, l) catch return null;
+        defer a.deinit();
+        const b = toCodepoints(ctx.a, r) catch return null;
+        defer b.deinit();
+        return self.isBetweenSlices(a.items, b.items);
+    }
+    const a = toCp(l) catch return null;
+    const b = toCp(r) catch return null;
+    return self.isBetweenCp(a, b);
+}
+
+pub fn isBetweenCp(self: String, l: Codepoint, r: Codepoint) ?String {
+    if (!self.startsWithCp(l) or !self.endsWithCp(r))
+        return null;
+    return self.between(1, self.size() - 1) catch return null;
+}
+
+pub fn isBetweenSlices(self: String, l: CpSlice, r: CpSlice) ?String {
+    const cs = CaseSensitive.Yes;
+    if (!self.startsWithSlice(l, cs) or !self.endsWithSlice(r, cs))
+        return null;
+    return self.between(l.len, self.size() - r.len) catch return null;
 }
 
 pub fn clearAndFree(self: *String) void {
@@ -228,7 +254,7 @@ pub fn clearRetainingCapacity(self: *String) void {
 
 pub fn Clone(self: String) !String {
     var sd = self.d orelse return String{};
-    return String {
+    return String{
         .d = try sd.Clone(),
     };
 }
@@ -276,7 +302,7 @@ pub fn contains(self: String, str: []const u8) bool {
     return self.indexOf(str, null) != null;
 }
 
-pub fn contains2(self: String, str: CodepointSlice) bool {
+pub fn contains2(self: String, str: CpSlice) bool {
     return self.indexOf2(str, null) != null;
 }
 
@@ -298,11 +324,11 @@ pub fn countGraphemesRaw(alloc: Allocator, input: []const u8) usize {
     return grapheme_count;
 }
 
-pub fn dup_as_cstr(self: String) ![]u8 {
-    return self.dup_as_cstr_alloc(ctx.a);
+pub fn dupAsCstr(self: String) ![]u8 {
+    return self.dupAsCstrAlloc(ctx.a);
 }
 
-pub fn dup_as_cstr_alloc(self: String, a: Allocator) ![]u8 {
+pub fn dupAsCstrAlloc(self: String, a: Allocator) ![]u8 {
     const buf = try self.toString();
     defer buf.deinit();
     return a.dupe(u8, buf.items);
@@ -315,7 +341,7 @@ pub fn endsWith(self: String, phrase: []const u8, cs: CaseSensitive) bool {
 }
 
 pub fn endsWithChar(self: String, letter: []const u8) bool {
-    const cp = toCodepoint(letter) catch return false;
+    const cp = toCp(letter) catch return false;
     return self.endsWithCp(cp);
 }
 
@@ -323,13 +349,13 @@ pub fn endsWithChar(self: String, letter: []const u8) bool {
 pub fn endsWithCp(self: String, cp: Codepoint) bool {
     const sd = self.d orelse return false;
     const slice = sd.codepoints.items[0..];
-    if (slice.len == 0 or slice[slice.len-1] != cp)
+    if (slice.len == 0 or slice[slice.len - 1] != cp)
         return false;
     const glist = sd.graphemes.items[0..];
-    return glist[glist.len-1] == 1;
+    return glist[glist.len - 1] == 1;
 }
 
-pub fn endsWithSlice(self: String, needles: CodepointSlice, cs: CaseSensitive) bool {
+pub fn endsWithSlice(self: String, needles: CpSlice, cs: CaseSensitive) bool {
     const sd = self.d orelse return false;
     const start_index: usize = sd.codepoints.items.len - needles.len;
     // The starting codepoint must be a grapheme
@@ -375,7 +401,7 @@ pub fn equals(self: String, input: []const u8, cs: CaseSensitive) bool {
     return self.equalsSlice(list.items, cs);
 }
 
-pub fn equalsSlice(self: String, slice: CodepointSlice, cs: CaseSensitive) bool {
+pub fn equalsSlice(self: String, slice: CpSlice, cs: CaseSensitive) bool {
     const sd = self.d orelse return false;
     if (cs == CaseSensitive.Yes) {
         return std.mem.eql(Codepoint, sd.codepoints.items, slice);
@@ -403,7 +429,7 @@ pub fn equalsStr(self: String, other: String, cs: CaseSensitive) bool {
     return self.equalsSlice(sdo.codepoints.items, cs);
 }
 
-fn findCaseInsensitive(graphemes: []u1, haystack: CpSlice, needles: CpSlice) ?usize {
+fn findCaseInsensitive(graphemes: []u1, haystack: ConstCpSlice, needles: ConstCpSlice) ?usize {
     var index: ?usize = null;
     const till: usize = haystack.len - needles.len + 1;
     for (0..till) |i| {
@@ -427,7 +453,7 @@ fn findCaseInsensitive(graphemes: []u1, haystack: CpSlice, needles: CpSlice) ?us
     return index;
 }
 
-pub fn findManyLinear(self: String, needles: CpSlice, start: ?Index, cs: CaseSensitive) ?Index {
+pub fn findManyLinear(self: String, needles: ConstCpSlice, start: ?Index, cs: CaseSensitive) ?Index {
     const sd = self.d orelse return null;
     const cp_count = sd.codepoints.items.len;
     if (needles.len > cp_count) {
@@ -463,7 +489,7 @@ pub fn findManyLinear(self: String, needles: CpSlice, start: ?Index, cs: CaseSen
     return null;
 }
 
-pub fn findManySimd(self: String, needles: CpSlice, from_index: ?Index, comptime depth: u16) ?Index {
+pub fn findManySimd(self: String, needles: ConstCpSlice, from_index: ?Index, comptime depth: u16) ?Index {
     const sd = self.d orelse return null;
     const from = from_index orelse Index.strStart();
     const cp_count = sd.codepoints.items.len;
@@ -614,7 +640,7 @@ pub fn graphemeAddressFromCp(self: String, codepoint_index: usize) ?Index {
     const sd = self.d orelse return null;
     const gr = countGraphemes(sd.graphemes.items[0 .. codepoint_index + 1]);
     if (gr) |g| {
-        return Index {.cp = codepoint_index, .gr = g};
+        return Index{ .cp = codepoint_index, .gr = g };
     }
     return null;
 }
@@ -638,7 +664,7 @@ pub fn graphemeAddress(self: String, grapheme_index: usize) ?Index {
     return null;
 }
 
-pub fn graphemeMatchesAnyCodepoint(self: String, index: Index, slice: CodepointSlice) bool {
+pub fn graphemeMatchesAnyCodepoint(self: String, index: Index, slice: CpSlice) bool {
     const sd = self.d orelse return false;
     const codepoints = sd.codepoints.items;
     const graphemes = sd.graphemes.items;
@@ -657,7 +683,7 @@ pub fn graphemeMatchesAnyCodepoint(self: String, index: Index, slice: CodepointS
     return false;
 }
 
-pub fn graphemesToUtf8(alloc: Allocator, input: CodepointSlice) !ArrayList(u8) {
+pub fn graphemesToUtf8(alloc: Allocator, input: CpSlice) !ArrayList(u8) {
     return utf8_from_slice(alloc, input);
 }
 
@@ -668,7 +694,7 @@ pub fn indexOfCp(self: String, input: []const u8, from: Index, cs: CaseSensitive
     return self.indexOfCp2(input_cps.items, from, cs);
 }
 
-pub fn indexOfCp2(self: String, input: CodepointSlice, from: Index, cs: CaseSensitive) ?Index {
+pub fn indexOfCp2(self: String, input: CpSlice, from: Index, cs: CaseSensitive) ?Index {
     const sd = self.d orelse return null;
     if (cs == CaseSensitive.No) {
         toUpper2(input) catch return null;
@@ -716,7 +742,7 @@ pub fn indexOf2(self: String, input: []const u8, from_index: ?Index, cs: CaseSen
     return self.findManyLinear(needles.items, from, cs);
 }
 
-pub fn indexOf3(self: String, needles: CodepointSlice, from_index: ?Index, cs: CaseSensitive) ?Index {
+pub fn indexOf3(self: String, needles: CpSlice, from_index: ?Index, cs: CaseSensitive) ?Index {
     const sd = self.d orelse return null;
     const from = from_index orelse Index.strStart();
     if (cs == CaseSensitive.Yes and sd.codepoints.items.len >= SimdVecLen) {
@@ -732,7 +758,7 @@ pub fn init(self: *String, input: []const u8, clear: Clear) !void {
 
     if (input.len == 0)
         return;
-    
+
     var sd: *Data = try self.getPointer();
     var cp_count: usize = 0;
     const approx = @max(input.len / 2, 2);
@@ -791,7 +817,7 @@ pub fn lastIndexOf(self: String, needles: []const u8, from_index: ?Index) ?Index
     return self.lastIndexOf2(cp_needles.items, from_index, null);
 }
 
-pub fn lastIndexOf2(self: String, needles: CodepointSlice, start: ?Index, comptime vector_len: ?u16) ?Index {
+pub fn lastIndexOf2(self: String, needles: CpSlice, start: ?Index, comptime vector_len: ?u16) ?Index {
     const sd = self.d orelse return null;
     const vec_len = vector_len orelse SimdVecLen;
     const from = start orelse self.strEnd();
@@ -1080,8 +1106,9 @@ pub fn startsWith(self: String, phrase: []const u8, cs: CaseSensitive) !bool {
     return self.startsWithSlice(needles.items, cs);
 }
 
+/// `letter` must resolve to one codepoint, which all ASCII chars are.
 pub fn startsWithChar(self: String, letter: []const u8) bool {
-    const cp = toCodepoint(letter) catch return false;
+    const cp = toCp(letter) catch return false;
     return self.startsWithCp(cp);
 }
 
@@ -1095,7 +1122,7 @@ pub fn startsWithCp(self: String, cp: Codepoint) bool {
     return gr_list.len == 1 or gr_list[1] == 1; // it's either the end or the next cp is a grapheme
 }
 
-pub fn startsWithSlice(self: String, needles: CodepointSlice, cs: CaseSensitive) bool {
+pub fn startsWithSlice(self: String, needles: CpSlice, cs: CaseSensitive) bool {
     const sd = self.d orelse return false;
     if (sd.graphemes.items.len > needles.len) {
         // make sure it ends on a grapheme boundary:
@@ -1169,12 +1196,43 @@ pub fn substring(self: String, start: usize, count: isize) !String {
     return s;
 }
 
+pub fn toString(self: String) !ArrayList(u8) {
+    const sd = self.d orelse return ArrayList(u8).init(ctx.a);
+    return utf8_from_slice(ctx.a, sd.codepoints.items);
+}
+
+pub fn toCp(input: []const u8) !Codepoint {
+// This function is for `input` that is one codepoint in size.
+// This case is useful because:
+// a) no memory allocation is needed
+// b) the code is shorter cause no deallocation is needed
+// c) convenient for example for many text parsing
+// operations where delimiters are often known to be one
+// codepoint, like "=", or "[", or "\n".
+    var cp_iter = zg_codepoint.Iterator{ .bytes = input };
+    if (cp_iter.next()) |obj| {
+        return obj.code;
+    }
+    return Error.BadArg;
+}
+
+pub fn toCodepoints(a: Allocator, input: []const u8) !ArrayList(Codepoint) {
+    var buf = ArrayList(Codepoint).init(a);
+    errdefer buf.deinit();
+    var cp_iter = zg_codepoint.Iterator{ .bytes = input };
+    while (cp_iter.next()) |obj| {
+        try buf.append(obj.code);
+    }
+
+    return buf;
+}
+
 pub fn toLower(self: *String) !void {
     const sd = try self.getPointer();
     try toLower2(sd.codepoints.items);
 }
 
-pub fn toLower2(list: CodepointSlice) !void {
+pub fn toLower2(list: CpSlice) !void {
     for (list) |*k| {
         k.* = ctx.cd.toLower(k.*);
     }
@@ -1185,7 +1243,7 @@ pub fn toUpper(self: *String) !void {
     try toUpper2(sd.codepoints.items);
 }
 
-pub fn toUpper2(list: CodepointSlice) !void {
+pub fn toUpper2(list: CpSlice) !void {
     for (list) |*k| {
         k.* = ctx.cd.toUpper(k.*);
     }
@@ -1271,7 +1329,7 @@ pub fn utf8_from_cp(a: Allocator, cp: Codepoint) !ArrayList(u8) {
     return buf;
 }
 
-pub fn utf8_from_slice(a: Allocator, slice: CpSlice) !ArrayList(u8) {
+pub fn utf8_from_slice(a: Allocator, slice: ConstCpSlice) !ArrayList(u8) {
     var buf = ArrayList(u8).init(a);
     errdefer buf.deinit();
     var tmp: [4]u8 = undefined;
@@ -1283,35 +1341,7 @@ pub fn utf8_from_slice(a: Allocator, slice: CpSlice) !ArrayList(u8) {
     return buf;
 }
 
-pub fn toString(self: String) !ArrayList(u8) {
-    const sd = self.d orelse return ArrayList(u8).init(ctx.a);
-    return utf8_from_slice(ctx.a, sd.codepoints.items);
-}
-
-// This is for chars that are one codepoint which
-// is fast/convenient for example for text parsing
-// operations where delimiters are often/always one
-// codepoint length, like "=", or "[", or "\n"
-pub fn toCodepoint(input: []const u8) !Codepoint {
-    var cp_iter = zg_codepoint.Iterator{ .bytes = input };
-    while (cp_iter.next()) |obj| {
-        return obj.code;
-    }
-    return Error.BadArg;
-}
-
-pub fn toCodepoints(a: Allocator, input: []const u8) !ArrayList(Codepoint) {
-    var buf = ArrayList(Codepoint).init(a);
-    errdefer buf.deinit();
-    var cp_iter = zg_codepoint.Iterator{ .bytes = input };
-    while (cp_iter.next()) |obj| {
-        try buf.append(obj.code);
-    }
-
-    return buf;
-}
-
-const posix = (builtin.target.os.tag == .linux );
+const posix = (builtin.target.os.tag == .linux);
 pub const COLOR_BLUE = if (posix) "\x1B[34m" else "";
 pub const COLOR_DEFAULT = if (posix) "\x1B[0m" else "";
 pub const COLOR_GREEN = if (posix) "\x1B[32m" else "";

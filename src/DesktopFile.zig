@@ -17,7 +17,7 @@ const ScriptsData = @import("ScriptsData");
 const String = @import("String.zig").String;
 const CaseSensitive = String.CaseSensitive;
 const Codepoint = String.Codepoint;
-const CodepointSlice = String.CodepointSlice;
+const CodepointSlice = String.CpSlice;
 const Context = String.Context;
 const CpSlice = String.CpSlice;
 const Error = String.Error;
@@ -116,20 +116,13 @@ pub fn init(self: *DesktopFile) !void {
             try line.print(std.debug, "Comment: ");
             continue;
         }
-        if (line.startsWithChar("[")) {
-            if (line.endsWithChar("]")) {
-                const group_name = try line.between(1, line.size() - 1);
-                try group_name.print(std.debug, "Group name: ");
-                defer group_name.deinit();
-                const name_cstr = try group_name.dup_as_cstr();
-                const h = KVHash.init(self.alloc);
-                try self.groups.put(name_cstr, h);
-                current_hash_opt = self.groups.getPtr(name_cstr) orelse break;
-                continue;
-            } else {
-                std.debug.print("{s}: Line doesn't end with ]\n", .{@src().fn_name});
-                continue;
-            }
+        if (line.isBetween("[", "]")) |group_name| {
+            defer group_name.deinit();
+            const name_cstr = try group_name.dupAsCstr();
+            const h = KVHash.init(self.alloc);
+            try self.groups.put(name_cstr, h);
+            current_hash_opt = self.groups.getPtr(name_cstr) orelse break;
+            continue;
         }
         //try line.print(std.debug, "Line: ");
         var current_hash: *KVHash = current_hash_opt orelse break;
@@ -144,7 +137,7 @@ pub fn init(self: *DesktopFile) !void {
         const key = try kv.items[0].Clone();
         defer key.deinit();
         const value = if (kv.items.len == 2) try kv.items[1].Clone() else String.New();
-        const final_key = try key.dup_as_cstr_alloc(self.alloc);
+        const final_key = try key.dupAsCstrAlloc(self.alloc);
         std.debug.print("\"{s}\"=>\"{s}{}{s}\"\n",
         .{final_key, String.COLOR_BLUE, value, String.COLOR_DEFAULT});
         try current_hash.put(final_key, value);

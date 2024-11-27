@@ -329,8 +329,8 @@ test "Split" {
 
     const correct3 = [_][]const u8 {"Foo", "", "Bar"};
     try expect(empty_arr.items.len == correct3.len);
-    for (empty_arr.items, correct3) |str_obj, char_arr| {
-        try expect(str_obj.equals(char_arr, CaseSensitive.Yes));
+    for (empty_arr.items, correct3) |str_obj, correct_word| {
+        try expect(str_obj.equals(correct_word, CaseSensitive.Yes));
     }
 
 }
