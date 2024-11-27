@@ -1,12 +1,27 @@
 # ZigString
-A string class for the Zig programming language to manipulate UTF-8 strings.<p/>
-A visible letter/character is a grapheme that might be composed of more than one codepoints (almost always it's one codepoint).<p/>
-Each codepoint takes 21 bits (plus 1 bit to mark if it's also the start of a grapheme) because 21 bits is enough to store every UTF-8 codepoint.
-Internally it uses SIMD or linear operations when needed. Under the hood it works with graphemes only unless otherwise specified. See src/tests.zig for details.<br/>
+A string class for the Zig programming language to correctly manipulate UTF-8 strings
+by respecting grapheme cluster boundaries. As opposed to other String classes including
+in other programming languages that operate on raw bytes or codepoints which is inherently flawed.
+<p/>
+When the user searches for a substring e.g. `my_str.indexOf("something")` he gets an `Index` struct in
+ return which has two fields: `.gr` for grapheme index and
+`.cp` for codepoint index (the user only needs the `.gr` field). This way when the next search
+ is done from this position onward the implementation doesn't have to do a linear search up to
+  that point while still respects grapheme boundaries. In short, this little user inconvenience 
+  exists to achieve **fast** and **correct** searches and string manipulations.
+<p/>
+A visible letter/character is a grapheme (or "grapheme cluster" to sound fancier) that might
+ be composed of more than one codepoints (but often it's one codepoint).
+ <p/>
+In this implementation under the hood each codepoint takes 21 bits (plus 1 separate bit to
+ mark grapheme boundaries) because 21 bits is enough to store every UTF-8 codepoint.
+Internally it uses SIMD or linear operations when needed. Under the hood it works with
+ graphemes only unless explicitly otherwise specified in the API/docs. See the tests
+ (from the /src folder) for examples.<br/>
 Tested on Zig 0.14dev
-<br/><br/>
+<p/>
 Example:<br/>
-<pre>
+```
     String.ctx = try Context.New(alloc);
     defer String.ctx.deinit();
 
@@ -40,4 +55,4 @@ Example:<br/>
     const sub2 = try hello_world.substring(3, -1);
     defer sub2.deinit();
     try expect(sub2.equals("lo, World!", CaseSensitive.Yes));
-</pre>
+```
