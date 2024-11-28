@@ -32,10 +32,15 @@ exec: ?String = null,
 icon: ?String = null,
 alloc: Allocator = undefined,
 
+const CstrMainGroup = "Desktop Entry";
 const CstrName = "Name";
+const CstrComment = "Comment";
 const CstrExec = "Exec";
 const CstrIcon = "Icon";
 const CstrGenericName = "GenericName";
+const CstrMimeType = "MimeType";
+const CstrCategories = "Categories";
+const CstrActions = "Actions";
 
 pub fn NewCstr(a: Allocator, fullpath: []const u8) !DesktopFile {
     return New(a, try String.From(fullpath));
@@ -75,21 +80,58 @@ pub fn deinit(self: *DesktopFile) void {
     }
 }
 
-fn put(a: Allocator, key: String, value: String, dest: *KVHash) !void {
-    std.debug.print("{s}(): key=\"{s}\", value=\"{}\"\n", .{ @src().fn_name, key, value });
-    if (key.isEmpty()) {
-        const cstr_key = try a.dupe(u8, "");
-        
-        try dest.put(cstr_key, value);
-    } else {
-        const cstr_key = try key.dup_as_cstr_alloc(a);
-        try dest.put(cstr_key, value);
-    }
+fn buildKeyname(name: []const u8, lang: []const u8) !ArrayList(u8) {
+    var key_name = try String.From(name);
+    defer key_name.deinit();
+    try key_name.append("[");
+    try key_name.append(lang);
+    try key_name.append("]");
+    return key_name.toString();
 }
 
-fn splitKey(key: String) !?struct { String, String } {
-    const index = key.indexOfCp("[", Index.strStart(), CaseSensitive.Yes) orelse return null;
-    return .{ try key.between(0, index.gr), try key.between(index.gr + 1, key.size() - 1) };
+pub fn getActions(self: DesktopFile) ?*const String {
+    return self.getField(CstrActions, null, null);
+}
+
+pub fn getCategories(self: DesktopFile) ?*const String {
+    return self.getField(CstrCategories, null, null);
+}
+
+pub fn getComment(self: DesktopFile, lang: ?[]const u8) ?*const String {
+    return self.getField(CstrComment, lang, null);
+}
+
+pub fn getExec(self: DesktopFile) ?*const String {
+    return self.getField(CstrExec, null, null);
+}
+
+pub fn getField(self: DesktopFile, name: []const u8, lang: ?[]const u8,
+group_name: ?[]const u8) ?*const String {
+    const gn = if (group_name) |cstr| cstr else CstrMainGroup;
+    const group = self.groups.getPtr(gn) orelse return null;
+    if (lang) |lang_cstr| {
+        const key_name = buildKeyname(name, lang_cstr) catch return null;
+        defer key_name.deinit();
+        return group.getPtr(key_name.items);
+    }
+    
+    return group.getPtr(name);
+}
+
+pub fn getGenericName(self: DesktopFile, lang: ?[]const u8) ?*const String {
+    return self.getField(CstrGenericName, lang, null);
+}
+
+pub fn getIcon(self: DesktopFile) ?*const String {
+    return self.getField(CstrIcon, null, null);
+}
+
+pub fn getMimeTypes(self: DesktopFile) ?*const String {
+    return self.getField(CstrMimeType, null, null);
+}
+
+pub fn getName(self: DesktopFile, lang: ?[]const u8) ?*const String {
+    return self.getField(CstrName, lang, null);
 }
 
 pub fn init(self: *DesktopFile) !void {
@@ -138,8 +180,22 @@ pub fn init(self: *DesktopFile) !void {
         defer key.deinit();
         const value = if (kv.items.len == 2) try kv.items[1].Clone() else String.New();
         const final_key = try key.dupAsCstrAlloc(self.alloc);
-        std.debug.print("\"{s}\"=>\"{s}{}{s}\"\n",
-        .{final_key, String.COLOR_BLUE, value, String.COLOR_DEFAULT});
+        // std.debug.print("\"{s}\"=>\"{s}{}{s}\"\n",
+        // .{final_key, String.COLOR_BLUE, value, String.COLOR_DEFAULT});
         try current_hash.put(final_key, value);
     }
 }
+
+fn put(a: Allocator, key: String, value: String, dest: *KVHash) !void {
+    std.debug.print("{s}(): key=\"{s}\", value=\"{}\"\n", .{ @src().fn_name, key, value });
+    if (key.isEmpty()) {
+        const cstr_key = try a.dupe(u8, "");
+        
+        try dest.put(cstr_key, value);
+    } else {
+        const cstr_key = try key.dup_as_cstr_alloc(a);
+        try dest.put(cstr_key, value);
+    }
+}
+
+

@@ -188,17 +188,22 @@ pub fn deinit(self: String) void {
 }
 
 pub fn append(self: *String, what: []const u8) !void {
-    var input = try String.From(what);
-    defer input.deinit();
-    try self.appendStr(input);
+    if (what.len == 1) {
+        const cp = try toCp(what);
+        var sd = try self.getPointer();
+        try sd.codepoints.append(cp);
+        try sd.graphemes.append(1);
+        sd.grapheme_count += 1;
+    } else {
+        const input = try String.From(what);
+        defer input.deinit();
+        try self.appendStr(input);
+    }
 }
 
 pub fn appendStr(self: *String, other: String) !void {
-    if (self.d == null) {
-        self.initEmpty();
-    }
-    var sd = try self.getPointer(); //self.d orelse return Error.Alloc;
-    const sdo = other.d orelse return Error.Alloc;
+    const sdo = other.d orelse return;
+    var sd = try self.getPointer();
     try sd.codepoints.appendSlice(sdo.codepoints.items);
     try sd.graphemes.appendSlice(sdo.graphemes.items);
     sd.grapheme_count += sdo.grapheme_count;
@@ -628,11 +633,7 @@ inline fn getPointer(self: *String) !*Data {
         return k;
     } else {
         self.initEmpty();
-        if (self.d) |*k| {
-            return k;
-        } else {
-            return Error.Alloc;
-        }
+        return if (self.d) |*k| k else Error.Alloc;
     }
 }
 

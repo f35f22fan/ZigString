@@ -73,6 +73,50 @@ test "Desktop File" {
     // try fullpath.print(std.debug, "Fullpath: ");
     // var df = try DesktopFile.New(dctx, try fullpath.Clone());
     // defer df.deinit();
-    var df2 = try DesktopFile.NewCstr(alloc, "/usr/share/applications/chromium-browser.desktop");
-    defer df2.deinit();
+    var chromium = try DesktopFile.NewCstr(alloc, "/usr/share/applications/chromium-browser.desktop");
+    defer chromium.deinit();
+
+    if (chromium.getName(null)) |value| {
+        try value.print(std.debug, "Name(default): ");
+    }
+
+    if (chromium.getName("ru")) |value| {
+        try value.print(std.debug, "Name(ru): ");
+    }
+
+    if (chromium.getName("zh_CN")) |value| {
+        try value.print(std.debug, "Name(zh_CN): ");
+    }
+
+    if (chromium.getGenericName("zh_CN")) |value| {
+        try value.print(std.debug, "Generic Name(zh_CN): ");
+    }
+
+    if (chromium.getComment("zh_CN")) |value| {
+        try value.print(std.debug, "Comment(zh_CN): ");
+    }
+
+    if (chromium.getIcon()) |value| {
+        try value.print(std.debug, "Icon: ");
+    }
+
+    if (chromium.getActions()) |value| {
+        try value.print(std.debug, "Actions: ");
+    }
+
+    if (chromium.getExec()) |value| {
+        try value.print(std.debug, "Exec: ");
+    }
+
+    if (chromium.getField("Exec", null, "Desktop Action new-private-window")) |value| {
+        try value.print(std.debug, "Exec(Desktop Action new-private-window): ");
+    }
+
+    if (chromium.getMimeTypes()) |value| {
+        try value.print(std.debug, "Mimetypes: ");
+    }
+
+    if (chromium.getCategories()) |value| {
+        try value.print(std.debug, "Categories: ");
+    }
 }
