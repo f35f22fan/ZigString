@@ -81,12 +81,12 @@ pub fn deinit(self: *DesktopFile) void {
 }
 
 fn buildKeyname(name: []const u8, lang: []const u8) !ArrayList(u8) {
-    var key_name = try String.From(name);
-    defer key_name.deinit();
-    try key_name.append("[");
-    try key_name.append(lang);
-    try key_name.append("]");
-    return key_name.toString();
+    var key = try String.From(name);
+    defer key.deinit();
+    try key.append("[");
+    try key.append(lang);
+    try key.append("]");
+    return key.toString();
 }
 
 pub fn getActions(self: DesktopFile) ?*const String {

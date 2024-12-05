@@ -56,4 +56,18 @@ Example:<br/>
     const sub2 = try hello_world.substring(3, -1);
     defer sub2.deinit();
     try expect(sub2.equals("lo, World!", CaseSensitive.Yes));
+    
+    // charAt() usage:
+    const str_ru = try String.From("Жизнь");
+    defer str_ru.deinit();
+    try expect(str_ru.charAt(0).?.eq(try String.toCp("Ж")));
+    try expect(str_ru.charAt(4).?.eq(try String.toCp("ь")));
+
+    const str_ch = try String.From("好久不见，你好吗？");
+    defer str_ch.deinit();
+    try str_ch.printGraphemes(std.debug, theme);
+    try str_ch.printCodepoints(std.debug, theme);
+    try expect(str_ch.charAt(0).?.eq(try String.toCp("好")));
+    try expect(str_ch.charAt(8).?.eq(try String.toCp("？")));
+    
    </code>

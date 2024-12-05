@@ -120,3 +120,47 @@ test "Desktop File" {
         try value.print(std.debug, "Categories: ");
     }
 }
+
+fn readWrite(input: []const u8) !void {
+    const rw_string = try String.From(input);
+    defer rw_string.deinit();
+    
+    const home_cstr = try io.getEnv(alloc, io.Folder.Home);
+    defer alloc.free(home_cstr);
+    var fullpath = try String.From(home_cstr);
+    defer fullpath.deinit();
+    try fullpath.append("/out.txt");
+    try fullpath.print(std.debug, null);
+    const fp = try fullpath.toString();
+    defer fp.deinit();
+
+    const file_out = try std.fs.createFileAbsolute(fp.items, .{.truncate = true, .read = true});
+    try rw_string.writeTo(file_out.writer(), String.Flush.Yes);
+    file_out.close();
+
+    // var m = [_]u8{0} ** 256;
+    // var stream = std.io.fixedBufferStream(&m);
+    // try s.writeTo(stream.writer());
+
+    // for (m) |k| {
+    //     std.debug.print("{X}| ", .{k});
+    // }
+
+    const file_in = try std.fs.openFileAbsolute(fp.items, .{});
+    defer file_in.close();
+    const read_str = try String.readFrom(file_in.reader());
+    defer read_str.deinit();
+    try expect(read_str.eq(input));
+    try read_str.print(std.debug, "Read str: ");
+    std.debug.print("{s}(): read str gr count: {}", .{@src().fn_name, read_str.size()});
+}
+
+test "Binary read/write string to file" {
+// This test reads/writes the string not in UTF-8,
+// but in its internal binary format.
+    String.ctx = try Context.New(alloc);
+    defer String.ctx.deinit();
+
+    //try readWrite("This is a string");
+    try readWrite("Jos\u{65}\u{301} se fu\u{65}\u{301}");
+}

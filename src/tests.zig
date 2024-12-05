@@ -353,3 +353,51 @@ test "To Upper, To Lower" {
     }
 }
 
+test "Char At" {
+    String.ctx = try Context.New(alloc);
+    defer String.ctx.deinit();
+
+    const str = try String.From(JoseStr);
+    defer str.deinit();
+
+    // toCpAscii() is slightly faster than toCp()
+    const letter_s: Codepoint = try String.toCpAscii('s');
+    
+    // String.charAt() returns a ?String.Grapheme object which
+    // internally points to a section of the string object,
+    // so it's invalid once the string changes.
+    // But thanks to this it can hold an arbitrary long grapheme cluster
+    // and doesn't need a deinit() call.
+    try expect(str.charAt(2).?.eq(letter_s));
+    try expect(str.charAt(32).?.eqAscii('e'));
+
+    const at: usize = 1;
+    if (str.charAt(at)) |g| {
+        try expect(!g.eqAscii('a'));
+        try expect(g.eqAscii('o'));
+        try expect(!g.eqAscii('G'));
+        try expect(!g.eqBytes("\u{65}\u{301}"));
+    } else {
+        std.debug.print("Nothing found at {}\n", .{at});
+    }
+
+    if (str.charAt(3)) |g| {
+        // const slice = g.getSlice() orelse return;
+        // std.debug.print("{s}(): Grapheme len={}, slice=\"{any}\", index={}\n",
+        //     .{@src().fn_name, g.len, slice, g.index()});
+        try expect(g.eqBytes("\u{65}\u{301}"));
+        try expect(!g.eqAscii('G'));
+    }
+
+    const str_ru = try String.From("Жизнь");
+    defer str_ru.deinit();
+    try expect(str_ru.charAt(0).?.eq(try String.toCp("Ж")));
+    try expect(str_ru.charAt(4).?.eq(try String.toCp("ь")));
+
+    const str_ch = try String.From("好久不见，你好吗？");
+    defer str_ch.deinit();
+    try str_ch.printGraphemes(std.debug, theme);
+    try str_ch.printCodepoints(std.debug, theme);
+    try expect(str_ch.charAt(0).?.eq(try String.toCp("好")));
+    try expect(str_ch.charAt(8).?.eq(try String.toCp("？")));
+}
