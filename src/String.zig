@@ -68,9 +68,7 @@ pub const Grapheme = struct {
 
     pub fn eq(self: Grapheme, cp: Codepoint) bool {
         const slice = self.getSlice() orelse return false;
-        if (slice.len == 0)
-            return false;
-        return slice[0] == cp;
+        return (slice.len == 1) and (slice[0] == cp);
     }
 
     pub fn eqAscii(self: Grapheme, c: comptime_int) bool {
@@ -84,6 +82,11 @@ pub const Grapheme = struct {
         return self.eqSlice(buf.items);
     }
 
+    pub fn eqCp(self: Grapheme, input: []const u8) bool {
+        const cp = toCp(input) catch return false;
+        return self.eq(cp);
+    }
+
     pub fn eqSlice(self: Grapheme, input: CpSlice) bool {
         const slice = self.getSlice() orelse return (input.len == 0);
         if (input.len != slice.len)
@@ -94,6 +97,16 @@ pub const Grapheme = struct {
         }
 
         return true;
+    }
+
+    pub fn format(self: Grapheme, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = fmt;
+        _ = options;
+
+        const slice = self.getSlice() orelse return;
+        const utf8 = try String.utf8_from_slice(ctx.a, slice);
+        defer utf8.deinit();
+        _ = try writer.print("{s}", .{utf8.items});
     }
 
     pub fn index(self: Grapheme) Index {
@@ -117,10 +130,10 @@ pub const Index = struct {
     cp: usize = 0,
     gr: usize = 0,
 
-    fn advance_to_next_grapheme(self: *Index, s: String) void {
+    fn advance_to_next_grapheme(self: *Index, gr_slice: GraphemeSlice) void {
         self.cp += 1;
-        const gr_slice = s.graphemes.items[self.cp..];
-        for (gr_slice, 0..) |gr_bit, i| {
+        const slice = gr_slice[self.cp..];
+        for (slice, 0..) |gr_bit, i| {
             if (gr_bit == 1) {
                 self.cp += i;
                 self.gr += 1;
@@ -138,16 +151,17 @@ pub const Index = struct {
 
     // Must return the next grapheme index
     pub fn next(self: *Index, s: String) ?Index {
+        const sd = s.d orelse return null;
         const from_cp = self.cp;
-        if (from_cp >= s.codepoints.items.len)
+        if (from_cp >= sd.codepoints.items.len)
             return null;
 
-        const gr_slice = s.graphemes.items[from_cp..];
+        const gr_slice = sd.graphemes.items[from_cp..];
         for (gr_slice, 0..) |gr_bit, i| {
             if (gr_bit == 1) {
                 self.cp = from_cp + i;
                 const index = self.*;
-                self.advance_to_next_grapheme(s);
+                self.advance_to_next_grapheme(sd.graphemes.items);
                 return index;
             }
         }
@@ -155,16 +169,20 @@ pub const Index = struct {
         return null;
     }
 
-    pub fn prev(self: Index, s: String) ?Index {
-        const cp_count = s.codepoints.items.len;
-        if (self.cp == 0 or self.cp >= cp_count)
+    pub fn prev(self: *Index, s: String) ?Index {
+        const sd = s.d orelse return null;
+        const cp_count = sd.codepoints.items.len;
+        if (self.cp == 0 or self.cp > cp_count)
             return null;
 
-        var i: usize = self.cp - 1;
-        while (i > 0) : (i -= 1) {
-            const b = s.graphemes.items[i];
+        var i: isize = @intCast(self.cp);
+        i -= 1;
+        while (i >= 0) : (i -= 1) {
+            const b = sd.graphemes.items[@intCast(i)];
             if (b == 1) {
-                return Index{ .cp = i, .gr = self.gr - 1 };
+                self.cp = @intCast(i);
+                self.gr -= 1;
+                return self.*;
             }
         }
 
@@ -497,6 +515,10 @@ pub fn eq(self: String, input: []const u8) bool {
     return self.equals(input, CaseSensitive.Yes);
 }
 
+pub fn eqStr(self: String, other: String) bool {
+    return self.equalsStr(other, CaseSensitive.Yes);
+}
+
 pub fn equals(self: String, input: []const u8, cs: CaseSensitive) bool {
     const list = toCodepoints(ctx.a, input) catch return false;
     defer list.deinit();
@@ -524,10 +546,6 @@ pub fn equalsSlice(self: String, slice: CpSlice, cs: CaseSensitive) bool {
     }
 
     return true;
-}
-
-pub fn eqStr(self: String, other: String) bool {
-    return self.equalsStr(other, CaseSensitive.Yes);
 }
 
 pub fn equalsStr(self: String, other: String, cs: CaseSensitive) bool {
@@ -752,9 +770,10 @@ pub fn graphemeAddress(self: String, grapheme_index: usize) ?Index {
     if (grapheme_index >= sd.grapheme_count) {
         return null;
     }
-    var current_grapheme: isize = -1;
+    
     const slice = sd.graphemes.items[0..];
     var cp_index: isize = -1;
+    var current_grapheme: isize = -1;
     for (slice) |k| {
         cp_index += 1;
         if (k == 1) {
@@ -763,6 +782,7 @@ pub fn graphemeAddress(self: String, grapheme_index: usize) ?Index {
         if (grapheme_index == current_grapheme)
             return Index{ .cp = @abs(cp_index), .gr = grapheme_index };
     }
+
     return null;
 }
 
@@ -996,7 +1016,14 @@ pub fn print2(self: String, out: anytype, theme: Theme, msg: ?[]const u8) !void 
     out.print("{s}{s}\"{s}\"{s}\n", .{ info, color, self, COLOR_DEFAULT });
 }
 
-const print_format_str = "{s}{}{s}{s}|{s}|{s}{s}{s}{s} ";
+pub fn printInfo(self: String, out: anytype, msg: ?[] const u8) !void {
+    const color = if (string_theme == Theme.Light) COLOR_DEFAULT else COLOR_GREEN;
+    const info = if (msg) |k| k else "String.printInfo(): ";
+
+    out.print("{s}[gr={},cp={}]={s}\"{s}\"{s}\n", .{ info, self.size(), self.size_cp(), color, self, COLOR_DEFAULT });
+}
+
+const print_format_str = "{s}{}{s}{s}[{s}]{s}{s}{s}{s} ";
 const nl_chars = UNDERLINE_START ++ "(LF)" ++ UNDERLINE_END;
 const cr_chars = UNDERLINE_START ++ "(CR)" ++ UNDERLINE_END;
 const crnl_chars = UNDERLINE_START ++ "(CR/LF)" ++ UNDERLINE_END;
@@ -1035,10 +1062,11 @@ see_as: SeeAs, attr: Attr, theme: Theme) !void {
     const cp_color: []const u8 = if (see_as == SeeAs.PartOfGrapheme) COLOR_GREEN else COLOR_MAGENTA;
     var final_fg: []const u8 = if (theme == Theme.Light) COLOR_BLACK else cp_color;
     if (attr == Attr.Codepoint) {
-        final_fg = COLOR_RED;
+        final_fg = COLOR_RED ++ BOLD_START;
     }
+    const end_final_fg = if (attr == Attr.Codepoint) COLOR_DEFAULT ++ BOLD_END else COLOR_DEFAULT;
     const num_color = if (theme == Theme.Light) "\x1B[38;5;196m" else COLOR_YELLOW;
-    out.print(print_format_str, .{ COLOR_BLUE, gr_index, COLOR_DEFAULT, final_fg, cp_as_str, COLOR_DEFAULT, num_color, codepoints_str, COLOR_DEFAULT });
+    out.print(print_format_str, .{ COLOR_BLUE, gr_index, COLOR_DEFAULT, final_fg, cp_as_str, end_final_fg, num_color, codepoints_str, COLOR_DEFAULT });
 }
 
 pub fn printCodepoints(self: String, out: anytype, theme: Theme) !void {
@@ -1267,7 +1295,7 @@ pub fn startsWithStr(self: String, needles: String, cs: CaseSensitive) bool {
 
 /// returns `Index` after the last grapheme, exec is O(1)
 pub fn strEnd(self: String) Index {
-    const sd = self.d orelse return Index.strStart{};
+    const sd = self.d orelse return strStart();
     return Index{ .cp = sd.codepoints.items.len, .gr = sd.grapheme_count };
 }
 
@@ -1328,9 +1356,12 @@ fn readSize(in: anytype, msg: []const u8) !usize {
     }
 
     _ = try in.readBits(u8, @bitSizeOf(u8), &read_count);
+    if (read_count != @bitSizeOf(u8)) {
+        Print("{s}FN(u8/u64)={s}:{}: msg=\"{s}\" read_count={}{s}\n", .{ COLOR_RED, @src().fn_name, @src().line, msg, read_count, COLOR_DEFAULT });
+    }
     const z = try in.readBits(u64, @bitSizeOf(u64), &read_count);
     if (read_count != @bitSizeOf(u64)) {
-        Print("FN={s}:{}: msg=\"{s}\" read_count={}\n", .{ @src().fn_name, @src().line, msg, read_count });
+        Print("{s}FN(u64)={s}:{}: msg=\"{s}\" read_count={}{s}\n", .{ COLOR_RED, @src().fn_name, @src().line, msg, read_count, COLOR_DEFAULT });
     }
     return z;
 }
@@ -1348,10 +1379,10 @@ fn writeSize(out: anytype, count: u64) !void {
     }
 }
 
-pub fn writeTo(self: String, out: anytype, f: Flush) !void {
-    var bitw = std.io.bitWriter(.big, out); //mem_out_be.writer());
+pub fn writeTo(self: String, bitw: anytype, f: Flush) !void {
+    //var bitw = std.io.bitWriter(.big, out); //mem_out_be.writer());
     const cp_count = self.size_cp();
-    try writeSize(&bitw, cp_count);
+    try writeSize(bitw, cp_count);
 
     if (cp_count == 0)
         return;
@@ -1365,16 +1396,19 @@ pub fn writeTo(self: String, out: anytype, f: Flush) !void {
         try bitw.writeBits(g, 1);
     }
 
-    try writeSize(&bitw, sd.grapheme_count);
+    try writeSize(bitw, sd.grapheme_count);
     if (f == Flush.Yes) {
+        const rembits = 8 - bitw.count;
+        std.debug.print("Remaining bits: {}\n", .{rembits});
         try bitw.flushBits();
     }
 }
 
-pub fn readFrom(in: anytype) !String {
-    var bits = std.io.bitReader(.big, in);
+pub fn readFrom(bits: anytype) !String {
+    //var bits = std.io.bitReader(.big, in);
     var read_count: u16 = 0;
-    const cp_count: usize = try readSize(&bits, "codepoints");
+    const cp_count: usize = try readSize(bits, "codepoints");
+    std.debug.print("{s}(): cp count: {}\n", .{@src().fn_name, cp_count});
     var ret_str = String{};
     if (cp_count == 0)
         return ret_str;
@@ -1393,7 +1427,7 @@ pub fn readFrom(in: anytype) !String {
         }
     }
 
-    sd.grapheme_count = try readSize(&bits, "grapheme count");
+    sd.grapheme_count = try readSize(bits, "grapheme count");
     return ret_str;
 }
 
@@ -1549,18 +1583,6 @@ pub fn utf8_from_slice(a: Allocator, slice: ConstCpSlice) !ArrayList(u8) {
     }
 
     return buf;
-}
-
-pub fn printInfo(comptime fmt: []const u8, args: anytype) void {
-    // const held = stderr_mutex.acquire();
-    // defer held.release();
-    const stderr = std.io.getStdErr().writer();
-    const real_fmt = "{s}{s}:{}" ++ fmt ++ "{s}\n";
-    _ = real_fmt;
-    // nosuspend stderr.print(real_fmt, .{
-    //     COLOR_BLUE, @src().fn_name, @src().line, args, COLOR_DEFAULT
-    // }) catch return;
-    stderr.print(fmt, args) catch {};
 }
 
 const posix = (builtin.target.os.tag == .linux);

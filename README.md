@@ -65,9 +65,8 @@ Example:<br/>
 
     const str_ch = try String.From("好久不见，你好吗？");
     defer str_ch.deinit();
-    try str_ch.printGraphemes(std.debug, theme);
-    try str_ch.printCodepoints(std.debug, theme);
-    try expect(str_ch.charAt(0).?.eq(try String.toCp("好")));
-    try expect(str_ch.charAt(8).?.eq(try String.toCp("？")));
+    try expect(str_ch.charAt(0).?.eqCp("好"));
+    try expect(str_ch.charAt(8).?.eqCp("？"));
+    try expect(!str_ch.charAt(1).?.eqCp("A"));
     
    </code>

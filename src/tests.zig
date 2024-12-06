@@ -392,12 +392,46 @@ test "Char At" {
     const str_ru = try String.From("Жизнь");
     defer str_ru.deinit();
     try expect(str_ru.charAt(0).?.eq(try String.toCp("Ж")));
-    try expect(str_ru.charAt(4).?.eq(try String.toCp("ь")));
+    // When the method argument is known to be 1 codepoint one can use
+    // the slightly faster method Grapheme.eqCp():
+    try expect(str_ru.charAt(4).?.eqCp("ь"));
+    // Btw an even faster method is Grapheme.eqAscii() when the
+    // method argument is known to be ASCII, like Grapheme.eqAscii('A').
+    // Therefore, for example, it's wrong to use Grapheme.eqCp() with the following
+    // method argument cause the grapheme has 2 codepoints \u65 and \u301:
+    // try expect(!str_ru.charAt(4).?.eqCp("\u{65}\u{301}"));
+    // The proper approach in this case is to use the slowest method - eqBytes():
+    // try expect(!str_ru.charAt(4).?.eqBytes("\u{65}\u{301}"));
+
+    
+    // String.charAtIndex() is faster (almost O(1)) then CharAt(), which is O(n)
+    // because each time CharAt() is called it iterates from the start
+    // of the string to get to the grapheme at the given index,
+    // while charAtIndex() from the previous position inside the string.
+    // So here's usage of CharAtIndex() which is used to efficiently
+    // iterate over a string to print it forth and then backwards:
+    const both_ways = try String.From("Jos\u{65}\u{301}"); // "José"
+    defer both_ways.deinit();
+    var index = String.strStart();
+    while (index.next(both_ways)) |idx| { // ends up printing "José"
+        if (both_ways.charAtIndex(idx)) |grapheme| {
+            std.debug.print("{}", .{grapheme});
+        }
+    }
+    std.debug.print("\n", .{});
+    index = both_ways.strEnd();
+    while (index.prev(both_ways)) |idx| { // ends up printing "ésoJ"
+        if (both_ways.charAtIndex(idx)) |grapheme| {
+            std.debug.print("{}", .{grapheme});
+        }
+    }
+    std.debug.print("\n", .{});
 
     const str_ch = try String.From("好久不见，你好吗？");
     defer str_ch.deinit();
     try str_ch.printGraphemes(std.debug, theme);
     try str_ch.printCodepoints(std.debug, theme);
-    try expect(str_ch.charAt(0).?.eq(try String.toCp("好")));
-    try expect(str_ch.charAt(8).?.eq(try String.toCp("？")));
+    try expect(str_ch.charAt(0).?.eqCp("好"));
+    try expect(str_ch.charAt(8).?.eqCp("？"));
+    try expect(!str_ch.charAt(1).?.eqCp("A"));
 }

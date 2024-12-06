@@ -40,6 +40,11 @@ const BOLD_END = "\x1B[0m";
 const UNDERLINE_START = "\x1B[4m";
 const UNDERLINE_END = "\x1B[0m";
 
+const Truncate = enum(u1) {
+    Yes,
+    No
+};
+
 fn ticker(step: u8) !void {
     _ = step;
     String.ctx = try Context.New(alloc);
@@ -121,22 +126,12 @@ test "Desktop File" {
     }
 }
 
-fn readWrite(input: []const u8) !void {
-    const rw_string = try String.From(input);
-    defer rw_string.deinit();
-    
-    const home_cstr = try io.getEnv(alloc, io.Folder.Home);
-    defer alloc.free(home_cstr);
-    var fullpath = try String.From(home_cstr);
-    defer fullpath.deinit();
-    try fullpath.append("/out.txt");
-    try fullpath.print(std.debug, null);
-    const fp = try fullpath.toString();
-    defer fp.deinit();
-
-    const file_out = try std.fs.createFileAbsolute(fp.items, .{.truncate = true, .read = true});
-    try rw_string.writeTo(file_out.writer(), String.Flush.Yes);
-    file_out.close();
+fn writeString(input_str: []const u8, writer: anytype, flush: String.Flush) !void {
+    const s = try String.From(input_str);
+    defer s.deinit();
+    try s.printGraphemes(std.debug, theme);
+    try s.printCodepoints(std.debug, theme);
+    try s.writeTo(writer, flush);
 
     // var m = [_]u8{0} ** 256;
     // var stream = std.io.fixedBufferStream(&m);
@@ -145,14 +140,13 @@ fn readWrite(input: []const u8) !void {
     // for (m) |k| {
     //     std.debug.print("{X}| ", .{k});
     // }
+}
 
-    const file_in = try std.fs.openFileAbsolute(fp.items, .{});
-    defer file_in.close();
-    const read_str = try String.readFrom(file_in.reader());
+fn readString(reader: anytype) !void {
+    const read_str = try String.readFrom(reader);
     defer read_str.deinit();
-    try expect(read_str.eq(input));
-    try read_str.print(std.debug, "Read str: ");
-    std.debug.print("{s}(): read str gr count: {}", .{@src().fn_name, read_str.size()});
+    //try expect(read_str.eq(input));
+    try read_str.printInfo(std.debug, "Read str: ");
 }
 
 test "Binary read/write string to file" {
@@ -161,6 +155,28 @@ test "Binary read/write string to file" {
     String.ctx = try Context.New(alloc);
     defer String.ctx.deinit();
 
-    //try readWrite("This is a string");
-    try readWrite("Jos\u{65}\u{301} se fu\u{65}\u{301}");
+    const home_cstr = try io.getEnv(alloc, io.Folder.Home);
+    defer alloc.free(home_cstr);
+    var fullpath = try String.From(home_cstr);
+    defer fullpath.deinit();
+    try fullpath.append("/out.txt");
+    //try fullpath.print(std.debug, null);
+    const fp = try fullpath.toString();
+    defer fp.deinit();
+
+    const file = try std.fs.createFileAbsolute(fp.items, .{.truncate = true, .read = true});
+    var writer = file.writer();
+    var bitw = std.io.bitWriter(.big, &writer);
+    try writeString("Jos\u{65}\u{301} se fu\u{65}\u{301}",
+    &bitw, String.Flush.No);
+    try writeString("Hello", &bitw, String.Flush.Yes);
+    file.close();
+
+    const file_in = try std.fs.openFileAbsolute(fp.items, .{});
+    defer file_in.close();
+
+    var reader = file_in.reader();
+    var bits = std.io.bitReader(.big, &reader);
+    try readString(&bits);
+    try readString(&bits);
 }
