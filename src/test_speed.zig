@@ -153,8 +153,8 @@ pub fn test_find_index(raw_str: []const u8, needles: ConstCpSlice, needles_raw: 
     std.debug.print("String(graphemes={}, cp={}) init done in {}{s}\n\n",
     .{ haystack.size(), haystack.size_cp(), done_in, TimeExt });
     if (raw_str.len <= short_string_len) {
-        try haystack.printGraphemes(std.debug, theme);
-        try haystack.printCodepoints(std.debug, theme);
+        try haystack.printGraphemes(@src());
+        try haystack.printCodepoints(@src());
     }
 
     const depth: u16 = 32;

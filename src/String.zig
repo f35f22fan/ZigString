@@ -1,12 +1,13 @@
 pub const String = @This();
 const std = @import("std");
-const Print = std.debug.print;
 const builtin = @import("builtin");
 const unicode = std.unicode;
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 //const out = std.io.getStdOut().writer();
 const BitWriter = std.io.bit_writer.BitWriter;
+
+const mtl = @import("mtl.zig");
 
 const zg_codepoint = @import("code_point");
 const zg_grapheme = @import("grapheme");
@@ -619,8 +620,6 @@ pub fn findManySimd(self: String, needles: ConstCpSlice, from_index: ?Index, com
     const cp_count = sd.codepoints.items.len;
     if ((needles.len == 0) or (needles.len > cp_count) or (from.cp >= cp_count)) {
         // Not sure if I should be checking for any of this.
-        //Print("Bad params. Needles.len={}, haystack.len={}, from={?}\n",
-        //.{ needles.len, cp_count, from });
         return null;
     }
     const haystack = sd.codepoints.items[from.cp..];
@@ -629,7 +628,6 @@ pub fn findManySimd(self: String, needles: ConstCpSlice, from_index: ?Index, com
     const first_needle = needles[0];
     while (pos < cp_count) {
         const found_abs = self.findOneSimd(first_needle, pos, depth) orelse {
-            //Print("{s}() found nothing\n", .{@src().fn_name});
             return null;
         };
 
@@ -658,7 +656,7 @@ pub fn findManySimd(self: String, needles: ConstCpSlice, from_index: ?Index, com
         pos = found_abs + 1;
     }
 
-    //Print("{s} found nothing, at end of func\n", .{@src().fn_name});
+    //mtl.debug(@src(), "Found nothing, at end of func", .{});
     return null;
 }
 
@@ -943,8 +941,6 @@ pub fn lastIndexOf2(self: String, needles: CpSlice, start: ?Index, comptime vect
     const cp_count = sd.codepoints.items.len;
     if ((needles.len == 0) or (needles.len > cp_count) or (from.cp == 0)) {
         // Not sure if I should be checking for any of this.
-        // Print("Bad args. Needles.len={}, haystack.len={}, from={}\n",
-        // .{ needles.len, cp_count, from });
         return null;
     }
     const haystack = sd.codepoints.items[0..from.cp];
@@ -953,7 +949,6 @@ pub fn lastIndexOf2(self: String, needles: CpSlice, start: ?Index, comptime vect
     const first_needle = needles[0];
     while (pos > 0) {
         const found_index = self.findOneSimdFromEnd(first_needle, pos, vec_len) orelse {
-            //Print("{s}() found nothing\n", .{@src().fn_name});
             return null;
         };
         if (found_index + needles.len >= haystack.len) {
@@ -984,7 +979,6 @@ pub fn lastIndexOf2(self: String, needles: CpSlice, start: ?Index, comptime vect
         pos = found_index; // the next search happens to the left of `found_index`
     }
 
-    //Print("{s} found nothing, at end of func\n", .{@src().fn_name});
     return null;
 }
 
@@ -1006,21 +1000,21 @@ pub fn parseFloat(self: String, comptime T: type) !T {
 }
 
 pub threadlocal var string_theme = Theme.Dark;
-pub fn print(self: String, out: anytype, msg: ?[]const u8) !void {
-    try self.print2(out, string_theme, msg);
+pub fn print(self: String, src: std.builtin.SourceLocation, msg: ?[]const u8) !void {
+    try self.print2(src, string_theme, msg);
 }
 
-pub fn print2(self: String, out: anytype, theme: Theme, msg: ?[]const u8) !void {
+pub fn print2(self: String, src: std.builtin.SourceLocation, theme: Theme, msg: ?[]const u8) !void {
     const color = if (theme == Theme.Light) COLOR_DEFAULT else COLOR_GREEN;
     const info = if (msg) |k| k else "String.print(): ";
-    out.print("{s}{s}\"{s}\"{s}\n", .{ info, color, self, COLOR_DEFAULT });
+    mtl.debug(src, "{s}{s}\"{s}\"", .{ info, color, self});
 }
 
-pub fn printInfo(self: String, out: anytype, msg: ?[] const u8) !void {
+pub fn printInfo(self: String, src: std.builtin.SourceLocation, msg: ?[] const u8) !void {
     const color = if (string_theme == Theme.Light) COLOR_DEFAULT else COLOR_GREEN;
     const info = if (msg) |k| k else "String.printInfo(): ";
 
-    out.print("{s}[gr={},cp={}]={s}\"{s}\"{s}\n", .{ info, self.size(), self.size_cp(), color, self, COLOR_DEFAULT });
+    mtl.debug(src, "{s}[gr={},cp={}]={s}\"{s}\"", .{ info, self.size(), self.size_cp(), color, self});
 }
 
 const print_format_str = "{s}{}{s}{s}[{s}]{s}{s}{s}{s} ";
@@ -1029,7 +1023,8 @@ const cr_chars = UNDERLINE_START ++ "(CR)" ++ UNDERLINE_END;
 const crnl_chars = UNDERLINE_START ++ "(CR/LF)" ++ UNDERLINE_END;
 
 fn printCpBuf(out: anytype, cp_buf: ArrayList(Codepoint), gr_index: isize,
-see_as: SeeAs, attr: Attr, theme: Theme) !void {
+see_as: SeeAs, attr: Attr) !void {
+    const theme = string_theme;
     if (cp_buf.items.len == 0)
         return;
 
@@ -1069,36 +1064,38 @@ see_as: SeeAs, attr: Attr, theme: Theme) !void {
     out.print(print_format_str, .{ COLOR_BLUE, gr_index, COLOR_DEFAULT, final_fg, cp_as_str, end_final_fg, num_color, codepoints_str, COLOR_DEFAULT });
 }
 
-pub fn printCodepoints(self: String, out: anytype, theme: Theme) !void {
+pub fn printCodepoints(self: String, src: std.builtin.SourceLocation) !void {
     const sd = self.d orelse return Error.Alloc;
     var cp_buf = ArrayList(Codepoint).init(ctx.a);
     defer cp_buf.deinit();
-    out.print("Codepoints: ", .{});
+    const out = std.debug;
+    try self.print(src, "Codepoints: ");
     for (sd.codepoints.items, 0..) |cp, i| {
         if (i > 255) {
             break;
         }
         const attr = if (sd.graphemes.items[i] == 1) Attr.Grapheme else Attr.Codepoint;
         try cp_buf.append(cp);
-        try printCpBuf(out, cp_buf, @intCast(i), SeeAs.CodepointOnly, attr, theme);
+        try printCpBuf(out, cp_buf, @intCast(i), SeeAs.CodepointOnly, attr);
         cp_buf.clearRetainingCapacity();
     }
     out.print("\n", .{});
 }
 
-pub fn printGraphemes(self: String, out: anytype, theme: Theme) !void {
+pub fn printGraphemes(self: String, src: std.builtin.SourceLocation) !void {
     const sd = self.d orelse return Error.Alloc;
     var cp_buf = std.ArrayList(Codepoint).init(ctx.a);
     defer cp_buf.deinit();
     var gr_index: isize = -1;
-    out.print("Graphemes: ", .{});
+    const out = std.debug;
+    try self.print(src, "Graphemes: ");
     for (sd.codepoints.items, 0..) |cp, i| {
         if (i > 255) {
             break;
         }
 
         if (sd.graphemes.items[i] == 1) {
-            try printCpBuf(out, cp_buf, gr_index, SeeAs.PartOfGrapheme, Attr.Ignore, theme);
+            try printCpBuf(out, cp_buf, gr_index, SeeAs.PartOfGrapheme, Attr.Ignore);
             gr_index += 1;
             cp_buf.clearRetainingCapacity();
         }
@@ -1106,7 +1103,7 @@ pub fn printGraphemes(self: String, out: anytype, theme: Theme) !void {
         try cp_buf.append(cp);
     }
 
-    try printCpBuf(out, cp_buf, gr_index, SeeAs.PartOfGrapheme, Attr.Ignore, theme);
+    try printCpBuf(out, cp_buf, gr_index, SeeAs.PartOfGrapheme, Attr.Ignore);
     out.print("\n", .{});
 }
 
@@ -1114,15 +1111,12 @@ pub fn printFind(self: String, needles: []const u8, from: usize, cs: CaseSensiti
     const index = self.indexOf(needles, from, cs);
     const needles_str = String.From(needles) catch return null;
     defer needles_str.deinit();
-    Print("{s}(): \"{s}(len={})\"=>{?}, haystack_len={}\n", .{ @src().fn_name, needles, needles_str.size(), index, self.size() });
-    //self.printGraphemes(std.debug) catch {};
     return index;
 }
 
 pub fn remove(self: *String, needles: []const u8) !void {
     const from = self.indexOf(needles, 0, CaseSensitive.Yes);
     const count = countGraphemesRaw(ctx.a, needles);
-    //Print("{s}(): grapheme count={}\n", .{@src().fn_name, count});
     try self.removeByIndex(from, count);
 }
 
@@ -1211,12 +1205,10 @@ pub fn split(self: String, sep: []const u8, cs: CaseSensitive, kep: KeepEmptyPar
 
     var from = Index.strStart();
     while (self.indexOfCp(sep, from, cs)) |found| {
-        //Print("{s}(): found={}\n", .{ @src().fn_name, found });
         const s = try self.mid(from.gr, @intCast(found.gr - from.gr));
         from = Index{ .cp = found.cp + 1, .gr = found.gr + 1 };
 
         if (kep == KeepEmptyParts.No and s.isEmpty()) {
-            //try s.print(std.debug, "Skipping: ");
             s.deinit();
             continue;
         }
@@ -1345,7 +1337,7 @@ fn readSize(in: anytype, msg: []const u8) !usize {
     var read_count: u16 = 0;
     const b1: u8 = try in.readBits(u8, @bitSizeOf(u8), &read_count);
     if (read_count != @bitSizeOf(u8)) {
-        Print("{s}FN={s}:{}: msg=\"{s}\" count={}, b1={}{s}\n", .{ COLOR_RED, @src().fn_name, @src().line, msg, read_count, b1, COLOR_DEFAULT });
+        mtl.debug(@src(), "msg=\"{s}\" count={}, b1={}", .{msg, read_count, b1});
     }
     if (b1 == 0)
         return 0;
@@ -1357,11 +1349,11 @@ fn readSize(in: anytype, msg: []const u8) !usize {
 
     _ = try in.readBits(u8, @bitSizeOf(u8), &read_count);
     if (read_count != @bitSizeOf(u8)) {
-        Print("{s}FN(u8/u64)={s}:{}: msg=\"{s}\" read_count={}{s}\n", .{ COLOR_RED, @src().fn_name, @src().line, msg, read_count, COLOR_DEFAULT });
+        mtl.debug(@src(), "msg=\"{s}\" read_count={}", .{msg, read_count});
     }
     const z = try in.readBits(u64, @bitSizeOf(u64), &read_count);
     if (read_count != @bitSizeOf(u64)) {
-        Print("{s}FN(u64)={s}:{}: msg=\"{s}\" read_count={}{s}\n", .{ COLOR_RED, @src().fn_name, @src().line, msg, read_count, COLOR_DEFAULT });
+        mtl.debug(@src(), "msg=\"{s}\" read_count={}", .{msg, read_count});
     }
     return z;
 }
@@ -1398,8 +1390,8 @@ pub fn writeTo(self: String, bitw: anytype, f: Flush) !void {
 
     try writeSize(bitw, sd.grapheme_count);
     if (f == Flush.Yes) {
-        const rembits = 8 - bitw.count;
-        std.debug.print("Remaining bits: {}\n", .{rembits});
+        //const rembits = 8 - bitw.count;
+        //mtl.debug(@src(), "Remaining bits: {}\n", .{rembits});
         try bitw.flushBits();
     }
 }
@@ -1408,7 +1400,6 @@ pub fn readFrom(bits: anytype) !String {
     //var bits = std.io.bitReader(.big, in);
     var read_count: u16 = 0;
     const cp_count: usize = try readSize(bits, "codepoints");
-    std.debug.print("{s}(): cp count: {}\n", .{@src().fn_name, cp_count});
     var ret_str = String{};
     if (cp_count == 0)
         return ret_str;
@@ -1417,13 +1408,13 @@ pub fn readFrom(bits: anytype) !String {
     for (0..cp_count) |_| {
         try sd.codepoints.append(try bits.readBits(Codepoint, @bitSizeOf(Codepoint), &read_count));
         if (read_count != @bitSizeOf(Codepoint)) {
-            Print("{s}codepoint bit count read {}{s}\n", .{ COLOR_RED, read_count, COLOR_DEFAULT });
+            mtl.warn(@src(), "Codepoint bit count read={}", .{read_count});
         }
     }
     for (0..cp_count) |_| {
         try sd.graphemes.append(try bits.readBits(u1, @bitSizeOf(u1), &read_count));
         if (read_count != @bitSizeOf(u1)) {
-            Print("{s}grapheme bit count read {}{s}\n", .{ COLOR_RED, read_count, COLOR_DEFAULT });
+            mtl.warn(@src(), "Grapheme bit count read={}", .{read_count});
         }
     }
 
@@ -1525,7 +1516,6 @@ pub fn trimLeft(self: *String) !void {
         const cp = sd.codepoints.items[i];
         if (std.mem.indexOfScalar(u21, &CodepointsToTrim, cp)) |index| {
             _ = index;
-            //Print("{s}(): {}\n", .{ @src().fn_name, index });
             found_count += 1;
         } else {
             break;

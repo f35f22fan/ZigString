@@ -58,13 +58,27 @@ Example:<br/>
     try expect(sub2.equals("lo, World!", CaseSensitive.Yes));
     
     // charAt() usage:
-    const str_ru = try String.From("Жизнь");
-    defer str_ru.deinit();
-    try expect(str_ru.charAt(0).?.eq(try String.toCp("Ж")));
-    try expect(str_ru.charAt(4).?.eq(try String.toCp("ь")));
+    const both_ways = try String.From("Jos\u{65}\u{301}"); // "José"
+    defer both_ways.deinit();
+    var index = String.strStart();
+    while (index.next(both_ways)) |idx| { // ends up printing "José"
+        if (both_ways.charAtIndex(idx)) |grapheme| {
+            std.debug.print("{}", .{grapheme});
+        }
+    }
+    std.debug.print("\n", .{});
+    index = both_ways.strEnd();
+    while (index.prev(both_ways)) |idx| { // ends up printing "ésoJ"
+        if (both_ways.charAtIndex(idx)) |grapheme| {
+            std.debug.print("{}", .{grapheme});
+        }
+    }
+    std.debug.print("\n", .{});
 
     const str_ch = try String.From("好久不见，你好吗？");
     defer str_ch.deinit();
+    try str_ch.printGraphemes(@src());
+    try str_ch.printCodepoints(@src());
     try expect(str_ch.charAt(0).?.eqCp("好"));
     try expect(str_ch.charAt(8).?.eqCp("？"));
     try expect(!str_ch.charAt(1).?.eqCp("A"));

@@ -265,8 +265,8 @@ test "Split" {
     const main_str = try String.From(JoseStr);
     defer main_str.deinit();
     // the next 2 functions help the developer to visually dissect a string:
-    try main_str.printGraphemes(std.debug, theme);
-    try main_str.printCodepoints(std.debug, theme);
+    try main_str.printGraphemes(@src());
+    try main_str.printCodepoints(@src());
 
     // split(..) returns !ArrayList(String)
     const words = try main_str.split(" ", CaseSensitive.Yes, KeepEmptyParts.No);
@@ -429,8 +429,8 @@ test "Char At" {
 
     const str_ch = try String.From("好久不见，你好吗？");
     defer str_ch.deinit();
-    try str_ch.printGraphemes(std.debug, theme);
-    try str_ch.printCodepoints(std.debug, theme);
+    try str_ch.printGraphemes(@src());
+    try str_ch.printCodepoints(@src());
     try expect(str_ch.charAt(0).?.eqCp("好"));
     try expect(str_ch.charAt(8).?.eqCp("？"));
     try expect(!str_ch.charAt(1).?.eqCp("A"));

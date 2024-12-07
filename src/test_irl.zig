@@ -7,6 +7,13 @@ const expectEqualStrings = std.testing.expectEqualStrings;
 const alloc = std.testing.allocator;
 
 const io = @import("io.zig");
+const mtl = @import("mtl.zig");
+
+const c = @cImport({
+    // See https://github.com/ziglang/zig/issues/515
+    @cDefine("_NO_CRT_STDIO_INLINE", "1");
+    @cInclude("stdio.h");
+});
 
 const Normalize = @import("Normalize");
 const CaseFold = @import("CaseFold");
@@ -40,19 +47,16 @@ const BOLD_END = "\x1B[0m";
 const UNDERLINE_START = "\x1B[4m";
 const UNDERLINE_END = "\x1B[0m";
 
-const Truncate = enum(u1) {
-    Yes,
-    No
-};
+const Truncate = enum(u1) { Yes, No };
 
 fn ticker(step: u8) !void {
     _ = step;
     String.ctx = try Context.New(alloc);
-    defer String.ctx.deinit();   
+    defer String.ctx.deinit();
     var s = try String.From("Hello, World!");
     try s.append("...From another thread");
     defer s.deinit();
-    std.debug.print("{s}():==================== {}\n", .{@src().fn_name, s});
+    std.debug.print("{s}():==================== {}\n", .{ @src().fn_name, s });
     // while (true) {
     //     std.time.sleep(1 * std.time.ns_per_s);
     //     tick += @as(isize, step);
@@ -60,7 +64,6 @@ fn ticker(step: u8) !void {
 }
 
 var tick: isize = 0;
-
 
 test "Desktop File" {
     String.ctx = try Context.New(alloc);
@@ -71,7 +74,7 @@ test "Desktop File" {
 
     // const home_cstr = try io.getEnv(alloc, io.Folder.Home);
     // defer alloc.free(home_cstr);
-    
+
     // var fullpath = try String.From(home_cstr);
     // defer fullpath.deinit();
     // try fullpath.append("/Desktop/Firefox.desktop");
@@ -82,55 +85,55 @@ test "Desktop File" {
     defer chromium.deinit();
 
     if (chromium.getName(null)) |value| {
-        try value.print(std.debug, "Name(default): ");
+        try value.print(@src(), "Name(default): ");
     }
 
     if (chromium.getName("ru")) |value| {
-        try value.print(std.debug, "Name(ru): ");
+        try value.print(@src(), "Name(ru): ");
     }
 
     if (chromium.getName("zh_CN")) |value| {
-        try value.print(std.debug, "Name(zh_CN): ");
+        try value.print(@src(), "Name(zh_CN): ");
     }
 
     if (chromium.getGenericName("zh_CN")) |value| {
-        try value.print(std.debug, "Generic Name(zh_CN): ");
+        try value.print(@src(), "Generic Name(zh_CN): ");
     }
 
     if (chromium.getComment("zh_CN")) |value| {
-        try value.print(std.debug, "Comment(zh_CN): ");
+        try value.print(@src(), "Comment(zh_CN): ");
     }
 
     if (chromium.getIcon()) |value| {
-        try value.print(std.debug, "Icon: ");
+        try value.print(@src(), "Icon: ");
     }
 
     if (chromium.getActions()) |value| {
-        try value.print(std.debug, "Actions: ");
+        try value.print(@src(), "Actions: ");
     }
 
     if (chromium.getExec()) |value| {
-        try value.print(std.debug, "Exec: ");
+        try value.print(@src(), "Exec: ");
     }
 
     if (chromium.getField("Exec", null, "Desktop Action new-private-window")) |value| {
-        try value.print(std.debug, "Exec(Desktop Action new-private-window): ");
+        try value.print(@src(), "Exec(Desktop Action new-private-window): ");
     }
 
     if (chromium.getMimeTypes()) |value| {
-        try value.print(std.debug, "Mimetypes: ");
+        try value.print(@src(), "Mimetypes: ");
     }
 
     if (chromium.getCategories()) |value| {
-        try value.print(std.debug, "Categories: ");
+        try value.print(@src(), "Categories: ");
     }
 }
 
 fn writeString(input_str: []const u8, writer: anytype, flush: String.Flush) !void {
     const s = try String.From(input_str);
     defer s.deinit();
-    try s.printGraphemes(std.debug, theme);
-    try s.printCodepoints(std.debug, theme);
+    try s.printGraphemes(@src());
+    try s.printCodepoints(@src());
     try s.writeTo(writer, flush);
 
     // var m = [_]u8{0} ** 256;
@@ -142,16 +145,16 @@ fn writeString(input_str: []const u8, writer: anytype, flush: String.Flush) !voi
     // }
 }
 
-fn readString(reader: anytype) !void {
+fn readString(reader: anytype, correct: []const u8) !void {
     const read_str = try String.readFrom(reader);
     defer read_str.deinit();
-    //try expect(read_str.eq(input));
-    try read_str.printInfo(std.debug, "Read str: ");
+    try expect(read_str.eq(correct));
+    //try read_str.printInfo(@src(), "Read str: ");
 }
 
 test "Binary read/write string to file" {
-// This test reads/writes the string not in UTF-8,
-// but in its internal binary format.
+    // This test reads/writes the string not in UTF-8,
+    // but in its internal binary format.
     String.ctx = try Context.New(alloc);
     defer String.ctx.deinit();
 
@@ -160,23 +163,30 @@ test "Binary read/write string to file" {
     var fullpath = try String.From(home_cstr);
     defer fullpath.deinit();
     try fullpath.append("/out.txt");
-    //try fullpath.print(std.debug, null);
+    //try fullpath.print(@src(), "Filepath: ");
     const fp = try fullpath.toString();
     defer fp.deinit();
 
-    const file = try std.fs.createFileAbsolute(fp.items, .{.truncate = true, .read = true});
-    var writer = file.writer();
-    var bitw = std.io.bitWriter(.big, &writer);
-    try writeString("Jos\u{65}\u{301} se fu\u{65}\u{301}",
-    &bitw, String.Flush.No);
-    try writeString("Hello", &bitw, String.Flush.Yes);
-    file.close();
+    const str1 = "Jos\u{65}\u{301} se fu\u{65}\u{301}";
+    const str2 = "Hello";
+    const str3 = "Добрый день";
+    {
+        const file_out = try std.fs.createFileAbsolute(fp.items, .{ .truncate = true, .read = true });
+        defer file_out.close();
+        var bitw = std.io.bitWriter(.big, file_out.writer());
+        // When writing multiple strings in a row only the last write should
+        // equal=Flush.Yes because it flushes extra empty bits to
+        // fill the last byte.
+        try writeString(str1, &bitw, String.Flush.No);
+        try writeString(str2, &bitw, String.Flush.No);
+        try writeString(str3, &bitw, String.Flush.Yes);
+    }
 
     const file_in = try std.fs.openFileAbsolute(fp.items, .{});
     defer file_in.close();
 
-    var reader = file_in.reader();
-    var bits = std.io.bitReader(.big, &reader);
-    try readString(&bits);
-    try readString(&bits);
+    var bits = std.io.bitReader(.big, file_in.reader());
+    try readString(&bits, str1);
+    try readString(&bits, str2);
+    try readString(&bits, str3);
 }

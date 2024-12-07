@@ -155,7 +155,7 @@ pub fn init(self: *DesktopFile) !void {
 
     for (lines.items) |line| {
         if (line.startsWithChar("#")) {
-            try line.print(std.debug, "Comment: ");
+            try line.print(@src(), "Comment: ");
             continue;
         }
         if (line.isBetween("[", "]")) |group_name| {

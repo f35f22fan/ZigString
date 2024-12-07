@@ -104,6 +104,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    test_irl.linkLibC();
     //test_irl.root_module.addImport("zigstr", zigstr.module("zigstr"));
     test_irl.root_module.addImport("code_point", zg.module("code_point"));
     test_irl.root_module.addImport("grapheme", zg.module("grapheme"));
