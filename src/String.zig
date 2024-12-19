@@ -8,6 +8,7 @@ const Allocator = std.mem.Allocator;
 const BitWriter = std.io.bit_writer.BitWriter;
 
 const mtl = @import("mtl.zig");
+const Num = @import("Num.zig");
 
 const zg_codepoint = @import("code_point");
 const zg_grapheme = @import("grapheme");
@@ -378,6 +379,34 @@ pub fn Clone(self: String) !String {
     return String{
         .d = try sd.Clone(),
     };
+}
+
+pub fn computeSizeInBytes(self: String) u64 {
+    const bits_total: u64 = self.computeSizeInBits();
+    var byte_count = bits_total / 8;
+    if ((bits_total % 8) != 0) {
+        byte_count += 1;
+    }
+    return byte_count;
+}
+
+pub fn computeSizeInBits(self: String) u64 {
+    const cp_count = self.size_cp();
+    if (cp_count == 0)
+        return @bitSizeOf(u8);
+    
+    var total_bits = cp_count * @bitSizeOf(Codepoint) // codepoints
+    + cp_count; // the grapheme bits
+    total_bits += @bitSizeOf(u8); // binary header
+    if (cp_count <= 0b0011_1111) {
+        total_bits += @bitSizeOf(u8); // grapheme_count
+    } else {
+        total_bits += @bitSizeOf(u64) * 2; // cp_count + grapheme_count
+    }
+
+    //total_bits += 4; // 4 bits to represent possible 7 extra bits
+
+    return total_bits;
 }
 
 inline fn countGraphemes(slice: GraphemeSlice) usize {
@@ -1013,8 +1042,11 @@ pub fn print2(self: String, src: std.builtin.SourceLocation, theme: Theme, msg: 
 pub fn printInfo(self: String, src: std.builtin.SourceLocation, msg: ?[] const u8) !void {
     const color = if (string_theme == Theme.Light) COLOR_DEFAULT else COLOR_GREEN;
     const info = if (msg) |k| k else "String.printInfo(): ";
-
-    mtl.debug(src, "{s}[gr={},cp={}]={s}\"{s}\"", .{ info, self.size(), self.size_cp(), color, self});
+    if (self.size() <= 255) {
+        mtl.debug(src, "{s}[gr={},cp={}]={s}\"{s}\"", .{ info, Num.New(self.size()), Num.New(self.size_cp()), color, self});
+    } else {
+        mtl.debug(src, "{s}[gr={},cp={}]={s}", .{ info, Num.New(self.size()), Num.New(self.size_cp()), color});
+    }
 }
 
 const print_format_str = "{s}{}{s}{s}[{s}]{s}{s}{s}{s} ";
@@ -1022,8 +1054,7 @@ const nl_chars = UNDERLINE_START ++ "(LF)" ++ UNDERLINE_END;
 const cr_chars = UNDERLINE_START ++ "(CR)" ++ UNDERLINE_END;
 const crnl_chars = UNDERLINE_START ++ "(CR/LF)" ++ UNDERLINE_END;
 
-fn printCpBuf(out: anytype, cp_buf: ArrayList(Codepoint), gr_index: isize,
-see_as: SeeAs, attr: Attr) !void {
+fn printCpBuf(out: anytype, cp_buf: ArrayList(Codepoint), gr_index: isize, see_as: SeeAs, attr: Attr) !void {
     const theme = string_theme;
     if (cp_buf.items.len == 0)
         return;
@@ -1328,83 +1359,72 @@ pub fn substring(self: String, start: usize, count: isize) !String {
     return s;
 }
 
-//const HintEmpty: u2 = 0;
-const HintByte: u8 = 1 << 6;
-const HintU16: u8 = 2 << 6;
-const HintU64: u8 = 3 << 6;
+const HintByte: u8 = 0b0100_0000;
+const HintU64: u8 =  0b1000_0000;
+const HintMask: u8 = 0b1100_0000;
+const MaxByte: u8 = 0b0011_1111;
 
 fn readSize(in: anytype, msg: []const u8) !usize {
     var read_count: u16 = 0;
-    const b1: u8 = try in.readBits(u8, @bitSizeOf(u8), &read_count);
+    const value: u8 = try in.readBits(u8, @bitSizeOf(u8), &read_count);
     if (read_count != @bitSizeOf(u8)) {
-        mtl.debug(@src(), "msg=\"{s}\" count={}, b1={}", .{msg, read_count, b1});
+        mtl.warn(@src(), "msg=\"{s}\" count={}, value={}",
+         .{msg, read_count, value});
     }
-    if (b1 == 0)
+    if (value == 0)
         return 0;
 
-    if ((b1 & HintByte) == HintByte) {
-        const retval = b1 & ~HintByte;
-        return retval;
+    if ((value & HintMask) == HintByte) {
+        return value & ~HintMask;
     }
 
-    _ = try in.readBits(u8, @bitSizeOf(u8), &read_count);
-    if (read_count != @bitSizeOf(u8)) {
-        mtl.debug(@src(), "msg=\"{s}\" read_count={}", .{msg, read_count});
-    }
-    const z = try in.readBits(u64, @bitSizeOf(u64), &read_count);
+    const count = try in.readBits(u64, @bitSizeOf(u64), &read_count);
     if (read_count != @bitSizeOf(u64)) {
         mtl.debug(@src(), "msg=\"{s}\" read_count={}", .{msg, read_count});
     }
-    return z;
+
+    return count;
 }
 
 fn writeSize(out: anytype, count: u64) !void {
     if (count == 0) {
         try out.writeBits(@as(u8, 0), @bitSizeOf(u8));
-    } else if (count <= 0b0011_1111) {
+    } else if (count <= MaxByte) {
+        //mtl.debug(@src(), "writing as byte={}", .{count});
         var z: u8 = @intCast(count);
         z |= HintByte;
         try out.writeBits(z, @bitSizeOf(u8));
     } else {
+        //mtl.debug(@src(), "writing as u64={}", .{count});
         try out.writeBits(HintU64, @bitSizeOf(u8));
         try out.writeBits(count, @bitSizeOf(u64));
     }
 }
 
-pub fn writeTo(self: String, bitw: anytype, f: Flush) !void {
-    //var bitw = std.io.bitWriter(.big, out); //mem_out_be.writer());
-    const cp_count = self.size_cp();
-    try writeSize(bitw, cp_count);
-
-    if (cp_count == 0)
-        return;
-
-    const sd = self.d orelse return;
-    for (sd.codepoints.items) |cp| {
-        try bitw.writeBits(cp, @bitSizeOf(@TypeOf(cp)));
-    }
-
-    for (sd.graphemes.items) |g| {
-        try bitw.writeBits(g, 1);
-    }
-
-    try writeSize(bitw, sd.grapheme_count);
-    if (f == Flush.Yes) {
-        //const rembits = 8 - bitw.count;
-        //mtl.debug(@src(), "Remaining bits: {}\n", .{rembits});
-        try bitw.flushBits();
-    }
-}
-
 pub fn readFrom(bits: anytype) !String {
-    //var bits = std.io.bitReader(.big, in);
     var read_count: u16 = 0;
-    const cp_count: usize = try readSize(bits, "codepoints");
+    //mtl.debug(@src(), "--------------Bits.count={}", .{bits.count});
+    if (bits.count > 0) {
+        const rem = bits.count;//8 - bits.count;
+        _ = try bits.readBits(u64, rem, &read_count);
+    }
+    
+    const cp_count: usize = try readSize(bits, "codepoints"); // cp count
+    //mtl.debug(@src(), "cp_count: {X}", .{cp_count});
     var ret_str = String{};
     if (cp_count == 0)
         return ret_str;
-    try ret_str.ensureTotalCapacity(cp_count);
+
     var sd = try ret_str.getPointer();
+    if (cp_count <= MaxByte) {
+        sd.grapheme_count = try bits.readBits(u8, @bitSizeOf(u8), &read_count);
+    } else {
+        sd.grapheme_count = try bits.readBits(u64, @bitSizeOf(u64), &read_count);
+    }
+    
+    //mtl.debug(@src(), "gr_count={}, cp_count={}", .{Num.New(sd.grapheme_count), Num.New(cp_count)});
+    try ret_str.ensureTotalCapacity(cp_count);
+    
     for (0..cp_count) |_| {
         try sd.codepoints.append(try bits.readBits(Codepoint, @bitSizeOf(Codepoint), &read_count));
         if (read_count != @bitSizeOf(Codepoint)) {
@@ -1418,8 +1438,30 @@ pub fn readFrom(bits: anytype) !String {
         }
     }
 
-    sd.grapheme_count = try readSize(bits, "grapheme count");
     return ret_str;
+}
+
+pub fn writeTo(self: String, bitw: anytype) !void {
+    const cp_count = self.size_cp();
+    try writeSize(bitw, cp_count); // codepoints count
+
+    if (cp_count == 0)
+        return;
+    
+    const sd = self.d orelse return;
+    if (cp_count <= MaxByte) {
+        try bitw.writeBits(sd.grapheme_count, @bitSizeOf(u8));
+    } else {
+        try bitw.writeBits(sd.grapheme_count, @bitSizeOf(u64));
+    }
+    
+    for (sd.codepoints.items) |cp| { // the codepoints (as u21)
+        try bitw.writeBits(cp, @bitSizeOf(@TypeOf(cp)));
+    }
+
+    for (sd.graphemes.items) |g| { // the graphemes (as one bit per codepoint)
+        try bitw.writeBits(g, 1);
+    }
 }
 
 pub fn toCp(input: []const u8) !Codepoint {

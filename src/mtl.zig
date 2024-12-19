@@ -3,7 +3,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 fn print(out: anytype, comptime fg: []const u8, src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
-    nosuspend out.print("{s}{s}:{} {s}", .{fg, src.file, src.line, COLOR_DEFAULT}) catch {};
+    nosuspend out.print("{s}{s}{s}[{s}]{s}:{d} {s}",
+    .{fg, src.file, COLOR_CYAN, src.fn_name, fg, src.line, COLOR_DEFAULT}) catch {};
     nosuspend out.print(fmt, args) catch {};
     nosuspend out.print("{s}\n", .{COLOR_DEFAULT}) catch {};
 }
@@ -30,6 +31,10 @@ pub inline fn warn(src: std.builtin.SourceLocation, comptime fmt: []const u8, ar
 
 pub inline fn tbd(src: std.builtin.SourceLocation) void {
     debugger(COLOR_MAGENTA, src, "{s}", .{"TBD"});
+}
+
+pub fn separator(src: std.builtin.SourceLocation, comptime chars: []const u8) void {
+    debug(src, chars ** 30, .{});
 }
 
 

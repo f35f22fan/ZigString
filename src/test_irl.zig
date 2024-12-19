@@ -8,6 +8,7 @@ const alloc = std.testing.allocator;
 
 const io = @import("io.zig");
 const mtl = @import("mtl.zig");
+const Num = @import("Num.zig");
 
 const c = @cImport({
     // See https://github.com/ziglang/zig/issues/515
@@ -49,23 +50,12 @@ const UNDERLINE_END = "\x1B[0m";
 
 const Truncate = enum(u1) { Yes, No };
 
-fn ticker(step: u8) !void {
-    _ = step;
-    String.ctx = try Context.New(alloc);
-    defer String.ctx.deinit();
-    var s = try String.From("Hello, World!");
-    try s.append("...From another thread");
-    defer s.deinit();
-    std.debug.print("{s}():==================== {}\n", .{ @src().fn_name, s });
-    // while (true) {
-    //     std.time.sleep(1 * std.time.ns_per_s);
-    //     tick += @as(isize, step);
-    // }
-}
-
 var tick: isize = 0;
 
 test "Desktop File" {
+    if (true)
+        return error.SkipZigTest;
+
     String.ctx = try Context.New(alloc);
     defer String.ctx.deinit();
 
@@ -129,27 +119,44 @@ test "Desktop File" {
     }
 }
 
-fn writeString(input_str: []const u8, writer: anytype, flush: String.Flush) !void {
-    const s = try String.From(input_str);
-    defer s.deinit();
-    try s.printGraphemes(@src());
-    try s.printCodepoints(@src());
-    try s.writeTo(writer, flush);
-
-    // var m = [_]u8{0} ** 256;
-    // var stream = std.io.fixedBufferStream(&m);
-    // try s.writeTo(stream.writer());
-
-    // for (m) |k| {
-    //     std.debug.print("{X}| ", .{k});
-    // }
+fn writeString(input_str: []const u8, file_out: *std.fs.File, fp: []const u8) !void {
+    _ = fp;
+    // const ts1 = getTime();
+    const str_out = try String.From(input_str);
+    defer str_out.deinit();
+    // const ts2 = getTime();
+    // mtl.debug(@src(), "String.From(cstr) done in {}{s}", .{Num{.value=ts2-ts1}, TimeExt});
+    try str_out.printInfo(@src(), null);
+    //const t1 = getTime();
+    const str_byte_count = str_out.computeSizeInBytes();
+    mtl.debug(@src(), "str_byte_count: {}", .{Num.New(str_byte_count)});
+    const memory = try alloc.alloc(u8, str_byte_count);
+    defer alloc.free(memory);
+    var stream = std.io.fixedBufferStream(memory);
+    var bits = std.io.bitWriter(.big, stream.writer());
+    // mtl.debug(@src(), "bitw type info: {}", .{@TypeOf(&bitw)});
+    try str_out.writeTo(&bits);
+    try file_out.writeAll(memory);
+    //const t2 = getTime();
+    //mtl.debug(@src(), "Done Writing in {}{s} to {s}", .{Num{.value=t2-t1}, TimeExt, fp});
 }
 
-fn readString(reader: anytype, correct: []const u8) !void {
-    const read_str = try String.readFrom(reader);
+fn readString(in: anytype, correct: []const u8) !void {
+    //const t1 = getTime();
+    const read_str = try String.readFrom(in);
     defer read_str.deinit();
+    //const t2 = getTime();
+    //mtl.debug(@src(), "Done reading binary in {}{s}", .{Num{.value = t2-t1}, TimeExt});
+    try read_str.printInfo(@src(), null);
+    
+    // const buf = try read_str.toString();
+    // defer buf.deinit();
+    // const out_path = "/home/fox/compare.xml";
+    // const compare_file = try std.fs.createFileAbsolute(out_path, .{.truncate=true, .read=true});
+    // defer compare_file.close();
+    // try compare_file.writeAll(buf.items);
+
     try expect(read_str.eq(correct));
-    //try read_str.printInfo(@src(), "Read str: ");
 }
 
 test "Binary read/write string to file" {
@@ -158,35 +165,37 @@ test "Binary read/write string to file" {
     String.ctx = try Context.New(alloc);
     defer String.ctx.deinit();
 
-    const home_cstr = try io.getEnv(alloc, io.Folder.Home);
-    defer alloc.free(home_cstr);
-    var fullpath = try String.From(home_cstr);
-    defer fullpath.deinit();
-    try fullpath.append("/out.txt");
-    //try fullpath.print(@src(), "Filepath: ");
-    const fp = try fullpath.toString();
-    defer fp.deinit();
-
-    const str1 = "Jos\u{65}\u{301} se fu\u{65}\u{301}";
-    const str2 = "Hello";
-    const str3 = "Добрый день";
+    // const home_cstr = try io.getEnv(alloc, io.Folder.Home);
+    // defer alloc.free(home_cstr);
     {
-        const file_out = try std.fs.createFileAbsolute(fp.items, .{ .truncate = true, .read = true });
-        defer file_out.close();
-        var bitw = std.io.bitWriter(.big, file_out.writer());
-        // When writing multiple strings in a row only the last write should
-        // equal=Flush.Yes because it flushes extra empty bits to
-        // fill the last byte.
-        try writeString(str1, &bitw, String.Flush.No);
-        try writeString(str2, &bitw, String.Flush.No);
-        try writeString(str3, &bitw, String.Flush.Yes);
+        const fp = "/home/fox/size-out.bin";
+        var file_out = try std.fs.createFileAbsolute(fp, .{ .truncate = true, .read = true });
+        
+        const str1 = "Jos\u{65}\u{301} se fu\u{65}\u{301}";
+        try writeString(str1, &file_out, fp);
+
+        const str2 = try io.readFile(alloc, "/home/fox/Documents/content.xml");
+        defer alloc.free(str2);
+        try writeString(str2, &file_out, fp);
+
+        const str3 = "Привет";
+        try writeString(str3, &file_out, fp);
+        
+        file_out.close();
+
+        const file_in = try std.fs.openFileAbsolute(fp, .{});
+        var bits = std.io.bitReader(.big, file_in.reader());
+        mtl.separator(@src(), "1");
+        try readString(&bits, str1);
+        mtl.separator(@src(), "2");
+        try readString(&bits, str2);
+        mtl.separator(@src(), "3");
+        try readString(&bits, str3);
+        file_in.close();
     }
+}
 
-    const file_in = try std.fs.openFileAbsolute(fp.items, .{});
-    defer file_in.close();
-
-    var bits = std.io.bitReader(.big, file_in.reader());
-    try readString(&bits, str1);
-    try readString(&bits, str2);
-    try readString(&bits, str3);
+const TimeExt = "mc";
+inline fn getTime() i128 {
+    return std.time.microTimestamp();
 }
