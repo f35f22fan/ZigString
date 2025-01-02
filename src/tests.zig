@@ -265,8 +265,8 @@ test "Split" {
     const main_str = try String.From(JoseStr);
     defer main_str.deinit();
     // the next 2 functions help the developer to visually dissect a string:
-    try main_str.printGraphemes(@src());
-    try main_str.printCodepoints(@src());
+    // try main_str.printGraphemes(@src());
+    // try main_str.printCodepoints(@src());
 
     // split(..) returns !ArrayList(String)
     const words = try main_str.split(" ", CaseSensitive.Yes, KeepEmptyParts.No);
@@ -407,7 +407,7 @@ test "Char At" {
     // String.charAtIndex() is faster (almost O(1)) then CharAt(), which is O(n)
     // because each time CharAt() is called it iterates from the start
     // of the string to get to the grapheme at the given index,
-    // while charAtIndex() from the previous position inside the string.
+    // while charAtIndex() only from the previous position inside the string.
     // So here's usage of CharAtIndex() which is used to efficiently
     // iterate over a string to print it forth and then backwards:
     const both_ways = try String.From("Jos\u{65}\u{301}"); // "José"
@@ -429,8 +429,8 @@ test "Char At" {
 
     const str_ch = try String.From("好久不见，你好吗？");
     defer str_ch.deinit();
-    try str_ch.printGraphemes(@src());
-    try str_ch.printCodepoints(@src());
+    // try str_ch.printGraphemes(@src());
+    // try str_ch.printCodepoints(@src());
     try expect(str_ch.charAt(0).?.eqCp("好"));
     try expect(str_ch.charAt(8).?.eqCp("？"));
     try expect(!str_ch.charAt(1).?.eqCp("A"));

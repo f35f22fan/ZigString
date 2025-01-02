@@ -20,8 +20,13 @@ pub const Codepoint = u21;
 pub const CpSlice = []Codepoint;
 pub const ConstCpSlice = []const Codepoint;
 pub const GraphemeSlice = []const u1;
-pub const Error = error{ NotFound, BadArg, Index, Alloc };
+pub const Error = error{ NotFound, BadArg, Index, Alloc, Other };
 const SimdVecLen: u16 = 32;
+
+const BinaryHintByte: u8 = 0b0100_0000;
+const BinaryHintU64: u8 =  0b1000_0000;
+const BinaryHintMask: u8 = 0b1100_0000;
+const BinaryMaxByte: u8 = 0b0011_1111;
 
 pub const KeepEmptyParts = enum(u1) {
     Yes,
@@ -774,6 +779,46 @@ pub fn format(self: String, comptime fmt: []const u8, options: std.fmt.FormatOpt
     try writer.print("{s}", .{buf.items});
 }
 
+pub fn fromBlob(bits: anytype) !String {
+    var read_count: u16 = 0;
+    //mtl.debug(@src(), "--------------Bits.count={}", .{bits.count});
+    if (bits.count > 0) {
+        const rem = bits.count;//8 - bits.count;
+        _ = try bits.readBits(u64, rem, &read_count);
+    }
+    
+    const cp_count: usize = try readSize(bits, "codepoints"); // cp count
+    //mtl.debug(@src(), "cp_count: {X}", .{cp_count});
+    var ret_str = String{};
+    if (cp_count == 0)
+        return ret_str;
+
+    var sd = try ret_str.getPointer();
+    if (cp_count <= BinaryMaxByte) {
+        sd.grapheme_count = try bits.readBits(u8, @bitSizeOf(u8), &read_count);
+    } else {
+        sd.grapheme_count = try bits.readBits(u64, @bitSizeOf(u64), &read_count);
+    }
+    
+    //mtl.debug(@src(), "gr_count={}, cp_count={}", .{Num.New(sd.grapheme_count), Num.New(cp_count)});
+    try ret_str.ensureTotalCapacity(cp_count);
+    
+    for (0..cp_count) |_| {
+        try sd.codepoints.append(try bits.readBits(Codepoint, @bitSizeOf(Codepoint), &read_count));
+        if (read_count != @bitSizeOf(Codepoint)) {
+            mtl.warn(@src(), "Codepoint bit count read={}", .{read_count});
+        }
+    }
+    for (0..cp_count) |_| {
+        try sd.graphemes.append(try bits.readBits(u1, @bitSizeOf(u1), &read_count));
+        if (read_count != @bitSizeOf(u1)) {
+            mtl.warn(@src(), "Grapheme bit count read={}", .{read_count});
+        }
+    }
+
+    return ret_str;
+}
+
 inline fn getPointer(self: *String) !*Data {
     if (self.d) |*k| {
         return k;
@@ -1029,17 +1074,17 @@ pub fn parseFloat(self: String, comptime T: type) !T {
 }
 
 pub threadlocal var string_theme = Theme.Dark;
-pub fn print(self: String, src: std.builtin.SourceLocation, msg: ?[]const u8) !void {
-    try self.print2(src, string_theme, msg);
+pub fn print(self: String, src: std.builtin.SourceLocation, msg: ?[]const u8) void {
+    self.print2(src, string_theme, msg);
 }
 
-pub fn print2(self: String, src: std.builtin.SourceLocation, theme: Theme, msg: ?[]const u8) !void {
+pub fn print2(self: String, src: std.builtin.SourceLocation, theme: Theme, msg: ?[]const u8) void {
     const color = if (theme == Theme.Light) COLOR_DEFAULT else COLOR_GREEN;
     const info = if (msg) |k| k else "String.print(): ";
     mtl.debug(src, "{s}{s}\"{s}\"", .{ info, color, self});
 }
 
-pub fn printInfo(self: String, src: std.builtin.SourceLocation, msg: ?[] const u8) !void {
+pub fn printInfo(self: String, src: std.builtin.SourceLocation, msg: ?[] const u8) void {
     const color = if (string_theme == Theme.Light) COLOR_DEFAULT else COLOR_GREEN;
     const info = if (msg) |k| k else "String.printInfo(): ";
     if (self.size() <= 255) {
@@ -1100,7 +1145,7 @@ pub fn printCodepoints(self: String, src: std.builtin.SourceLocation) !void {
     var cp_buf = ArrayList(Codepoint).init(ctx.a);
     defer cp_buf.deinit();
     const out = std.debug;
-    try self.print(src, "Codepoints: ");
+    self.print(src, "Codepoints: ");
     for (sd.codepoints.items, 0..) |cp, i| {
         if (i > 255) {
             break;
@@ -1119,7 +1164,7 @@ pub fn printGraphemes(self: String, src: std.builtin.SourceLocation) !void {
     defer cp_buf.deinit();
     var gr_index: isize = -1;
     const out = std.debug;
-    try self.print(src, "Graphemes: ");
+    self.print(src, "Graphemes: ");
     for (sd.codepoints.items, 0..) |cp, i| {
         if (i > 255) {
             break;
@@ -1143,6 +1188,28 @@ pub fn printFind(self: String, needles: []const u8, from: usize, cs: CaseSensiti
     const needles_str = String.From(needles) catch return null;
     defer needles_str.deinit();
     return index;
+}
+
+fn readSize(in: anytype, msg: []const u8) !usize {
+    var read_count: u16 = 0;
+    const value: u8 = try in.readBits(u8, @bitSizeOf(u8), &read_count);
+    if (read_count != @bitSizeOf(u8)) {
+        mtl.warn(@src(), "msg=\"{s}\" count={}, value={}",
+         .{msg, read_count, value});
+    }
+    if (value == 0)
+        return 0;
+
+    if ((value & BinaryHintMask) == BinaryHintByte) {
+        return value & ~BinaryHintMask;
+    }
+
+    const count = try in.readBits(u64, @bitSizeOf(u64), &read_count);
+    if (read_count != @bitSizeOf(u64)) {
+        mtl.debug(@src(), "msg=\"{s}\" read_count={}", .{msg, read_count});
+    }
+
+    return count;
 }
 
 pub fn remove(self: *String, needles: []const u8) !void {
@@ -1213,14 +1280,6 @@ pub fn size(self: String) usize {
 /// returns the codepoints count in string
 pub fn size_cp(self: String) usize {
     return if (self.d) |sd| sd.codepoints.items.len else 0;
-}
-
-pub fn regionEquals(self: String, at: Index, slice: CpSlice, cs: CaseSensitive) bool {
-    std.debug.print("{s} TBD.\n", .{@src().fn_name});
-    _ = self;
-    _ = at;
-    _ = slice;
-    _ = cs;
 }
 
 // Each `sep` grapheme must be 1 codepoint long
@@ -1357,111 +1416,6 @@ pub fn substring(self: String, start: usize, count: isize) !String {
     sdo.grapheme_count = countGraphemes(sdo.graphemes.items);
 
     return s;
-}
-
-const HintByte: u8 = 0b0100_0000;
-const HintU64: u8 =  0b1000_0000;
-const HintMask: u8 = 0b1100_0000;
-const MaxByte: u8 = 0b0011_1111;
-
-fn readSize(in: anytype, msg: []const u8) !usize {
-    var read_count: u16 = 0;
-    const value: u8 = try in.readBits(u8, @bitSizeOf(u8), &read_count);
-    if (read_count != @bitSizeOf(u8)) {
-        mtl.warn(@src(), "msg=\"{s}\" count={}, value={}",
-         .{msg, read_count, value});
-    }
-    if (value == 0)
-        return 0;
-
-    if ((value & HintMask) == HintByte) {
-        return value & ~HintMask;
-    }
-
-    const count = try in.readBits(u64, @bitSizeOf(u64), &read_count);
-    if (read_count != @bitSizeOf(u64)) {
-        mtl.debug(@src(), "msg=\"{s}\" read_count={}", .{msg, read_count});
-    }
-
-    return count;
-}
-
-fn writeSize(out: anytype, count: u64) !void {
-    if (count == 0) {
-        try out.writeBits(@as(u8, 0), @bitSizeOf(u8));
-    } else if (count <= MaxByte) {
-        //mtl.debug(@src(), "writing as byte={}", .{count});
-        var z: u8 = @intCast(count);
-        z |= HintByte;
-        try out.writeBits(z, @bitSizeOf(u8));
-    } else {
-        //mtl.debug(@src(), "writing as u64={}", .{count});
-        try out.writeBits(HintU64, @bitSizeOf(u8));
-        try out.writeBits(count, @bitSizeOf(u64));
-    }
-}
-
-pub fn readFrom(bits: anytype) !String {
-    var read_count: u16 = 0;
-    //mtl.debug(@src(), "--------------Bits.count={}", .{bits.count});
-    if (bits.count > 0) {
-        const rem = bits.count;//8 - bits.count;
-        _ = try bits.readBits(u64, rem, &read_count);
-    }
-    
-    const cp_count: usize = try readSize(bits, "codepoints"); // cp count
-    //mtl.debug(@src(), "cp_count: {X}", .{cp_count});
-    var ret_str = String{};
-    if (cp_count == 0)
-        return ret_str;
-
-    var sd = try ret_str.getPointer();
-    if (cp_count <= MaxByte) {
-        sd.grapheme_count = try bits.readBits(u8, @bitSizeOf(u8), &read_count);
-    } else {
-        sd.grapheme_count = try bits.readBits(u64, @bitSizeOf(u64), &read_count);
-    }
-    
-    //mtl.debug(@src(), "gr_count={}, cp_count={}", .{Num.New(sd.grapheme_count), Num.New(cp_count)});
-    try ret_str.ensureTotalCapacity(cp_count);
-    
-    for (0..cp_count) |_| {
-        try sd.codepoints.append(try bits.readBits(Codepoint, @bitSizeOf(Codepoint), &read_count));
-        if (read_count != @bitSizeOf(Codepoint)) {
-            mtl.warn(@src(), "Codepoint bit count read={}", .{read_count});
-        }
-    }
-    for (0..cp_count) |_| {
-        try sd.graphemes.append(try bits.readBits(u1, @bitSizeOf(u1), &read_count));
-        if (read_count != @bitSizeOf(u1)) {
-            mtl.warn(@src(), "Grapheme bit count read={}", .{read_count});
-        }
-    }
-
-    return ret_str;
-}
-
-pub fn writeTo(self: String, bitw: anytype) !void {
-    const cp_count = self.size_cp();
-    try writeSize(bitw, cp_count); // codepoints count
-
-    if (cp_count == 0)
-        return;
-    
-    const sd = self.d orelse return;
-    if (cp_count <= MaxByte) {
-        try bitw.writeBits(sd.grapheme_count, @bitSizeOf(u8));
-    } else {
-        try bitw.writeBits(sd.grapheme_count, @bitSizeOf(u64));
-    }
-    
-    for (sd.codepoints.items) |cp| { // the codepoints (as u21)
-        try bitw.writeBits(cp, @bitSizeOf(@TypeOf(cp)));
-    }
-
-    for (sd.graphemes.items) |g| { // the graphemes (as one bit per codepoint)
-        try bitw.writeBits(g, 1);
-    }
 }
 
 pub fn toCp(input: []const u8) !Codepoint {
@@ -1615,6 +1569,53 @@ pub fn utf8_from_slice(a: Allocator, slice: ConstCpSlice) !ArrayList(u8) {
     }
 
     return buf;
+}
+
+
+fn writeCpCount(out: anytype, count: u64) !void {
+    if (count == 0) {
+        try out.writeBits(@as(u8, 0), @bitSizeOf(u8));
+    } else if (count <= BinaryMaxByte) {
+        //mtl.debug(@src(), "writing as byte={}", .{count});
+        var z: u8 = @intCast(count);
+        z |= BinaryHintByte;
+        try out.writeBits(z, @bitSizeOf(u8));
+    } else {
+        //mtl.debug(@src(), "writing as u64={}", .{count});
+        try out.writeBits(BinaryHintU64, @bitSizeOf(u8));
+        try out.writeBits(count, @bitSizeOf(u64));
+    }
+}
+
+pub fn toBlob(self: String, alloc: Allocator) ![]const u8 {
+    const str_byte_count = self.computeSizeInBytes();
+    mtl.debug(@src(), "str_byte_count: {}", .{Num.New(str_byte_count)});
+    // const ts1 = getTime();
+    const memory = try alloc.alloc(u8, str_byte_count);
+    var stream = std.io.fixedBufferStream(memory);
+    var bitw = std.io.bitWriter(.big, stream.writer());
+    const cp_count = self.size_cp();
+    try writeCpCount(&bitw, cp_count); // codepoints count
+
+    if (cp_count == 0)
+        return memory;
+    
+    const sd = self.d orelse return String.Error.Other;
+    if (cp_count <= BinaryMaxByte) {
+        try bitw.writeBits(sd.grapheme_count, @bitSizeOf(u8));
+    } else {
+        try bitw.writeBits(sd.grapheme_count, @bitSizeOf(u64));
+    }
+    
+    for (sd.codepoints.items) |cp| { // the codepoints (as u21)
+        try bitw.writeBits(cp, @bitSizeOf(@TypeOf(cp)));
+    }
+
+    for (sd.graphemes.items) |g| { // the graphemes (as one bit per codepoint)
+        try bitw.writeBits(g, 1);
+    }
+
+    return memory;
 }
 
 const posix = (builtin.target.os.tag == .linux);
