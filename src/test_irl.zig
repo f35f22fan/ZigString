@@ -7,6 +7,7 @@ const expectEqualStrings = std.testing.expectEqualStrings;
 const alloc = std.testing.allocator;
 
 const io = @import("io.zig");
+const BitData = @import("bit_data.zig").BitData;
 const mtl = @import("mtl.zig");
 const Num = @import("Num.zig");
 
@@ -116,12 +117,13 @@ test "Desktop File" {
 }
 
 fn readString(in: anytype, correct: []const u8) !void {
-    //const t1 = getTime();
+    const t1 = getTime();
     const read_str = try String.fromBlob(in);
     defer read_str.deinit();
-    //const t2 = getTime();
-    //mtl.debug(@src(), "Done reading binary in {}{s}", .{Num{.value = t2-t1}, TimeExt});
-    read_str.printInfo(@src(), null);
+    const t2 = getTime();
+    mtl.debug(@src(), "Done reading binary in {}{s}", .{Num{.value = t2-t1}, TimeExt});
+    //read_str.printInfo(@src(), null);
+    //try read_str.printCodepoints(@src());
     try expect(read_str.eq(correct));
 }
 
@@ -130,19 +132,22 @@ test "Binary read/write string to file" {
     // but in its internal binary format.
     String.ctx = try Context.New(alloc);
     defer String.ctx.deinit();
-
-    // const home_cstr = try io.getEnv(alloc, io.Folder.Home);
-    // defer alloc.free(home_cstr);
     {
-        const fp = "/home/fox/size-out.bin";
+        //const fp = "/home/fox/size-out.bin";
+        const fp = try io.getHome(alloc, "/size-out.bin");
+        defer alloc.free(fp);
         var file_out = try std.fs.createFileAbsolute(fp, .{ .truncate = true, .read = true });
         const str1 = "Jos\u{65}\u{301} se fu\u{65}\u{301}";
-        const str2 = try io.readFile(alloc, "/home/fox/Documents/content.xml");
+        const read_path = try io.getHome(alloc, "/Documents/content.xml");
+        defer alloc.free(read_path);
+        const str2 = try io.readFile(alloc, read_path);
         defer alloc.free(str2);
         const str3 = "Привет";
+        const str4 = "违法和不良信息举报电话";
         {
             const s = try String.From(str1);
             defer s.deinit();
+            //try s.printCodepoints(@src());
             const memory = try s.toBlob(alloc);
             defer alloc.free(memory);
             try file_out.writeAll(memory);
@@ -154,7 +159,6 @@ test "Binary read/write string to file" {
             defer alloc.free(memory);
             try file_out.writeAll(memory);
         }
-
         {
             const s = try String.From(str3);
             defer s.deinit();
@@ -162,15 +166,23 @@ test "Binary read/write string to file" {
             defer alloc.free(memory);
             try file_out.writeAll(memory);
         }
-        
+        {
+            const s = try String.From(str4);
+            defer s.deinit();
+            const memory = try s.toBlob(alloc);
+            defer alloc.free(memory);
+            try file_out.writeAll(memory);
+        }
+
         file_out.close();
 
         const file_in = try std.fs.openFileAbsolute(fp, .{});
-        var bits = std.io.bitReader(.big, file_in.reader());
-        try readString(&bits, str1);
-        try readString(&bits, str2);
-        try readString(&bits, str3);
-        file_in.close();
+        defer file_in.close();
+        const reader = file_in.reader();
+        try readString(&reader, str1);
+        try readString(&reader, str2);
+        try readString(&reader, str3);
+        try readString(&reader, str4);
     }
 }
 

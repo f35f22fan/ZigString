@@ -4,8 +4,10 @@ const builtin = @import("builtin");
 const unicode = std.unicode;
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
+const maxInt = std.math.maxInt;
 //const out = std.io.getStdOut().writer();
 const BitWriter = std.io.bit_writer.BitWriter;
+const BitData = @import("bit_data.zig").BitData;
 
 const mtl = @import("mtl.zig");
 const Num = @import("Num.zig");
@@ -400,18 +402,31 @@ pub fn computeSizeInBits(self: String) u64 {
     if (cp_count == 0)
         return @bitSizeOf(u8);
     
-    var total_bits = cp_count * @bitSizeOf(Codepoint) // codepoints
-    + cp_count; // the grapheme bits
-    total_bits += @bitSizeOf(u8); // binary header
-    if (cp_count <= 0b0011_1111) {
-        total_bits += @bitSizeOf(u8); // grapheme_count
-    } else {
-        total_bits += @bitSizeOf(u64) * 2; // cp_count + grapheme_count
+    var bit_count: u64 = @bitSizeOf(u8); // binary header
+    if (cp_count > BinaryMaxByte) { // then store cp_count as a u64
+        bit_count += @bitSizeOf(u64);
     }
 
-    //total_bits += 4; // 4 bits to represent possible 7 extra bits
+    // if (cp_count <= maxInt(u8)) { // how much to store grapheme count
+    //     bit_count += @bitSizeOf(u8);
+    // } else {
+    //     bit_count += @bitSizeOf(u64);
+    // }
 
-    return total_bits;
+    const sd = self.d orelse return 0;
+    for (sd.codepoints.items) |cp| {
+        if (cp <= maxInt(u8)) {
+            bit_count += @bitSizeOf(u8);
+        } else if (cp <= maxInt(u16)) {
+            bit_count += @bitSizeOf(u16);
+        } else {
+            bit_count += @bitSizeOf(u24);
+        }
+    }
+
+    bit_count += cp_count * 3; // each codepoint has a corresponding u3 for size/gr info.
+
+    return bit_count;
 }
 
 inline fn countGraphemes(slice: GraphemeSlice) usize {
@@ -779,43 +794,80 @@ pub fn format(self: String, comptime fmt: []const u8, options: std.fmt.FormatOpt
     try writer.print("{s}", .{buf.items});
 }
 
-pub fn fromBlob(bits: anytype) !String {
-    var read_count: u16 = 0;
-    //mtl.debug(@src(), "--------------Bits.count={}", .{bits.count});
-    if (bits.count > 0) {
-        const rem = bits.count;//8 - bits.count;
-        _ = try bits.readBits(u64, rem, &read_count);
+pub fn getU3(data: []const u8, u3_index: usize) !u3 {
+    const bit_index = u3_index * 3;
+    const byte_index = bit_index / 8;
+    const remainder: u3 = @intCast(bit_index % 8);
+    const byte = data[byte_index];
+    if (remainder <= 5) {
+        const k = (byte >> remainder) & 0b111;
+        return @intCast(k);
+    } else if (remainder == 6) {
+        var b: u8 = byte >> 6;
+        const nb = data[byte_index + 1];
+        b |= (nb << 2) & 0b0000_0100;
+        return @intCast(b);
+    } else {
+        var b: u8 = byte >> 7;
+        const nb = data[byte_index + 1] << 1;
+        b |= nb & 0b0000_0110;
+        return @intCast(b);
     }
-    
-    const cp_count: usize = try readSize(bits, "codepoints"); // cp count
-    //mtl.debug(@src(), "cp_count: {X}", .{cp_count});
+}
+
+pub fn fromBlob(reader: anytype) !String {
+    const cp_count: usize = try readCpCount(reader);
     var ret_str = String{};
     if (cp_count == 0)
         return ret_str;
 
     var sd = try ret_str.getPointer();
-    if (cp_count <= BinaryMaxByte) {
-        sd.grapheme_count = try bits.readBits(u8, @bitSizeOf(u8), &read_count);
-    } else {
-        sd.grapheme_count = try bits.readBits(u64, @bitSizeOf(u64), &read_count);
-    }
-    
-    //mtl.debug(@src(), "gr_count={}, cp_count={}", .{Num.New(sd.grapheme_count), Num.New(cp_count)});
     try ret_str.ensureTotalCapacity(cp_count);
-    
-    for (0..cp_count) |_| {
-        try sd.codepoints.append(try bits.readBits(Codepoint, @bitSizeOf(Codepoint), &read_count));
-        if (read_count != @bitSizeOf(Codepoint)) {
-            mtl.warn(@src(), "Codepoint bit count read={}", .{read_count});
-        }
-    }
-    for (0..cp_count) |_| {
-        try sd.graphemes.append(try bits.readBits(u1, @bitSizeOf(u1), &read_count));
-        if (read_count != @bitSizeOf(u1)) {
-            mtl.warn(@src(), "Grapheme bit count read={}", .{read_count});
-        }
+    const cp_bit_count = cp_count * 3;
+    var info_byte_count = cp_bit_count / 8;
+    if ((cp_bit_count % 8) != 0) {
+        info_byte_count += 1;
     }
 
+    const info_data = try ctx.a.alloc(u8, info_byte_count);
+    defer ctx.a.free(info_data);
+    const len = try reader.read(info_data);
+    if (len != info_data.len) {
+        @panic("len != info_data.len");
+    }
+    // var under_u8: usize = 0;
+    // var under_u16: usize = 0;
+    // var too_large: usize = 0;
+    for (0..cp_count) |i| {
+        const info: u3 = try getU3(info_data, i);
+        //mtl.debug(@src(), "i={}, u3=0b{b:0>3}", .{i, info});
+        const gr_bit: u1 = @intCast(info >> 2);
+        try sd.graphemes.append(gr_bit);
+        if (gr_bit == 0b1) {
+            sd.grapheme_count += 1;
+        }
+        const sz = info & 0b011;
+        var cp: u21 = 0;
+        if (sz == 0b01) { // u8
+            cp = try reader.readByte();
+        } else if (sz == 0b10) { // u16
+            cp = try reader.readInt(u16, .big);
+        } else {
+            const k = try reader.readInt(u24, .big);
+            cp = @intCast(k);
+        }
+
+        try sd.codepoints.append(cp);
+        // if (cp <= maxInt(u8)) {
+        //     under_u8 += 1;
+        // } else if (cp <= maxInt(u16)) {
+        //     under_u16 += 1;
+        // } else {
+        //     too_large += 1;
+        // }
+    }
+
+    //mtl.debug(@src(), "u8={}, u16={}, u24={}", .{Num.New(under_u8), Num.New(under_u16), Num.New(too_large)});
     return ret_str;
 }
 
@@ -1190,13 +1242,8 @@ pub fn printFind(self: String, needles: []const u8, from: usize, cs: CaseSensiti
     return index;
 }
 
-fn readSize(in: anytype, msg: []const u8) !usize {
-    var read_count: u16 = 0;
-    const value: u8 = try in.readBits(u8, @bitSizeOf(u8), &read_count);
-    if (read_count != @bitSizeOf(u8)) {
-        mtl.warn(@src(), "msg=\"{s}\" count={}, value={}",
-         .{msg, read_count, value});
-    }
+fn readCpCount(reader: anytype) !usize {
+    const value: u8 = try reader.readByte();
     if (value == 0)
         return 0;
 
@@ -1204,11 +1251,7 @@ fn readSize(in: anytype, msg: []const u8) !usize {
         return value & ~BinaryHintMask;
     }
 
-    const count = try in.readBits(u64, @bitSizeOf(u64), &read_count);
-    if (read_count != @bitSizeOf(u64)) {
-        mtl.debug(@src(), "msg=\"{s}\" read_count={}", .{msg, read_count});
-    }
-
+    const count = try reader.readInt(u64, .big);
     return count;
 }
 
@@ -1571,49 +1614,74 @@ pub fn utf8_from_slice(a: Allocator, slice: ConstCpSlice) !ArrayList(u8) {
     return buf;
 }
 
-
 fn writeCpCount(out: anytype, count: u64) !void {
     if (count == 0) {
-        try out.writeBits(@as(u8, 0), @bitSizeOf(u8));
+        try out.writeByte(0);
     } else if (count <= BinaryMaxByte) {
         //mtl.debug(@src(), "writing as byte={}", .{count});
         var z: u8 = @intCast(count);
         z |= BinaryHintByte;
-        try out.writeBits(z, @bitSizeOf(u8));
+        try out.writeByte(z);
     } else {
         //mtl.debug(@src(), "writing as u64={}", .{count});
-        try out.writeBits(BinaryHintU64, @bitSizeOf(u8));
-        try out.writeBits(count, @bitSizeOf(u64));
+        try out.writeByte(BinaryHintU64);
+        try out.writeInt(u64, count, .big);
     }
 }
 
 pub fn toBlob(self: String, alloc: Allocator) ![]const u8 {
     const str_byte_count = self.computeSizeInBytes();
-    mtl.debug(@src(), "str_byte_count: {}", .{Num.New(str_byte_count)});
-    // const ts1 = getTime();
     const memory = try alloc.alloc(u8, str_byte_count);
+    errdefer alloc.free(memory);
     var stream = std.io.fixedBufferStream(memory);
-    var bitw = std.io.bitWriter(.big, stream.writer());
+    const writer = stream.writer();
     const cp_count = self.size_cp();
-    try writeCpCount(&bitw, cp_count); // codepoints count
-
-    if (cp_count == 0)
+    try writeCpCount(writer, cp_count);
+    if (cp_count == 0) {
         return memory;
+    }
     
     const sd = self.d orelse return String.Error.Other;
-    if (cp_count <= BinaryMaxByte) {
-        try bitw.writeBits(sd.grapheme_count, @bitSizeOf(u8));
-    } else {
-        try bitw.writeBits(sd.grapheme_count, @bitSizeOf(u64));
-    }
-    
-    for (sd.codepoints.items) |cp| { // the codepoints (as u21)
-        try bitw.writeBits(cp, @bitSizeOf(@TypeOf(cp)));
+    var under_u8: usize = 0;
+    var under_u16: usize = 0;
+    var full_size: usize = 0;
+    var bit_data = BitData.New(alloc);
+    defer bit_data.deinit();
+
+    for (sd.codepoints.items, sd.graphemes.items) |cp, grapheme_bit| {
+        var n: u3 = 0;
+        if (cp <= maxInt(u8)) {
+            under_u8 += 1;
+            n = 0b01;
+        } else if (cp <= maxInt(u16)) {
+            under_u16 += 1;
+            n = 0b10;
+        } else {
+            full_size += 1;
+            n = 0b11;
+        }
+
+        n |= @as(u3, grapheme_bit) << 2;
+        try bit_data.addBits(n);
     }
 
-    for (sd.graphemes.items) |g| { // the graphemes (as one bit per codepoint)
-        try bitw.writeBits(g, 1);
+    try bit_data.finish();
+    //bit_data.printBits();
+    try writer.writeAll(bit_data.bytes());
+
+    for (sd.codepoints.items) |cp| {
+        if (cp <= maxInt(u8)) {
+            try writer.writeByte(@intCast(cp));
+        } else if (cp <= maxInt(u16)) {
+            try writer.writeInt(u16, @intCast(cp), .big);
+        } else {
+            try writer.writeInt(u24, @intCast(cp), .big);
+        }
     }
+
+    //self.printInfo(@src(), null);
+    // mtl.debug(@src(), "u8={}, u16={}, u24={}",
+    //     .{Num.New(under_u8), Num.New(under_u16), Num.New(full_size)});
 
     return memory;
 }
