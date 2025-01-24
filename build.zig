@@ -40,6 +40,18 @@ pub fn build(b: *std.Build) void {
     });
     exe.root_module.addImport("zigstr", zigstr.module("zigstr"));
 
+     // Module
+    _ = b.addModule("zigstring", .{
+        .root_source_file = b.path("src/ZigString.zig"),
+        // .imports = &.{
+        //     .{ .name = "cow_list", .module = cow_list.module("cow_list") },
+        //     .{ .name = "code_point", .module = zg.module("code_point") },
+        //     .{ .name = "grapheme", .module = zg.module("grapheme") },
+        //     .{ .name = "PropsData", .module = zg.module("PropsData") },
+        //     .{ .name = "CaseData", .module = zg.module("CaseData") },
+        // },
+    });
+
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
     // step when running `zig build`).

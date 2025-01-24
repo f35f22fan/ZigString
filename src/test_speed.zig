@@ -26,21 +26,6 @@ const KeepEmptyParts = String.KeepEmptyParts;
 const JoseStr = "Jos\u{65}\u{301} se fu\u{65}\u{301} a Sevilla sin pararse";
 const theme = String.Theme.Dark;
 
-const COLOR_BLUE = "\x1B[34m";
-const COLOR_DEFAULT = "\x1B[0m";
-const COLOR_GREEN = "\x1B[32m";
-const COLOR_RED = "\x1B[0;91m";
-const COLOR_YELLOW = "\x1B[93m";
-const COLOR_MAGENTA = "\x1B[35m";
-const COLOR_CYAN = "\x1B[36m";
-const COLOR_BLACK = "\x1B[38;5;16m";
-const BLINK_START = "\x1B[5m";
-const BLINK_END = "\x1B[25m";
-const BOLD_START = "\x1B[1m";
-const BOLD_END = "\x1B[0m";
-const UNDERLINE_START = "\x1B[4m";
-const UNDERLINE_END = "\x1B[0m";
-
 const TimeExt = "mc";
 inline fn getTime() i128 {
     return std.time.microTimestamp();
@@ -48,9 +33,9 @@ inline fn getTime() i128 {
 
 fn getFgColor(result: usize, correct: ?usize) []const u8 {
     if (correct) |c| {
-        return if (result == c) COLOR_DEFAULT else COLOR_RED;
+        return if (result == c) String.COLOR_DEFAULT else String.COLOR_RED;
     }
-    return COLOR_BLUE;
+    return String.COLOR_BLUE;
 }
 
 fn FindOneSimd(haystack: String, needle: Codepoint, from: usize, correct: ?usize, comptime depth: u16) !usize {
@@ -58,7 +43,7 @@ fn FindOneSimd(haystack: String, needle: Codepoint, from: usize, correct: ?usize
     const result = haystack.findOneSimd(needle, from, depth);
     const done_in = getTime() - start_time;
     const print_color = getFgColor(result, correct);
-    std.debug.print("{s}FoundAt={?}, From={}, Time={}{s} [{s}]{s}\n", .{ print_color, result, from, done_in, TimeExt, @src().fn_name, COLOR_DEFAULT });
+    std.debug.print("{s}FoundAt={?}, From={}, Time={}{s} [{s}]{s}\n", .{ print_color, result, from, done_in, TimeExt, @src().fn_name, String.COLOR_DEFAULT });
 
     return if (result) |t| t else Error.NotFound;
 }
@@ -82,7 +67,7 @@ fn FindManySimd(haystack: String, needles: ConstCpSlice, from: ?Index, comptime 
     };
     const done_in = getTime() - start_time;
     const print_color = getFgColor(result.gr, correct);
-    std.debug.print("{s}FoundAt={?}, From={?}, Time={}{s} [{s}]{s}\n", .{ print_color, result, from, done_in, TimeExt, @src().fn_name, COLOR_DEFAULT });
+    std.debug.print("{s}FoundAt={?}, From={?}, Time={}{s} [{s}]{s}\n", .{ print_color, result, from, done_in, TimeExt, @src().fn_name, String.COLOR_DEFAULT });
 
     return result;
 }
@@ -92,7 +77,7 @@ fn FindManyLinear(haystack: String, needles: ConstCpSlice, from: ?Index, correct
     const result = haystack.findManyLinear(needles, from, CaseSensitive.Yes) orelse return Error.NotFound;
     const done_in = getTime() - start_time;
     const print_color = getFgColor(result.gr, correct);
-    std.debug.print("{s}FoundAt={?}, From={?}, Time={}{s} [{s}]{s}\n", .{ print_color, result, from, done_in, TimeExt, @src().fn_name, COLOR_DEFAULT });
+    std.debug.print("{s}FoundAt={?}, From={?}, Time={}{s} [{s}]{s}\n", .{ print_color, result, from, done_in, TimeExt, @src().fn_name, String.COLOR_DEFAULT });
 
     return result;
 }
@@ -111,7 +96,7 @@ fn FindManyLinearZigstr(haystack: []const u8, needles: []const u8, from: usize, 
     const index_of_time = getTime() - start_time;
     const print_color = getFgColor(result, correct);
     std.debug.print("{s}FoundAt={?}, From={}, Time={}{s}, StrInit={}{s}, [{s}]{s}\n\n",
-    .{ print_color, result, from, index_of_time, TimeExt, zigstr_init_time, TimeExt, @src().fn_name, COLOR_DEFAULT });
+    .{ print_color, result, from, index_of_time, TimeExt, zigstr_init_time, TimeExt, @src().fn_name, String.COLOR_DEFAULT });
 
     return result;
 }
@@ -131,7 +116,8 @@ fn FindBackwards() !void {
         const result = haystack.lastIndexOf(needles_raw, from);
         const done_in = getTime() - start_time;
 
-        std.debug.print("findManySimdFromEnd() FoundAt={?}, From={?}, needles=\"{s}\", Time={}{s} [{s}]{s}\n", .{ result, from, needles_raw, done_in, TimeExt, @src().fn_name, COLOR_DEFAULT });
+        std.debug.print("findManySimdFromEnd() FoundAt={?}, From={?}, needles=\"{s}\", Time={}{s} [{s}]{s}\n",
+        .{ result, from, needles_raw, done_in, TimeExt, @src().fn_name, String.COLOR_DEFAULT });
     }
 }
 
@@ -140,7 +126,7 @@ pub fn test_find_index(raw_str: []const u8, needles: ConstCpSlice, needles_raw: 
     const short_string_len: usize = 255;
     const needles_buf = try String.utf8_from_slice(alloc, needles);
     defer needles_buf.deinit();
-    std.debug.print("{s}(): needles=\"{s}{s}{s}\"\n", .{@src().fn_name, COLOR_GREEN, needles_buf.items, COLOR_DEFAULT});
+    std.debug.print("{s}(): needles=\"{s}{s}{s}\"\n", .{@src().fn_name, String.COLOR_GREEN, needles_buf.items, String.COLOR_DEFAULT});
     if (raw_str.len <= short_string_len) {
         std.debug.print("raw_str.len={} bytes: '{s}'\n", .{ raw_str.len, raw_str });
     } else {
