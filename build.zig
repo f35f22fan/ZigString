@@ -31,7 +31,6 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("GenCatData", zg.module("GenCatData"));
     exe.root_module.addImport("PropsData", zg.module("PropsData"));
     exe.root_module.addImport("Normalize", zg.module("Normalize"));
-    exe.root_module.addImport("Normalize", zg.module("Normalize"));
     exe.root_module.addImport("CaseFold", zg.module("CaseFold"));
 
     const zigstr = b.dependency("zigstr", .{
@@ -42,14 +41,16 @@ pub fn build(b: *std.Build) void {
 
      // Module
     _ = b.addModule("zigstring", .{
-        .root_source_file = b.path("src/ZigString.zig"),
-        // .imports = &.{
-        //     .{ .name = "cow_list", .module = cow_list.module("cow_list") },
-        //     .{ .name = "code_point", .module = zg.module("code_point") },
-        //     .{ .name = "grapheme", .module = zg.module("grapheme") },
-        //     .{ .name = "PropsData", .module = zg.module("PropsData") },
-        //     .{ .name = "CaseData", .module = zg.module("CaseData") },
-        // },
+        .root_source_file = b.path("src/String.zig"),
+        .imports = &.{
+            .{ .name = "grapheme", .module = zg.module("grapheme") },
+            .{ .name = "code_point", .module = zg.module("code_point") },
+            .{ .name = "grapheme", .module = zg.module("grapheme") },
+            .{ .name = "PropsData", .module = zg.module("PropsData") },
+            .{ .name = "CaseData", .module = zg.module("CaseData") },
+            .{ .name = "Normalize", .module = zg.module("Normalize") },
+            .{ .name = "CaseFold", .module = zg.module("CaseFold") },
+        },
     });
 
     // This declares intent for the executable to be installed into the

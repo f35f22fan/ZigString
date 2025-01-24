@@ -5,7 +5,7 @@
     // the name of your project
     .name = "app",
     // the version of your project
-    .version = "0.0.1",
+    .version = "0.5.0",
 
     // the actual packages you need as dependencies of your project
     .dependencies = .{
