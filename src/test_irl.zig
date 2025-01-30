@@ -54,8 +54,8 @@ const Truncate = enum(u1) { Yes, No };
 var tick: isize = 0;
 
 test "Desktop File" {
-    if (true)
-        return error.SkipZigTest;
+    // if (true)
+    //     return error.SkipZigTest;
 
     String.ctx = try Context.New(alloc);
     defer String.ctx.deinit();

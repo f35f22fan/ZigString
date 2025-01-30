@@ -79,54 +79,71 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    const tests1 = b.addTest(.{
-        .root_source_file = b.path("src/tests.zig"),
+    const default_test = b.addTest(.{
+        .root_source_file = b.path("src/test_default.zig"),
         .target = target,
         .optimize = optimize,
     });
-    tests1.root_module.addImport("code_point", zg.module("code_point"));
-    tests1.root_module.addImport("grapheme", zg.module("grapheme"));
-    tests1.root_module.addImport("CaseData", zg.module("CaseData"));
-    tests1.root_module.addImport("GenCatData", zg.module("GenCatData"));
-    tests1.root_module.addImport("PropsData", zg.module("PropsData"));
-    tests1.root_module.addImport("Normalize", zg.module("Normalize"));
-    tests1.root_module.addImport("CaseFold", zg.module("CaseFold"));
-    const run1 = b.addRunArtifact(tests1);
-    const test_step = b.step("test", "Run unit tests");
+    default_test.root_module.addImport("code_point", zg.module("code_point"));
+    default_test.root_module.addImport("grapheme", zg.module("grapheme"));
+    default_test.root_module.addImport("CaseData", zg.module("CaseData"));
+    default_test.root_module.addImport("GenCatData", zg.module("GenCatData"));
+    default_test.root_module.addImport("PropsData", zg.module("PropsData"));
+    default_test.root_module.addImport("Normalize", zg.module("Normalize"));
+    default_test.root_module.addImport("CaseFold", zg.module("CaseFold"));
+    const run1 = b.addRunArtifact(default_test);
+    const test_step = b.step("test", "Run default tests");
     test_step.dependOn(&run1.step);
 
-    const speed_tests = b.addTest(.{
+    const speed_test = b.addTest(.{
         .root_source_file = b.path("src/test_speed.zig"),
         .target = target,
         .optimize = optimize,
     });
-    speed_tests.root_module.addImport("zigstr", zigstr.module("zigstr"));
-    speed_tests.root_module.addImport("code_point", zg.module("code_point"));
-    speed_tests.root_module.addImport("grapheme", zg.module("grapheme"));
-    speed_tests.root_module.addImport("CaseData", zg.module("CaseData"));
-    speed_tests.root_module.addImport("GenCatData", zg.module("GenCatData"));
-    speed_tests.root_module.addImport("PropsData", zg.module("PropsData"));
-    speed_tests.root_module.addImport("Normalize", zg.module("Normalize"));
-    speed_tests.root_module.addImport("CaseFold", zg.module("CaseFold"));
-    const speed_run = b.addRunArtifact(speed_tests);
-    const speed_test_step = b.step("speed", "Run unit tests");
+    speed_test.root_module.addImport("zigstr", zigstr.module("zigstr"));
+    speed_test.root_module.addImport("code_point", zg.module("code_point"));
+    speed_test.root_module.addImport("grapheme", zg.module("grapheme"));
+    speed_test.root_module.addImport("CaseData", zg.module("CaseData"));
+    speed_test.root_module.addImport("GenCatData", zg.module("GenCatData"));
+    speed_test.root_module.addImport("PropsData", zg.module("PropsData"));
+    speed_test.root_module.addImport("Normalize", zg.module("Normalize"));
+    speed_test.root_module.addImport("CaseFold", zg.module("CaseFold"));
+    const speed_run = b.addRunArtifact(speed_test);
+    const speed_test_step = b.step("test_speed", "Test Speed");
     speed_test_step.dependOn(&speed_run.step);
 
-    const test_irl = b.addTest(.{
+    const irl_test = b.addTest(.{
         .root_source_file = b.path("src/test_irl.zig"),
         .target = target,
         .optimize = optimize,
     });
-    test_irl.linkLibC();
-    //test_irl.root_module.addImport("zigstr", zigstr.module("zigstr"));
-    test_irl.root_module.addImport("code_point", zg.module("code_point"));
-    test_irl.root_module.addImport("grapheme", zg.module("grapheme"));
-    test_irl.root_module.addImport("CaseData", zg.module("CaseData"));
-    test_irl.root_module.addImport("GenCatData", zg.module("GenCatData"));
-    test_irl.root_module.addImport("PropsData", zg.module("PropsData"));
-    test_irl.root_module.addImport("Normalize", zg.module("Normalize"));
-    test_irl.root_module.addImport("CaseFold", zg.module("CaseFold"));
-    const irl_run = b.addRunArtifact(test_irl);
-    const irl_step = b.step("irl", "Run unit tests");
+    irl_test.linkLibC();
+    irl_test.root_module.addImport("code_point", zg.module("code_point"));
+    irl_test.root_module.addImport("grapheme", zg.module("grapheme"));
+    irl_test.root_module.addImport("CaseData", zg.module("CaseData"));
+    irl_test.root_module.addImport("GenCatData", zg.module("GenCatData"));
+    irl_test.root_module.addImport("PropsData", zg.module("PropsData"));
+    irl_test.root_module.addImport("Normalize", zg.module("Normalize"));
+    irl_test.root_module.addImport("CaseFold", zg.module("CaseFold"));
+    const irl_run = b.addRunArtifact(irl_test);
+    const irl_step = b.step("test_irl", "Test IRL");
     irl_step.dependOn(&irl_run.step);
+
+
+     const test_regexp = b.addTest(.{
+        .root_source_file = b.path("src/Regexp.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    test_regexp.linkLibC();
+    test_regexp.root_module.addImport("code_point", zg.module("code_point"));
+    test_regexp.root_module.addImport("grapheme", zg.module("grapheme"));
+    test_regexp.root_module.addImport("CaseData", zg.module("CaseData"));
+    test_regexp.root_module.addImport("GenCatData", zg.module("GenCatData"));
+    test_regexp.root_module.addImport("PropsData", zg.module("PropsData"));
+    test_regexp.root_module.addImport("Normalize", zg.module("Normalize"));
+    test_regexp.root_module.addImport("CaseFold", zg.module("CaseFold"));
+    const regexp_run = b.addRunArtifact(test_regexp);
+    const regexp_step = b.step("test_regexp", "Test Regexp");
+    regexp_step.dependOn(&regexp_run.step);
 }

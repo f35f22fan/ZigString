@@ -7,6 +7,7 @@ const alloc = std.testing.allocator;
 
 const zigstr = @import("zigstr");
 const io = @import("io.zig");
+const mtl = @import("mtl.zig");
 
 const Normalize = @import("Normalize");
 const CaseFold = @import("CaseFold");
@@ -43,7 +44,7 @@ fn FindOneSimd(haystack: String, needle: Codepoint, from: usize, correct: ?usize
     const result = haystack.findOneSimd(needle, from, depth);
     const done_in = getTime() - start_time;
     const print_color = getFgColor(result, correct);
-    std.debug.print("{s}FoundAt={?}, From={}, Time={}{s} [{s}]{s}\n", .{ print_color, result, from, done_in, TimeExt, @src().fn_name, String.COLOR_DEFAULT });
+    mtl.debug(@src(), "{s}FoundAt={?}, From={}, Time={}{s}", .{ print_color, result, from, done_in, TimeExt});
 
     return if (result) |t| t else Error.NotFound;
 }
@@ -52,7 +53,7 @@ fn FindOneLinear(haystack: String, needle: Codepoint) !String.Index {
     const start_time = getTime();
     const result = std.mem.indexOfScalar(Codepoint, haystack.codepoints.items, needle);
     const done_in = getTime() - start_time;
-    std.debug.print("{s}: FoundAt={?}, T={}{s}\n", .{ @src().fn_name, result, done_in, TimeExt});
+    mtl.debug(@src(), "FoundAt={?}, T={}{s}", .{result, done_in, TimeExt});
 
     return result;
 }
@@ -62,12 +63,12 @@ fn FindManySimd(haystack: String, needles: ConstCpSlice, from: ?Index, comptime 
     const result = haystack.findManySimd(needles, from, depth) orelse {
         const buf = try String.utf8_from_slice(alloc, needles);
         defer buf.deinit();
-        std.debug.print("{s} not found '{s}' from={?}, haystack.cp_count={}\n", .{ @src().fn_name, buf.items, from, haystack.size_cp()});
+        mtl.debug(@src(), "Not found '{s}' from={?}, haystack.cp_count={}", .{buf.items, from, haystack.size_cp()});
         return Error.NotFound;
     };
     const done_in = getTime() - start_time;
     const print_color = getFgColor(result.gr, correct);
-    std.debug.print("{s}FoundAt={?}, From={?}, Time={}{s} [{s}]{s}\n", .{ print_color, result, from, done_in, TimeExt, @src().fn_name, String.COLOR_DEFAULT });
+    mtl.debug(@src(), "{s}FoundAt={?}, From={?}, Time={}{s}", .{ print_color, result, from, done_in, TimeExt});
 
     return result;
 }
@@ -77,7 +78,7 @@ fn FindManyLinear(haystack: String, needles: ConstCpSlice, from: ?Index, correct
     const result = haystack.findManyLinear(needles, from, CaseSensitive.Yes) orelse return Error.NotFound;
     const done_in = getTime() - start_time;
     const print_color = getFgColor(result.gr, correct);
-    std.debug.print("{s}FoundAt={?}, From={?}, Time={}{s} [{s}]{s}\n", .{ print_color, result, from, done_in, TimeExt, @src().fn_name, String.COLOR_DEFAULT });
+    mtl.debug(@src(), "{s}FoundAt={?}, From={?}, Time={}{s}", .{print_color, result, from, done_in, TimeExt});
 
     return result;
 }
@@ -95,8 +96,8 @@ fn FindManyLinearZigstr(haystack: []const u8, needles: []const u8, from: usize, 
     result += from;
     const index_of_time = getTime() - start_time;
     const print_color = getFgColor(result, correct);
-    std.debug.print("{s}FoundAt={?}, From={}, Time={}{s}, StrInit={}{s}, [{s}]{s}\n\n",
-    .{ print_color, result, from, index_of_time, TimeExt, zigstr_init_time, TimeExt, @src().fn_name, String.COLOR_DEFAULT });
+    mtl.debug(@src(), "{s}FoundAt={?}, From={}, Time={}{s}, StrInit={}{s}\n",
+    .{ print_color, result, from, index_of_time, TimeExt, zigstr_init_time, TimeExt});
 
     return result;
 }
@@ -116,8 +117,8 @@ fn FindBackwards() !void {
         const result = haystack.lastIndexOf(needles_raw, from);
         const done_in = getTime() - start_time;
 
-        std.debug.print("findManySimdFromEnd() FoundAt={?}, From={?}, needles=\"{s}\", Time={}{s} [{s}]{s}\n",
-        .{ result, from, needles_raw, done_in, TimeExt, @src().fn_name, String.COLOR_DEFAULT });
+        mtl.debug(@src(), "findManySimdFromEnd() FoundAt={?}, From={?}, needles=\"{s}\", Time={}{s}",
+        .{ result, from, needles_raw, done_in, TimeExt});
     }
 }
 
@@ -126,17 +127,17 @@ pub fn test_find_index(raw_str: []const u8, needles: ConstCpSlice, needles_raw: 
     const short_string_len: usize = 255;
     const needles_buf = try String.utf8_from_slice(alloc, needles);
     defer needles_buf.deinit();
-    std.debug.print("{s}(): needles=\"{s}{s}{s}\"\n", .{@src().fn_name, String.COLOR_GREEN, needles_buf.items, String.COLOR_DEFAULT});
+    mtl.debug(@src(), "needles_count=\"{s}{s}\"", .{String.COLOR_GREEN, needles_buf.items});
     if (raw_str.len <= short_string_len) {
-        std.debug.print("raw_str.len={} bytes: '{s}'\n", .{ raw_str.len, raw_str });
+        mtl.debug(@src(), "raw_str.len={} bytes: '{s}'", .{ raw_str.len, raw_str });
     } else {
-        std.debug.print("raw_str.len={} bytes\n", .{raw_str.len});
+        mtl.debug(@src(), "raw_str.len={} bytes", .{raw_str.len});
     }
     const start_time = getTime();
-    var haystack: String = try String.From(raw_str);
+    var haystack = try String.From(raw_str);
     defer haystack.deinit();
     const done_in = getTime() - start_time;
-    std.debug.print("String(graphemes={}, cp={}) init done in {}{s}\n\n",
+    mtl.debug(@src(), "String(graphemes={}, cp={}) init done in {}{s}\n",
     .{ haystack.size(), haystack.size_cp(), done_in, TimeExt });
     if (raw_str.len <= short_string_len) {
         try haystack.printGraphemes(@src());
@@ -159,7 +160,9 @@ test "From File" {
     String.ctx = try Context.New(alloc);
     defer String.ctx.deinit();
 
-    const raw_str = try io.readFile(alloc, "/home/fox/Documents/content.xml");
+    const path = try io.getHome(alloc, "/Documents/content.xml");
+    defer alloc.free(path);
+    const raw_str = try io.readFile(alloc, path);
     defer alloc.free(raw_str);
     const needles_raw = "Это подтверждается разговором арестованного Иисуса";
     const needles = try String.toCodepoints(alloc, needles_raw);

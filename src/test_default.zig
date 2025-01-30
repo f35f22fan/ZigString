@@ -22,7 +22,7 @@ test "Append Test" {
     var main_str = try String.From(JoseStr);
     defer main_str.deinit();
     const correct_cstr = JoseStr ++ additional;
-    try main_str.append(additional);
+    try main_str.add(additional);
     var test_buf = try main_str.toString();
     defer test_buf.deinit();
     try expectEqualStrings(test_buf.items, correct_cstr);
@@ -368,15 +368,15 @@ test "Char At" {
     // so it's invalid once the string changes.
     // But thanks to this it can hold an arbitrary long grapheme cluster
     // and doesn't need a deinit() call.
-    try expect(str.charAt(2).?.eq(letter_s));
-    try expect(str.charAt(32).?.eqAscii('e'));
+    try expect(str.charAt(2).?.eqCp(letter_s));
+    try expect(str.charAt(32).?.eqChar('e'));
 
     const at: usize = 1;
     if (str.charAt(at)) |g| {
-        try expect(!g.eqAscii('a'));
-        try expect(g.eqAscii('o'));
-        try expect(!g.eqAscii('G'));
-        try expect(!g.eqBytes("\u{65}\u{301}"));
+        try expect(!g.eqChar('a'));
+        try expect(g.eqChar('o'));
+        try expect(!g.eqChar('G'));
+        try expect(!g.eq("\u{65}\u{301}"));
     } else {
         std.debug.print("Nothing found at {}\n", .{at});
     }
@@ -385,16 +385,16 @@ test "Char At" {
         // const slice = g.getSlice() orelse return;
         // std.debug.print("{s}(): Grapheme len={}, slice=\"{any}\", index={}\n",
         //     .{@src().fn_name, g.len, slice, g.index()});
-        try expect(g.eqBytes("\u{65}\u{301}"));
-        try expect(!g.eqAscii('G'));
+        try expect(g.eq("\u{65}\u{301}"));
+        try expect(!g.eqChar('G'));
     }
 
     const str_ru = try String.From("Жизнь");
     defer str_ru.deinit();
-    try expect(str_ru.charAt(0).?.eq(try String.toCp("Ж")));
+    try expect(str_ru.charAt(0).?.eqCp(try String.toCp("Ж")));
     // When the method argument is known to be 1 codepoint one can use
     // the slightly faster method Grapheme.eqCp():
-    try expect(str_ru.charAt(4).?.eqCp("ь"));
+    try expect(str_ru.charAt(4).?.eq("ь"));
     // Btw an even faster method is Grapheme.eqAscii() when the
     // method argument is known to be ASCII, like Grapheme.eqAscii('A').
     // Therefore, for example, it's wrong to use Grapheme.eqCp() with the following
@@ -413,25 +413,19 @@ test "Char At" {
     const both_ways = try String.From("Jos\u{65}\u{301}"); // "José"
     defer both_ways.deinit();
     var index = String.strStart();
-    while (index.next(both_ways)) |idx| { // ends up printing "José"
-        if (both_ways.charAtIndex(idx)) |grapheme| {
-            std.debug.print("{}", .{grapheme});
-        }
+    while (index.next(&both_ways)) |gr| { // ends up printing "José"
+        std.debug.print("{}", .{gr}); // the grapheme's index is at gr.idx
     }
     std.debug.print("\n", .{});
     index = both_ways.strEnd();
-    while (index.prev(both_ways)) |idx| { // ends up printing "ésoJ"
-        if (both_ways.charAtIndex(idx)) |grapheme| {
-            std.debug.print("{}", .{grapheme});
-        }
+    while (index.prev(&both_ways)) |gr| { // ends up printing "ésoJ"
+        std.debug.print("{}", .{gr});
     }
     std.debug.print("\n", .{});
 
     const str_ch = try String.From("好久不见，你好吗？");
     defer str_ch.deinit();
-    // try str_ch.printGraphemes(@src());
-    // try str_ch.printCodepoints(@src());
-    try expect(str_ch.charAt(0).?.eqCp("好"));
-    try expect(str_ch.charAt(8).?.eqCp("？"));
-    try expect(!str_ch.charAt(1).?.eqCp("A"));
+    try expect(str_ch.charAt(0).?.eq("好"));
+    try expect(str_ch.charAt(8).?.eq("？"));
+    try expect(!str_ch.charAt(1).?.eq("A"));
 }

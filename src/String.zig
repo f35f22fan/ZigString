@@ -7,10 +7,11 @@ const Allocator = std.mem.Allocator;
 const maxInt = std.math.maxInt;
 //const out = std.io.getStdOut().writer();
 const BitWriter = std.io.bit_writer.BitWriter;
-const BitData = @import("bit_data.zig").BitData;
+pub const BitData = @import("bit_data.zig").BitData;
 
-const mtl = @import("mtl.zig");
-const Num = @import("Num.zig");
+pub const io = @import("io.zig");
+pub const mtl = @import("mtl.zig");
+pub const Num = @import("Num.zig");
 
 const zg_codepoint = @import("code_point");
 const zg_grapheme = @import("grapheme");
@@ -75,25 +76,25 @@ pub const Grapheme = struct {
         return sd.codepoints.items[self.idx.cp..(self.idx.cp+len)];
     }
 
-    pub fn eq(self: Grapheme, cp: Codepoint) bool {
+    pub fn eq(self: Grapheme, input: []const u8) bool {
+        if (input.len == 1) {
+            const cp = toCp(input) catch return false;
+            return self.eqCp(cp);
+        } else {
+            const buf = toCodepoints(ctx.a, input) catch return false;
+            defer buf.deinit();
+            return self.eqSlice(buf.items);
+        }
+    }
+
+    pub fn eqChar(self: Grapheme, c: comptime_int) bool {
+        const cp = String.toCpAscii(c) catch return false;
+        return self.eqCp(cp);
+    }
+
+    pub fn eqCp(self: Grapheme, cp: Codepoint) bool {
         const slice = self.getSlice() orelse return false;
         return (slice.len == 1) and (slice[0] == cp);
-    }
-
-    pub fn eqAscii(self: Grapheme, c: comptime_int) bool {
-        const cp = String.toCpAscii(c) catch return false;
-        return self.eq(cp);
-    }
-
-    pub fn eqBytes(self: Grapheme, input: []const u8) bool {
-        const buf = toCodepoints(ctx.a, input) catch return false;
-        defer buf.deinit();
-        return self.eqSlice(buf.items);
-    }
-
-    pub fn eqCp(self: Grapheme, input: []const u8) bool {
-        const cp = toCp(input) catch return false;
-        return self.eq(cp);
     }
 
     pub fn eqSlice(self: Grapheme, input: CpSlice) bool {
@@ -108,7 +109,7 @@ pub const Grapheme = struct {
         return true;
     }
 
-    pub fn format(self: Grapheme, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+    pub fn format(self: *const Grapheme, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         _ = fmt;
         _ = options;
 
@@ -139,6 +140,10 @@ pub const Index = struct {
     cp: usize = 0,
     gr: usize = 0,
 
+    pub fn addOne(self: Index) Index {
+        return Index {.cp = self.cp + 1, .gr = self.gr + 1};
+    }
+
     fn advance_to_next_grapheme(self: *Index, gr_slice: GraphemeSlice) void {
         self.cp += 1;
         const slice = gr_slice[self.cp..];
@@ -158,8 +163,7 @@ pub const Index = struct {
         _ = try writer.print("Index{{cp={},gr={}}}", .{ self.cp, self.gr });
     }
 
-    // Must return the next grapheme index
-    pub fn next(self: *Index, s: String) ?Index {
+    pub fn nextIndex(self: *Index, s: *const String) ?Index {
         const sd = s.d orelse return null;
         const from_cp = self.cp;
         if (from_cp >= sd.codepoints.items.len)
@@ -178,7 +182,12 @@ pub const Index = struct {
         return null;
     }
 
-    pub fn prev(self: *Index, s: String) ?Index {
+    pub fn next(self: *Index, s: *const String) ?Grapheme {
+        const idx = self.nextIndex(s) orelse return null;
+        return s.charAtIndex(idx);
+    }
+
+    pub fn prevIndex(self: *Index, s: *const String) ?Index {
         const sd = s.d orelse return null;
         const cp_count = sd.codepoints.items.len;
         if (self.cp == 0 or self.cp > cp_count)
@@ -196,6 +205,11 @@ pub const Index = struct {
         }
 
         return null;
+    }
+
+    pub fn prev(self: *Index, s: *const String) ?Grapheme {
+        const idx = self.prevIndex(s) orelse return null;
+        return s.charAtIndex(idx);
     }
 
     pub fn strStart() Index {
@@ -248,11 +262,23 @@ const Data = struct {
     grapheme_count: usize = 0,
 
     pub fn Clone(self: Data) !Data {
-        return Data{
+        return Data {
             .codepoints = try self.codepoints.clone(),
             .graphemes = try self.graphemes.clone(),
             .grapheme_count = self.grapheme_count,
         };
+    }
+
+    pub fn CloneFrom(self: Data, from_index: Index) !Data {
+        var d = Data {};
+        d.codepoints = ArrayList(Codepoint).init(ctx.a);
+        d.graphemes = ArrayList(u1).init(ctx.a);
+        d.grapheme_count = self.grapheme_count - from_index.gr;
+
+        try d.codepoints.appendSlice(self.codepoints.items[from_index.cp..]);
+        try d.graphemes.appendSlice(self.graphemes.items[from_index.cp..]);
+
+        return d;
     }
 };
 
@@ -285,7 +311,8 @@ pub fn deinit(self: String) void {
     sd.graphemes.deinit();
 }
 
-pub fn append(self: *String, what: []const u8) !void {
+const ST=[]const u8;
+pub fn add(self: *String, what: ST) !void {
     if (what.len == 1) {
         const cp = try toCp(what);
         var sd = try self.getPointer();
@@ -295,16 +322,48 @@ pub fn append(self: *String, what: []const u8) !void {
     } else {
         const input = try String.From(what);
         defer input.deinit();
-        try self.appendStr(input);
+        try self.addStr(input);
     }
 }
 
-pub fn appendStr(self: *String, other: String) !void {
+pub fn add2(self: *String, a1: ST, a2: ST) !void {
+    try self.add(a1);
+    try self.add(a2);
+}
+
+pub fn add3(self: *String, a1: ST, a2: ST, a3: ST) !void {
+    try self.add(a1);
+    try self.add(a2);
+    try self.add(a3);
+}
+
+pub fn add4(self: *String, a1: ST, a2: ST, a3: ST, a4: ST) !void {
+    try self.add(a1);
+    try self.add(a2);
+    try self.add(a3);
+    try self.add(a4);
+}
+
+pub fn add5(self: *String, a1: ST, a2: ST, a3: ST, a4: ST, a5: ST) !void {
+    try self.add(a1);
+    try self.add(a2);
+    try self.add(a3);
+    try self.add(a4);
+    try self.add(a5);
+}
+
+pub fn addStr(self: *String, other: String) !void {
     const sdo = other.d orelse return;
     var sd = try self.getPointer();
     try sd.codepoints.appendSlice(sdo.codepoints.items);
     try sd.graphemes.appendSlice(sdo.graphemes.items);
     sd.grapheme_count += sdo.grapheme_count;
+}
+
+pub fn addAsciiChar(self: *String, c: comptime_int) !void {
+    const ch: u8 = @intCast(c);
+    const arr = [_]u8 {ch};
+    try self.add(&arr);
 }
 
 pub fn At(self: String, gr_index: usize) ?Index {
@@ -1111,6 +1170,14 @@ pub fn lastIndexOf2(self: String, needles: CpSlice, start: ?Index, comptime vect
 pub fn mid(self: String, start: usize, count: isize) !String {
     return self.substring(start, count);
 }
+
+pub fn midIndex(self: String, from_index: Index) !String {
+    var sd = self.d orelse return String{};
+    return String{
+        .d = try sd.CloneFrom(from_index),
+    };
+}
+
 /// parseInt tries to parse this Zigstr as an integer of type `T` in base `radix`.
 pub fn parseInt(self: String, comptime T: type, radix: u8) !T {
     const buf = try self.toString();
@@ -1162,9 +1229,9 @@ fn printCpBuf(out: anytype, cp_buf: ArrayList(Codepoint), gr_index: isize, see_a
 
     for (cp_buf.items, 0..) |k, i| {
         const num_as_str = try std.fmt.bufPrint(&temp_str_buf, "{d}", .{k});
-        try codepoints_str.append(num_as_str);
+        try codepoints_str.add(num_as_str);
         const s = if (i < cp_buf.items.len - 1) "+" else " ";
-        try codepoints_str.append(s);
+        try codepoints_str.add(s);
     }
 
     var utf8: ArrayList(u8) = try utf8_from_slice(ctx.a, cp_buf.items);
@@ -1510,6 +1577,17 @@ pub fn toString(self: String) !ArrayList(u8) {
     return utf8_from_slice(ctx.a, sd.codepoints.items);
 }
 
+pub fn toOwnedSlice(self: String) ![]const u8 {
+    const arr = try self.toString();
+    defer arr.deinit();
+    var memory = try ctx.a.alloc(u8, arr.items.len);
+    for (0..arr.items.len) |i| {
+        memory[i] = arr.items[i];
+    }
+
+    return memory;
+}
+
 pub fn toUpper(self: *String) !void {
     const sd = try self.getPointer();
     try toUpper2(sd.codepoints.items);
@@ -1606,6 +1684,7 @@ pub fn utf8_from_slice(a: Allocator, slice: ConstCpSlice) !ArrayList(u8) {
     var buf = ArrayList(u8).init(a);
     errdefer buf.deinit();
     var tmp: [4]u8 = undefined;
+    //mtl.debug(@src(), "slice.len={}, slice={any}", .{slice.len, slice});
     for (slice) |cp| {
         const len = try unicode.utf8Encode(cp, &tmp);
         try buf.appendSlice(tmp[0..len]);

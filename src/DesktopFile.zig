@@ -83,9 +83,7 @@ pub fn deinit(self: *DesktopFile) void {
 fn buildKeyname(name: []const u8, lang: []const u8) !ArrayList(u8) {
     var key = try String.From(name);
     defer key.deinit();
-    try key.append("[");
-    try key.append(lang);
-    try key.append("]");
+    try key.add3("[", lang, "]");
     return key.toString();
 }
 
