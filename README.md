@@ -22,10 +22,11 @@ Tested on Zig 0.14dev
 <p/>
 Example:<br/>
  
- <code>
-  
+ ```zig
+    // before using the string class, must create a string context per thread, it contains cached amd shared data:
     String.ctx = try Context.New(alloc);
     defer String.ctx.deinit();
+
     const hello_world = try String.From("Hello, World!");
     defer hello_world.deinit();
     const hello_split = try hello_world.split(" ", CaseSensitive.Yes, KeepEmptyParts.No);
@@ -79,5 +80,5 @@ Example:<br/>
     try expect(str_ch.charAt(0).?.eqCp("好"));
     try expect(str_ch.charAt(8).?.eqCp("？"));
     try expect(!str_ch.charAt(1).?.eqCp("A"));
-    
-   </code>
+
+```
