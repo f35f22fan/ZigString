@@ -1,9 +1,11 @@
 // because zon file is really just a zig struct
 // comments are really done in the same way using 2 forward slashes
+
 .{
     .paths = .{""},
+    .fingerprint = 0xc96e70cfbdff4ff1,
     // the name of your project
-    .name = "app",
+    .name = .app,
     // the version of your project
     .version = "0.5.0",
 

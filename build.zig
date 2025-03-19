@@ -131,7 +131,7 @@ pub fn build(b: *std.Build) void {
 
 
      const test_regexp = b.addTest(.{
-        .root_source_file = b.path("src/Regexp.zig"),
+        .root_source_file = b.path("src/Regex.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -144,6 +144,6 @@ pub fn build(b: *std.Build) void {
     test_regexp.root_module.addImport("Normalize", zg.module("Normalize"));
     test_regexp.root_module.addImport("CaseFold", zg.module("CaseFold"));
     const regexp_run = b.addRunArtifact(test_regexp);
-    const regexp_step = b.step("test_regexp", "Test Regexp");
+    const regexp_step = b.step("test_regex", "Test Regex");
     regexp_step.dependOn(&regexp_run.step);
 }

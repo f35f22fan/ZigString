@@ -3,6 +3,7 @@ const ArrayList = std.ArrayList;
 const expect = std.testing.expect;
 const expectEqualStrings = std.testing.expectEqualStrings;
 const alloc = std.testing.allocator;
+const mtl = @import("mtl.zig");
 
 const String = @import("String.zig").String;
 const CaseSensitive = String.CaseSensitive;
@@ -187,9 +188,9 @@ test "FindInsertRemove" {
     defer haystack.deinit();
     const cs = String.CaseSensitive.No  ;
     {
-        const index = haystack.indexOf("<human>", 0, cs) orelse return String.Error.NotFound;
+        const index = haystack.indexOf("<human>", .{.cs = cs}) orelse return String.Error.NotFound;
         try expect(index.cp == 0 and index.gr == 0);
-        const index2 = haystack.indexOf("</human>", 0, cs) orelse return String.Error.NotFound;
+        const index2 = haystack.indexOf("</human>", .{.cs = cs}) orelse return String.Error.NotFound;
         try expect(index2.cp == 38 and index2.gr == 37);
     }
 
@@ -214,7 +215,7 @@ test "FindInsertRemove" {
         var s = try String.From(initial_str);
         defer s.deinit();
         const needles = "no";
-        const from = s.indexOf(needles, 0, cs);
+        const from = s.indexOf(needles, .{.cs = cs});
         try s.removeByIndex(from, 200);
         const buf = try s.toString();
         defer buf.deinit();
@@ -231,7 +232,7 @@ test "FindInsertRemove" {
     {
         var s = try String.From(initial_str);
         defer s.deinit();
-        const start_from = s.indexOf("no", 0, cs);
+        const start_from = s.indexOf("no", .{.cs = cs});
         try s.replace(start_from, 2, "si\u{301}");
         const buf = try s.toString();
         defer buf.deinit();
@@ -301,7 +302,7 @@ test "Split" {
     }
 
     const start_from: usize = 0;
-    const at = hello_world.indexOf("lo", start_from, CaseSensitive.Yes);
+    const at = hello_world.indexOf("lo", .{.from=start_from});
     if (at) |index| {
         try expect(index.gr == 3); // .gr=grapheme, .cp=codepoint
     } else {
@@ -369,13 +370,13 @@ test "Char At" {
     // But thanks to this it can hold an arbitrary long grapheme cluster
     // and doesn't need a deinit() call.
     try expect(str.charAt(2).?.eqCp(letter_s));
-    try expect(str.charAt(32).?.eqChar('e'));
+    try expect(str.charAt(32).?.eqAscii('e'));
 
     const at: usize = 1;
     if (str.charAt(at)) |g| {
-        try expect(!g.eqChar('a'));
-        try expect(g.eqChar('o'));
-        try expect(!g.eqChar('G'));
+        try expect(!g.eqAscii('a'));
+        try expect(g.eqAscii('o'));
+        try expect(!g.eqAscii('G'));
         try expect(!g.eq("\u{65}\u{301}"));
     } else {
         std.debug.print("Nothing found at {}\n", .{at});
@@ -386,7 +387,7 @@ test "Char At" {
         // std.debug.print("{s}(): Grapheme len={}, slice=\"{any}\", index={}\n",
         //     .{@src().fn_name, g.len, slice, g.index()});
         try expect(g.eq("\u{65}\u{301}"));
-        try expect(!g.eqChar('G'));
+        try expect(!g.eqAscii('G'));
     }
 
     const str_ru = try String.From("Жизнь");
@@ -407,25 +408,96 @@ test "Char At" {
     // String.charAtIndex() is faster (almost O(1)) then CharAt(), which is O(n)
     // because each time CharAt() is called it iterates from the start
     // of the string to get to the grapheme at the given index,
-    // while charAtIndex() only from the previous position inside the string.
-    // So here's usage of CharAtIndex() which is used to efficiently
+    // while charAtIndex() goes straight to the given place inside the string.
+    // So here's usage of charAtIndex() which is used to efficiently
     // iterate over a string to print it forth and then backwards:
     const both_ways = try String.From("Jos\u{65}\u{301}"); // "José"
     defer both_ways.deinit();
-    var index = String.strStart();
-    while (index.next(&both_ways)) |gr| { // ends up printing "José"
-        std.debug.print("{}", .{gr}); // the grapheme's index is at gr.idx
+    {
+        var it = String.Iterator.New(&both_ways, String.strStart());
+        while (it.next()) |gr| { // ends up printing "José"
+            std.debug.print("{}", .{gr}); // the grapheme's index is at gr.idx
+        }
+        std.debug.print("\n", .{});
     }
-    std.debug.print("\n", .{});
-    index = both_ways.strEnd();
-    while (index.prev(&both_ways)) |gr| { // ends up printing "ésoJ"
-        std.debug.print("{}", .{gr});
+    
+    {
+        var it = String.Iterator.New(&both_ways, both_ways.strEnd());
+        while (it.prev()) |gr| { // ends up printing "ésoJ"
+            std.debug.print("{}", .{gr});
+        }
+        std.debug.print("\n", .{});
     }
-    std.debug.print("\n", .{});
+
+    {
+        // let's iterate from a given substring forward, from "s" in this case:
+        if (both_ways.indexOf("s", .{.from = 2})) |idx| {
+            var it = String.Iterator.New(&both_ways, idx);
+            while (it.next()) |gr| { // prints "sé"
+                std.debug.print("{}", .{gr});
+            }
+            std.debug.print("\n", .{});
+        }
+    }
 
     const str_ch = try String.From("好久不见，你好吗？");
     defer str_ch.deinit();
     try expect(str_ch.charAt(0).?.eq("好"));
+    try expect(str_ch.charAt(3).?.eq("见"));
     try expect(str_ch.charAt(8).?.eq("？"));
     try expect(!str_ch.charAt(1).?.eq("A"));
+
+    if (true) {
+        const s = try String.From("Jos\u{65}\u{301}t");
+        defer s.deinit();
+        {
+            const idx = Index {.cp=2, .gr=2};
+            mtl.debug(@src(), "From {}: ", .{idx});
+            var it = String.Iterator.New(&s, idx);
+            while (it.next()) |gr| {
+                mtl.debug(@src(), "gr={}, gr.idx={}, iter.idx={}", .{gr, gr.idx, it.idx});
+            }
+        }
+
+        {
+            mtl.debug(@src(), "From zero: ", .{});
+            var it = String.Iterator.New(&s, null);
+            while (it.next()) |gr| {
+                mtl.debug(@src(), "gr={}, gr.idx={}, iter.idx={}", .{gr, gr.idx, it.idx});
+            }
+        }
+
+        {
+            const idx = String.Index {.cp = 2, .gr = 2};
+            mtl.debug(@src(), "Backwards from: {}", .{idx});
+            var it = String.Iterator.New(&s, idx);
+            while (it.prev()) |gr| {
+                mtl.debug(@src(), "gr={}, gr.idx={}, iter.idx={}", .{gr, gr.idx, it.idx});
+            }
+        }
+
+        {
+            const idx = s.strEnd();
+            mtl.debug(@src(), "Backwards from: {}", .{idx});
+            var it = String.Iterator.New(&s, idx);
+            while (it.prev()) |gr| {
+                mtl.debug(@src(), "gr={}, gr.idx={}, iter.idx={}", .{gr, gr.idx, it.idx});
+            }
+        }
+    }
 }
+
+// test "Qt chars" {
+//     String.ctx = try Context.New(alloc);
+//     defer String.ctx.deinit();
+//     {
+//         const s = try String.From("Jos\u{65}\u{301}");
+//         defer s.deinit();
+//         mtl.debug(@src(), "Count: {} {}", .{s.size(), s});
+//     }
+//     {
+//         const s = try String.From("abc\u{00010139}def\u{00010102}g");
+//         defer s.deinit();
+//         mtl.debug(@src(), "Count: {} {}", .{s.size(), s});
+//     }
+// }

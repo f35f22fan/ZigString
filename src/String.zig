@@ -87,7 +87,7 @@ pub const Grapheme = struct {
         }
     }
 
-    pub fn eqChar(self: Grapheme, c: comptime_int) bool {
+    pub fn eqAscii(self: Grapheme, c: comptime_int) bool {
         const cp = String.toCpAscii(c) catch return false;
         return self.eqCp(cp);
     }
@@ -125,14 +125,59 @@ pub const Grapheme = struct {
 
     pub fn toOwned(self: Grapheme) !ArrayList(Codepoint) {
         var a = ArrayList(Codepoint).init(ctx.a);
-        errdefer a.deinit();
-        const sd = self.s.d orelse return String.Error.NotFound;
+        const sd = self.s.d orelse return a;
         const slice = sd.codepoints.items[0..];
         for (0..self.len) |k| {
             try a.append(slice[k]);
         }
 
         return a;
+    }
+};
+
+pub const Iterator = struct {
+    first_time: bool = true,
+    idx: Index,
+    str: *const String,
+
+    pub fn New(str: *const String, index: ?Index) Iterator {
+        const idx = if (index) |i| i else Index.strStart();
+        return Iterator {.str = str, .idx = idx};
+    }
+
+    pub fn continueFrom(self: *Iterator, idx: Index) void {
+        self.idx = idx;
+        self.first_time = true;
+    }
+
+    pub fn nextIndex(self: *Iterator) ?Index {
+        if (self.first_time) {
+            self.first_time = false;
+            return self.idx;
+        }
+
+        const sd = self.str.d orelse return null;
+        if (self.idx.cp >= sd.codepoints.items.len)
+            return null;
+        
+        return if (self.idx.advance_to_next_grapheme(sd.graphemes.items)) self.idx else null;
+    }
+
+    pub fn next(self: *Iterator) ?Grapheme {
+        const index = self.nextIndex() orelse return null;
+        return self.str.charAtIndex(index);
+    }
+
+    pub fn prev(self: *Iterator) ?Grapheme {
+        var idx: Index = undefined;
+        if (self.first_time) {
+            self.first_time = false;
+            idx = self.idx;
+        } else {
+            idx = self.idx.prevIndex(self.str) orelse return null;
+        }
+        
+        return self.str.charAtIndex(idx);
     }
 };
 
@@ -144,16 +189,27 @@ pub const Index = struct {
         return Index {.cp = self.cp + 1, .gr = self.gr + 1};
     }
 
-    fn advance_to_next_grapheme(self: *Index, gr_slice: GraphemeSlice) void {
+    pub fn advanceToNextGrapheme(self: *Index, s: *const String) void {
+        const sd = s.d orelse return;
+        if (self.cp < sd.codepoints.items.len)
+            self.advance_to_next_grapheme(sd.graphemes.items);
+    }
+
+    fn advance_to_next_grapheme(self: *Index, graphemes: GraphemeSlice) bool {
         self.cp += 1;
-        const slice = gr_slice[self.cp..];
-        for (slice, 0..) |gr_bit, i| {
+        for (graphemes[(self.cp)..], 0..) |gr_bit, i| {
             if (gr_bit == 1) {
                 self.cp += i;
                 self.gr += 1;
-                return;
+                return true;
             }
         }
+
+        return false;
+    }
+
+    pub fn clone(self: Index) Index {
+        return Index {.cp = self.cp, .gr = self.gr};
     }
 
     /// format implements the `std.fmt` format interface for printing types.
@@ -163,31 +219,12 @@ pub const Index = struct {
         _ = try writer.print("Index{{cp={},gr={}}}", .{ self.cp, self.gr });
     }
 
-    pub fn nextIndex(self: *Index, s: *const String) ?Index {
-        const sd = s.d orelse return null;
-        const from_cp = self.cp;
-        if (from_cp >= sd.codepoints.items.len)
-            return null;
-
-        const gr_slice = sd.graphemes.items[from_cp..];
-        for (gr_slice, 0..) |gr_bit, i| {
-            if (gr_bit == 1) {
-                self.cp = from_cp + i;
-                const index = self.*;
-                self.advance_to_next_grapheme(sd.graphemes.items);
-                return index;
-            }
-        }
-
-        return null;
+    pub fn hasNext(self: Index, s: *const String) bool {
+        const sd = s.d orelse return false;
+        return self.cp < sd.codepoints.items.len;
     }
 
-    pub fn next(self: *Index, s: *const String) ?Grapheme {
-        const idx = self.nextIndex(s) orelse return null;
-        return s.charAtIndex(idx);
-    }
-
-    pub fn prevIndex(self: *Index, s: *const String) ?Index {
+    fn prevIndex(self: *Index, s: *const String) ?Index {
         const sd = s.d orelse return null;
         const cp_count = sd.codepoints.items.len;
         if (self.cp == 0 or self.cp > cp_count)
@@ -205,11 +242,6 @@ pub const Index = struct {
         }
 
         return null;
-    }
-
-    pub fn prev(self: *Index, s: *const String) ?Grapheme {
-        const idx = self.prevIndex(s) orelse return null;
-        return s.charAtIndex(idx);
     }
 
     pub fn strStart() Index {
@@ -352,18 +384,28 @@ pub fn add5(self: *String, a1: ST, a2: ST, a3: ST, a4: ST, a5: ST) !void {
     try self.add(a5);
 }
 
+pub fn addAscii(self: *String, c: comptime_int) !void {
+    const ch: u8 = @intCast(c);
+    const arr = [_]u8 {ch};
+    try self.add(&arr);
+}
+
+pub fn addGrapheme(self: *String, gr: Grapheme) !void {
+    const slice = gr.getSlice() orelse return String.Error.Other;
+    var sd = try self.getPointer();
+    sd.grapheme_count += 1;
+    for (slice, 0..) |cp, i| {
+        try sd.codepoints.append(cp);
+        try sd.graphemes.append(if(i == 0) 1 else 0);
+    }
+}
+
 pub fn addStr(self: *String, other: String) !void {
     const sdo = other.d orelse return;
     var sd = try self.getPointer();
     try sd.codepoints.appendSlice(sdo.codepoints.items);
     try sd.graphemes.appendSlice(sdo.graphemes.items);
     sd.grapheme_count += sdo.grapheme_count;
-}
-
-pub fn addAsciiChar(self: *String, c: comptime_int) !void {
-    const ch: u8 = @intCast(c);
-    const arr = [_]u8 {ch};
-    try self.add(&arr);
 }
 
 pub fn At(self: String, gr_index: usize) ?Index {
@@ -519,8 +561,8 @@ fn countGraphemesSimd(slice: GraphemeSlice) usize {
             break;
         }
         const line: @Vector(SimdVecLen, u1) = slice[pos..][0..SimdVecLen].*;
-        const matches = line == vec_needles;
-        count += std.simd.countTrues(matches);
+        const does_match = line == vec_needles;
+        count += std.simd.countTrues(does_match);
         pos += SimdVecLen;
     }
 
@@ -791,11 +833,11 @@ pub fn findOneSimd(self: String, needle: Codepoint, from: usize, comptime vec_le
         }
 
         const h: @Vector(vec_len, Codepoint) = haystack[pos..][0..vec_len].*;
-        const matches = h == vector_needles;
+        const does_match = h == vector_needles;
 
-        if (@reduce(.Or, matches)) { // does it have any true value, if so,
+        if (@reduce(.Or, does_match)) { // does it have any true value, if so,
             // we have a match, we just need to find its index
-            const result = @select(Codepoint, matches, vec_indices, nulls);
+            const result = @select(Codepoint, does_match, vec_indices, nulls);
 
             const index = pos + @reduce(.Min, result);
             // out.print("{s} returning FoundAt={}, from={}\n",
@@ -830,10 +872,10 @@ pub fn findOneSimdFromEnd(self: String, needle: Codepoint, start: ?usize, compti
 
         const vector_loc = pos - vec_len;
         const h: @Vector(vec_len, Codepoint) = haystack[vector_loc..][0..vec_len].*;
-        const matches = h == vector_needles;
+        const does_match = h == vector_needles;
 
-        if (@reduce(.Or, matches)) {
-            const data_vec = @select(Codepoint, matches, vec_indices, nulls);
+        if (@reduce(.Or, does_match)) {
+            const data_vec = @select(Codepoint, does_match, vec_indices, nulls);
             const index = @reduce(.Max, data_vec);
             return index + vector_loc;
         }
@@ -1027,12 +1069,17 @@ pub fn indexOfCp2(self: String, input: CpSlice, from: Index, cs: CaseSensitive) 
     return null;
 }
 
-pub fn indexOf(self: String, input: []const u8, from_gr_index: usize, cs: CaseSensitive) ?Index {
-    if (from_gr_index == 0) {
-        return self.indexOf2(input, Index.strStart(), cs);
+pub const Find = struct {
+    from: usize = 0,
+    cs: CaseSensitive = CaseSensitive.Yes,
+};
+
+pub fn indexOf(self: String, input: []const u8, find: Find) ?Index {
+    if (find.from == 0) {
+        return self.indexOf2(input, Index.strStart(), find.cs);
     }
-    const index = self.graphemeAddress(from_gr_index) orelse return null;
-    return self.indexOf2(input, index, cs);
+    const index = self.graphemeAddress(find.from) orelse return null;
+    return self.indexOf2(input, index, find.cs);
 }
 
 pub fn indexOf2(self: String, input: []const u8, from_index: ?Index, cs: CaseSensitive) ?Index {
@@ -1054,6 +1101,15 @@ pub fn indexOf3(self: String, needles: CpSlice, from_index: ?Index, cs: CaseSens
         return self.findManySimd(needles, from, SimdVecLen);
     }
     return self.findManyLinear(needles, from, cs);
+}
+
+inline fn endsWithGrapheme(a: []const u1, end: usize) bool {
+    if (a.len < end)
+        return false;
+    if (a.len == end)
+        return true; // goes till the end, which implies it ends with a grapheme
+
+    return a[end] == 1;// the next one is a grapheme, therefore the previous sequence ends with a grapheme
 }
 
 pub fn init(self: *String, input: []const u8, clear: Clear) !void {
@@ -1165,6 +1221,33 @@ pub fn lastIndexOf2(self: String, needles: CpSlice, start: ?Index, comptime vect
     }
 
     return null;
+}
+
+pub fn matches(self: String, needles: []const u8, from: Index) ?Index {
+    if (needles.len == 0) {
+        // mtl.debug(@src(), "needles.len == 0", .{});
+        return null;
+    }
+    const input = String.toCodepoints(ctx.a, needles) catch return null;
+    defer input.deinit();
+    const sd = self.d orelse return null;
+    const end = input.items.len + from.cp;
+    if (!endsWithGrapheme(sd.graphemes.items, end)) {
+        return null;
+    }
+
+    const arr1 = sd.codepoints.items[from.cp..end];
+    var gr_count: usize = 0;
+    for (arr1, input.items, sd.graphemes.items[from.cp..end])|a, b, gr| {
+        if (a != b) {
+            return null;
+        }
+
+        if (gr == 1)
+            gr_count += 1;
+    }
+
+    return Index {.cp = end, .gr = from.gr + gr_count};
 }
 
 pub fn mid(self: String, start: usize, count: isize) !String {
@@ -1323,7 +1406,7 @@ fn readCpCount(reader: anytype) !usize {
 }
 
 pub fn remove(self: *String, needles: []const u8) !void {
-    const from = self.indexOf(needles, 0, CaseSensitive.Yes);
+    const from = self.indexOf(needles, .{});
     const count = countGraphemesRaw(ctx.a, needles);
     try self.removeByIndex(from, count);
 }
@@ -1378,8 +1461,12 @@ pub fn replaceStr(self: *String, start_index: ?Index, gr_count_to_remove: usize,
     try self.insertStr(start_index, replacement);
 }
 
-pub fn reset(self: *String, str: []const u8) !void {
+pub fn resetTo(self: *String, str: []const u8) !void {
     try self.init(str, Clear.Yes);
+}
+
+pub fn reset(self: *String) void {
+    self.clearAndFree();
 }
 
 /// returns the graphemes count in string
@@ -1486,10 +1573,24 @@ pub fn startsWithStr(self: String, needles: String, cs: CaseSensitive) bool {
 }
 
 /// returns `Index` after the last grapheme, exec is O(1)
+// pub fn strEnd(self: String) Index {
+//     const sd = self.d orelse return strStart();
+//     return Index{ .cp = sd.codepoints.items.len, .gr = sd.grapheme_count };
+// }
+
 pub fn strEnd(self: String) Index {
     const sd = self.d orelse return strStart();
-    return Index{ .cp = sd.codepoints.items.len, .gr = sd.grapheme_count };
+    var i: usize = sd.codepoints.items.len;
+    while (i > 0) {
+        i -= 1;
+        if (sd.graphemes.items[i] == 1) {
+            break;
+        }
+    }
+
+    return Index {.cp = i, .gr = sd.grapheme_count - 1};
 }
+
 
 /// returns `Index` of the first item
 pub fn strStart() Index {
@@ -1765,15 +1866,29 @@ pub fn toBlob(self: String, alloc: Allocator) ![]const u8 {
     return memory;
 }
 
-const posix = (builtin.target.os.tag == .linux);
+const posix = (builtin.target.os.tag != .windows);
+
+pub const COLOR_BLACK = if (posix) "\x1B[38;5;16m" else "";
 pub const COLOR_BLUE = if (posix) "\x1B[34m" else "";
+pub const COLOR_CYAN = if (posix) "\x1B[36m" else "";
 pub const COLOR_DEFAULT = if (posix) "\x1B[0m" else "";
 pub const COLOR_GREEN = if (posix) "\x1B[32m" else "";
+pub const COLOR_LIGHTGRAY = if (posix) "\x1B[37m" else "";
+pub const COLOR_MAGENTA = if (posix) "\x1B[35m" else "";
+pub const COLOR_ORANGE = if (posix) "\x1B[0;33m" else "";
 pub const COLOR_RED = if (posix) "\x1B[0;91m" else "";
 pub const COLOR_YELLOW = if (posix) "\x1B[93m" else "";
-pub const COLOR_MAGENTA = if (posix) "\x1B[35m" else "";
-pub const COLOR_CYAN = if (posix) "\x1B[36m" else "";
-pub const COLOR_BLACK = if (posix) "\x1B[38;5;16m" else "";
+
+pub const BGCOLOR_BLACK = if (posix) "\x1B[40m" else "";
+pub const BGCOLOR_BLUE = if (posix) "\x1B[44m" else "";
+pub const BGCOLOR_DEFAULT = if (posix) "\x1B[49m" else "";
+pub const BGCOLOR_GREEN = if (posix) "\x1B[42m" else "";
+pub const BGCOLOR_LIGHTGRAY = if (posix) "\x1B[47m" else "";
+pub const BGCOLOR_MAGENTA = if (posix) "\x1B[45m" else "";
+pub const BGCOLOR_ORANGE = if (posix) "\x1B[43m" else "";
+pub const BGCOLOR_RED = if (posix) "\x1B[41m" else "";
+pub const BGCOLOR_YELLOW = if (posix) "\x1B[103m" else "";
+
 pub const BLINK_START = if (posix) "\x1B[5m" else "";
 pub const BLINK_END = if (posix) "\x1B[25m" else "";
 pub const BOLD_START = if (posix) "\x1B[1m" else "";

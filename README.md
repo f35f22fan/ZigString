@@ -20,6 +20,8 @@ Internally it uses SIMD or linear operations when needed. Under the hood it work
  (from the /src folder) for examples.<br/>
 Tested on Zig 0.14dev
 <p/>
+### Regex support is a work in progress
+<p/>
 Example:<br/>
  
  ```zig
@@ -61,24 +63,28 @@ Example:<br/>
     // charAt() usage:
     const both_ways = try String.From("Jos\u{65}\u{301}"); // "José"
     defer both_ways.deinit();
-    var index = String.strStart();
-    while (index.next(&both_ways)) |gr| { // ends up printing "José"
-        std.debug.print("{}", .{gr}); // the grapheme's index is at gr.idx
+    {
+        var it = String.Iterator.New(&both_ways, String.strStart());
+        while (it.next()) |gr| { // ends up printing "José"
+            std.debug.print("{}", .{gr}); // the grapheme's index is at gr.idx
+        }
+        std.debug.print("\n", .{});
     }
-    std.debug.print("\n", .{});
-    index = both_ways.strEnd();
-    while (index.prev(&both_ways)) |gr| { // ends up printing "ésoJ"
-        std.debug.print("{}", .{gr});
+    
+    {
+        var it = String.Iterator.New(&both_ways, both_ways.strEnd());
+        while (it.prev()) |gr| { // ends up printing "ésoJ"
+            std.debug.print("{}", .{gr});
+        }
+        std.debug.print("\n", .{});
     }
-    std.debug.print("\n", .{});
 
     // Some Chinese:
     const str_ch = try String.From("好久不见，你好吗？");
     defer str_ch.deinit();
-    try str_ch.printGraphemes(@src());
-    try str_ch.printCodepoints(@src());
-    try expect(str_ch.charAt(0).?.eqCp("好"));
-    try expect(str_ch.charAt(8).?.eqCp("？"));
-    try expect(!str_ch.charAt(1).?.eqCp("A"));
+    try expect(str_ch.charAt(0).?.eq("好"));
+    try expect(str_ch.charAt(3).?.eq("见"));
+    try expect(str_ch.charAt(8).?.eq("？"));
+    try expect(!str_ch.charAt(1).?.eq("A"));
 
 ```
