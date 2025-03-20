@@ -119,10 +119,6 @@ pub const Grapheme = struct {
         _ = try writer.print("{s}", .{utf8.items});
     }
 
-    pub fn index(self: Grapheme) Index {
-        return self.idx;
-    }
-
     pub fn toOwned(self: Grapheme) !ArrayList(Codepoint) {
         var a = ArrayList(Codepoint).init(ctx.a);
         const sd = self.s.d orelse return a;
@@ -185,8 +181,8 @@ pub const Index = struct {
     cp: usize = 0,
     gr: usize = 0,
 
-    pub fn addOne(self: Index) Index {
-        return Index {.cp = self.cp + 1, .gr = self.gr + 1};
+    pub fn addRaw(self: Index, how_much: usize) Index {
+        return Index {.cp = self.cp + how_much, .gr = self.gr + how_much};
     }
 
     pub fn advanceToNextGrapheme(self: *Index, s: *const String) void {
@@ -376,14 +372,6 @@ pub fn add4(self: *String, a1: ST, a2: ST, a3: ST, a4: ST) !void {
     try self.add(a4);
 }
 
-pub fn add5(self: *String, a1: ST, a2: ST, a3: ST, a4: ST, a5: ST) !void {
-    try self.add(a1);
-    try self.add(a2);
-    try self.add(a3);
-    try self.add(a4);
-    try self.add(a5);
-}
-
 pub fn addAscii(self: *String, c: comptime_int) !void {
     const ch: u8 = @intCast(c);
     const arr = [_]u8 {ch};
@@ -414,6 +402,10 @@ pub fn At(self: String, gr_index: usize) ?Index {
 
 pub fn between(self: String, start: usize, end: usize) !String {
     return self.substring(start, @intCast(end - start));
+}
+
+pub fn betweenIndices(self: String, start: Index, end: Index) !String {
+    return self.substr(start, end.gr - start.gr);
 }
 
 pub fn charAt(self: *const String, at: usize) ?Grapheme {
@@ -1074,24 +1066,29 @@ pub const Find = struct {
     cs: CaseSensitive = CaseSensitive.Yes,
 };
 
+pub const FindIndex = struct {
+    from: Index = Index.strStart(),
+    cs: CaseSensitive = CaseSensitive.Yes,
+};
+
 pub fn indexOf(self: String, input: []const u8, find: Find) ?Index {
     if (find.from == 0) {
-        return self.indexOf2(input, Index.strStart(), find.cs);
+        return self.indexOf2(input, .{.cs = find.cs});
     }
     const index = self.graphemeAddress(find.from) orelse return null;
-    return self.indexOf2(input, index, find.cs);
+    return self.indexOf2(input, .{.from=index, .cs=find.cs});
 }
 
-pub fn indexOf2(self: String, input: []const u8, from_index: ?Index, cs: CaseSensitive) ?Index {
+pub fn indexOf2(self: String, input: []const u8, find: FindIndex) ?Index {
     const sd = self.d orelse return null;
     const needles = String.toCodepoints(ctx.a, input) catch return null;
     defer needles.deinit();
-    const from = from_index orelse Index.strStart();
-    if (cs == CaseSensitive.Yes and sd.codepoints.items.len >= SimdVecLen) {
+    const from = find.from;
+    if (find.cs == CaseSensitive.Yes and sd.codepoints.items.len >= SimdVecLen) {
         return self.findManySimd(needles.items, from, SimdVecLen);
     }
 
-    return self.findManyLinear(needles.items, from, cs);
+    return self.findManyLinear(needles.items, find.from, find.cs);
 }
 
 pub fn indexOf3(self: String, needles: CpSlice, from_index: ?Index, cs: CaseSensitive) ?Index {
@@ -1167,6 +1164,14 @@ pub fn isEmpty(self: String) bool {
 inline fn isGrapheme(self: String, i: usize) bool {
     const sd = self.d orelse return false;
     return sd.graphemes.items[i] == 1;
+}
+
+pub fn iterator(self: *const String) Iterator {
+    return Iterator.New(self, null);
+}
+
+pub fn iteratorFrom(self: *const String, from: Index) Iterator {
+    return Iterator.New(self, from);
 }
 
 pub fn lastIndexOf(self: String, needles: []const u8, from_index: ?Index) ?Index {
@@ -1597,17 +1602,15 @@ pub fn strStart() Index {
     return Index{};
 }
 
-pub fn substring(self: String, start: usize, count: isize) !String {
-    const sd = self.d orelse return Error.Alloc;
-    const how_many_gr: usize = if (count == -1) sd.grapheme_count - start else @intCast(count);
-    const index = self.graphemeAddress(start) orelse return Error.NotFound;
-    if (index.gr + how_many_gr > sd.grapheme_count) {
+pub fn substr(self: String, start: Index, how_many_gr: usize) !String {
+    const sd = self.d orelse return Error.Other;
+    if (start.gr + how_many_gr > sd.grapheme_count) {
         return Error.Index;
     }
 
     var gr_sofar: usize = 0;
     var cp_to_copy: usize = 0;
-    for (sd.graphemes.items[index.cp..], 0..) |g, i| {
+    for (sd.graphemes.items[start.cp..], 0..) |g, i| {
         if (g == 1) {
             gr_sofar += 1;
             if (gr_sofar > how_many_gr) {
@@ -1621,12 +1624,19 @@ pub fn substring(self: String, start: usize, count: isize) !String {
     try s.ensureTotalCapacity(cp_to_copy);
     errdefer s.deinit();
     var sdo = try s.getPointer();
-    const end: usize = index.cp + cp_to_copy;
-    try sdo.codepoints.appendSlice(sd.codepoints.items[index.cp..end]);
-    try sdo.graphemes.appendSlice(sd.graphemes.items[index.cp..end]);
+    const end_cp: usize = start.cp + cp_to_copy;
+    try sdo.codepoints.appendSlice(sd.codepoints.items[start.cp..end_cp]);
+    try sdo.graphemes.appendSlice(sd.graphemes.items[start.cp..end_cp]);
     sdo.grapheme_count = countGraphemes(sdo.graphemes.items);
 
     return s;
+}
+
+pub fn substring(self: String, start: usize, count: isize) !String {
+    const sd = self.d orelse return Error.Other;
+    const how_many_gr: usize = if (count == -1) sd.grapheme_count - start else @intCast(count);
+    const index = self.graphemeAddress(start) orelse return Error.NotFound;
+    return self.substr(index, how_many_gr);
 }
 
 pub fn toCp(input: []const u8) !Codepoint {

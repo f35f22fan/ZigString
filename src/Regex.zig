@@ -7,19 +7,28 @@ const Regex = @This();
 const Allocator = std.mem.Allocator;
 
 const Meta = enum(u8) {
-    Dot,
-    Plus,
-    Asterisk,
-    Question,
     Not,
     Or,
-    Greater,
-    Lesser,
     NonCapture,
+    NamedCapture,
     NegativeLookAhead,
     NegativeLookBehind,
     PositiveLookAhead,
     PositiveLookBehind,
+
+    SymbolAnyChar,
+    SymbolNewLine,
+    SymbolTab,
+    SymbolNumber,
+    SymbolNonNumber,
+    SymbolWordChar,
+    SymbolNonWordChar,
+    SymbolWhitespace,
+    SymbolNonWhitespace,
+    SymbolWordBoundary,
+    SymbolNonWordBoundary,
+    SymbolStartOfLine,
+    SymbolEndOfLine,
 };
 
 const TokenEnum = enum(u8) {
@@ -27,6 +36,7 @@ const TokenEnum = enum(u8) {
     qtty,
     meta,
     str,
+    name,
 };
 
 const Token = union(TokenEnum) {
@@ -34,6 +44,7 @@ const Token = union(TokenEnum) {
     qtty: Qtty,
     meta: Meta,
     str: Str,
+    name: Str,
 
     inline fn isMeta(self: Token, param: Meta) bool {
         switch(self) {
@@ -42,28 +53,30 @@ const Token = union(TokenEnum) {
         }
     }
 
-    pub fn isDot(self: Token) bool {
-        return self.isMeta(Meta.Dot);
+    pub fn isAnyChar(self: Token) bool {
+        return self.isMeta(Meta.SymbolAnyChar);
     }
 
     pub fn isNot(self: Token) bool {
         return self.isMeta(Meta.Not);
     }
 
-    pub fn isAsterisk(self: Token) bool {
-        return self.isMeta(Meta.Asterisk);
-    }
-
-    pub fn isQuestion(self: Token) bool {
-        return self.isMeta(Meta.Question);
-    }
-
-    pub fn isPlus(self: Token) bool {
-        return self.isMeta(Meta.Plus);
+    pub fn isName(self: Token) bool {
+        switch (self) {
+            .name => return true,
+            else => return false,
+        }
     }
 
     pub fn isOr(self: Token) bool {
         return self.isMeta(Meta.Or);
+    }
+
+    pub fn isQtty(self: Token) bool {
+        switch (self) {
+            .qtty => return true,
+            else => return false,
+        }
     }
 
     pub fn isGreater(self: Token) bool {
@@ -89,6 +102,9 @@ const Token = union(TokenEnum) {
             },
             .str => |s| {
                 // mtl.debug(@src(), "{}", .{s});
+                s.deinit();
+            },
+            .name => |s| {
                 s.deinit();
             },
             .qtty => |q| {
@@ -160,17 +176,20 @@ pub const Qtty = struct {
         self.b = inf();
     }
 
+    pub fn ZeroOrMore() Qtty { return Qtty {.a = 0, .b = inf()}; }
     pub fn zeroOrMore(self: Qtty) bool { // x*
         if (self.a != 0) return false;
         return self.b_inf();
     }
 
+    pub fn ZeroOrOne() Qtty { return Qtty {.a = 0, .b = 1}; }
     pub fn zeroOrOne(self: Qtty) bool { // x?
         if (self.a != 0) return false;
         if (self.b) |n| return (n == 1);
         return false;
     }
 
+    pub fn OneOrMore() Qtty { return Qtty {.a = 1, .b = inf()}; }
     pub fn oneOrMore(self: Qtty) bool { // x+
         if (self.a != 1) return false;
         return self.b_inf();
@@ -254,6 +273,9 @@ pub const Group = struct {
                 },
                 .str => |s| {
                     try writer.print("{s}{s}{}{s}{s} ", .{Str.COLOR_BLACK, Str.BGCOLOR_YELLOW, s, Str.BGCOLOR_DEFAULT, Str.COLOR_DEFAULT});
+                },
+                .name => |s| {
+                    try writer.print("{s}{s}{}{s}{s} ", .{Str.COLOR_BLUE, Str.BGCOLOR_YELLOW, s, Str.BGCOLOR_DEFAULT, Str.COLOR_DEFAULT});
                 }
             }
         }
@@ -289,7 +311,7 @@ pub const Group = struct {
                     g.setSquare();
                     const newg = it.next() orelse return Str.Error.Other;
                     it.continueFrom(try g.analyze(newg.idx));
-                    try self.appendGroup(g);
+                    try self.addGroup(g);
                     return it.idx;
                 } else {
                     self.setSquare();
@@ -302,50 +324,82 @@ pub const Group = struct {
                     g.setRound();
                     const newg = it.next() orelse return Str.Error.Other;
                     it.continueFrom(try g.analyze(newg.idx));
-                    try self.appendGroup(g);
+                    try self.addGroup(g);
                     return it.idx;
                 } else {
                     self.setRound();
                 }
             } else if (gr.eqAscii(')')) {
                 need_create_new = self.is_enclosed();
-            } else if (gr.eqAscii('*')) {
-                try self.appendMeta(Meta.Asterisk);
             } else if (gr.eqAscii('?')) {
                 const s: *Str = &self.regex.pattern;
                 if (s.matches("?:", gr.idx)) |idx| {
                     it.continueFrom(idx);
-                    try self.appendMeta(Meta.NonCapture);
+                    try self.addMeta(Meta.NonCapture);
                 } else if (s.matches("?!", gr.idx)) |idx| {
                     it.continueFrom(idx);
-                    try self.appendMeta(Meta.NegativeLookAhead);
+                    try self.addMeta(Meta.NegativeLookAhead);
                 } else if (s.matches("?<!", gr.idx)) |idx| {
                     it.continueFrom(idx);
-                    try self.appendMeta(Meta.NegativeLookBehind);
+                    try self.addMeta(Meta.NegativeLookBehind);
                 } else if (s.matches("?=", gr.idx)) |idx| {
                     it.continueFrom(idx);
-                    try self.appendMeta(Meta.PositiveLookAhead);
+                    try self.addMeta(Meta.PositiveLookAhead);
                 } else if (s.matches("?<=", gr.idx)) |idx| {
                     it.continueFrom(idx);
-                    try self.appendMeta(Meta.PositiveLookBehind);
+                    try self.addMeta(Meta.PositiveLookBehind);
                 } else if (s.matches("?<", gr.idx)) |idx| { //(?<name>\\w+) = name = e.g."Jordan"
                     it.continueFrom(idx);
                     // named capture
+                    if (s.indexOf2(">", .{.from = idx.addRaw(2)})) |end_idx| {
+                        const name = try s.betweenIndices(idx, end_idx);
+                        // mtl.debug(@src(), "Name: \"{}\"", .{name});
+                        try self.addMeta(Meta.NamedCapture);
+                        try self.addName(name);
+                        it.continueFrom(end_idx.addRaw(1)); // go past ">"
+                    }
+                } else { // just "?"
+                    try self.addQtty(Qtty.ZeroOrOne());
+                }
+            } else if (gr.eqAscii('\\')) {
+                const symbol = it.next() orelse break;
+                if (symbol.eqAscii('d')) {
+                    try self.addMeta(Meta.SymbolNumber);
+                } else if (symbol.eqAscii('D')) {
+                    try self.addMeta(Meta.SymbolNonNumber);
+                } else if (symbol.eqAscii('w')) {
+                    try self.addMeta(Meta.SymbolWordChar);
+                } else if (symbol.eqAscii('W')) {
+                    try self.addMeta(Meta.SymbolNonWordChar);
+                } else if (symbol.eqAscii('s')) {
+                    try self.addMeta(Meta.SymbolWhitespace);
+                } else if (symbol.eqAscii('S')) {
+                    try self.addMeta(Meta.SymbolNonWhitespace);
+                } else if (symbol.eqAscii('.')) {
+                    try self.addMeta(Meta.SymbolAnyChar);
+                } else if (symbol.eqAscii('b')) {
+                    try self.addMeta(Meta.SymbolWordBoundary);
+                } else if (symbol.eqAscii('B')) {
+                    try self.addMeta(Meta.SymbolNonWordBoundary);
+                }
+            } else if (gr.eqAscii('^')) {
+                if (gr.idx.gr == 0) {
+                    try self.addMeta(Meta.SymbolStartOfLine);
+                } else {
+                    try self.addMeta(Meta.Not);
                 }
             } else if (gr.eqAscii('+')) {
-                try self.appendMeta(Meta.Plus);
-            } else if (gr.eqAscii('^')) {
-                try self.appendMeta(Meta.Not);
-            } else if (gr.eqAscii('.')) {
-                try self.appendMeta(Meta.Dot);
+                try self.addQtty(Qtty.OneOrMore());
+            } else if (gr.eqAscii('*')) {
+                try self.addQtty(Qtty.ZeroOrMore());
+            } else if (gr.eqAscii('\n')) {
+                try self.addMeta(Meta.SymbolNewLine);
+            } else if (gr.eqAscii('\t')) {
+                try self.addMeta(Meta.SymbolTab);
+            } else if (gr.eqAscii('$')) {
+                try self.addMeta(Meta.SymbolEndOfLine);
             } else if (gr.eqAscii('|')) {
-                try self.appendMeta(Meta.Or);
-            } else if (gr.eqAscii('>')) {
-                try self.appendMeta(Meta.Greater);
-            } else if (gr.eqAscii('<')) {
-                try self.appendMeta(Meta.Lesser);
-            } else if (self.tokens.items.len > 0 and gr.eqAscii('^')) {
-                self.not = true;
+                try self.addMeta(Meta.Or);
             } else {
                 if (need_create_new) {
                     need_create_new = false;
@@ -353,7 +407,7 @@ pub const Group = struct {
                     try g.addGrapheme(gr);
                     const newg = it.next() orelse return Str.Error.Other;
                     it.continueFrom(try g.analyze(newg.idx));
-                    try self.appendGroup(g);
+                    try self.addGroup(g);
                     return it.idx;
                 } else {
                     try self.addGrapheme(gr);
@@ -364,12 +418,24 @@ pub const Group = struct {
         return it.idx;
     }
 
-    inline fn appendGroup(self: *Group, g: Group) !void {
+    inline fn addGroup(self: *Group, g: Group) !void {
         try self.tokens.append(Token {.group = g});
     }
 
-    inline fn appendMeta(self: *Group, m: Meta) !void {
+    inline fn addMeta(self: *Group, m: Meta) !void {
         try self.tokens.append(Token {.meta = m});
+    }
+
+    fn addName(self: *Group, s: Str) !void {
+        try self.tokens.append(Token {.name = s});
+    }
+
+    fn addQtty(self: *Group, qtty: Qtty) !void {
+        try self.tokens.append(Token {.qtty = qtty});
+    }
+
+    fn addStr(self: *Group, s: Str) !void {
+        try self.tokens.append(Token {.str = s});
     }
 
     pub fn deinit(self: Group) void {
@@ -459,22 +525,10 @@ test "Test regex" {
 
 // ?: means make the capturing group a non capturing group, i.e. don't include its match as a back-reference.
 // ?! is the negative lookahead. The regex will only match if the capturing group does not match.
-    const pattern = try Str.From("==[^abc](?:12[^A-Z]opq(?!345))xyz");
+    const pattern = try Str.From("==[?<ClientName>\\w+](?:12[^A-Z]opq(?!345))xyz");
     const regex = try Regex.New(alloc, pattern);
     defer regex.deinit();
     regex.printGroups();
-
-    // var qtty = Qtty{};
-    // try qtty.setFixedRange(3, 5);
-    // mtl.debug(@src(), "{}", .{qtty});
-    // qtty.setOneOrMore();
-    // mtl.debug(@src(), "{}", .{qtty});
-    // qtty.setZeroOrMore();
-    // mtl.debug(@src(), "{}", .{qtty});
-    // qtty.setExactNumber(28);
-    // mtl.debug(@src(), "{}", .{qtty});
-    // qtty.setNOrMore(4);
-    // mtl.debug(@src(), "{}", .{qtty});
 
 // QRegularExpression("(?<![a-zA-Z\\.])\\d+(\\.\\d+)?(?!\\.)");
 // Must not start with a letter or a dot => (?<![a-zA-Z\\.])

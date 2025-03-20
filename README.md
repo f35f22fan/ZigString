@@ -45,7 +45,7 @@ Example:<br/>
     }
 
     const start_from: usize = 0;
-    const at = hello_world.indexOf("lo", start_from, CaseSensitive.Yes);
+    const at = hello_world.indexOf("lo", .{.from=start_from});
     if (at) |index| {
         try expect(index.gr == 3); // .gr=grapheme, .cp=codepoint
     } else {
@@ -60,11 +60,11 @@ Example:<br/>
     defer sub2.deinit();
     try expect(sub2.equals("lo, World!", CaseSensitive.Yes));
     
-    // charAt() usage:
+    // Efficient iteration over graphemes:
     const both_ways = try String.From("Jos\u{65}\u{301}"); // "José"
     defer both_ways.deinit();
     {
-        var it = String.Iterator.New(&both_ways, String.strStart());
+        var it = both_ways.iterator();
         while (it.next()) |gr| { // ends up printing "José"
             std.debug.print("{}", .{gr}); // the grapheme's index is at gr.idx
         }
@@ -72,11 +72,22 @@ Example:<br/>
     }
     
     {
-        var it = String.Iterator.New(&both_ways, both_ways.strEnd());
+        var it = both_ways.iteratorFrom(both_ways.strEnd());
         while (it.prev()) |gr| { // ends up printing "ésoJ"
             std.debug.print("{}", .{gr});
         }
         std.debug.print("\n", .{});
+    }
+
+    {
+        // let's iterate from let's say the location of "s":
+        if (both_ways.indexOf("s", .{})) |idx| {
+            var it = both_ways.iteratorFrom(idx);
+            while (it.next()) |gr| { // prints "sé"
+                std.debug.print("{}", .{gr});
+            }
+            std.debug.print("\n", .{});
+        }
     }
 
     // Some Chinese:

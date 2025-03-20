@@ -414,7 +414,7 @@ test "Char At" {
     const both_ways = try String.From("Jos\u{65}\u{301}"); // "José"
     defer both_ways.deinit();
     {
-        var it = String.Iterator.New(&both_ways, String.strStart());
+        var it = both_ways.iterator();
         while (it.next()) |gr| { // ends up printing "José"
             std.debug.print("{}", .{gr}); // the grapheme's index is at gr.idx
         }
@@ -422,7 +422,7 @@ test "Char At" {
     }
     
     {
-        var it = String.Iterator.New(&both_ways, both_ways.strEnd());
+        var it = both_ways.iteratorFrom(both_ways.strEnd());
         while (it.prev()) |gr| { // ends up printing "ésoJ"
             std.debug.print("{}", .{gr});
         }
@@ -430,9 +430,9 @@ test "Char At" {
     }
 
     {
-        // let's iterate from a given substring forward, from "s" in this case:
-        if (both_ways.indexOf("s", .{.from = 2})) |idx| {
-            var it = String.Iterator.New(&both_ways, idx);
+        // let's iterate from let's say the location of "s":
+        if (both_ways.indexOf("s", .{})) |idx| {
+            var it = both_ways.iteratorFrom(idx);
             while (it.next()) |gr| { // prints "sé"
                 std.debug.print("{}", .{gr});
             }
@@ -448,40 +448,41 @@ test "Char At" {
     try expect(!str_ch.charAt(1).?.eq("A"));
 
     if (true) {
-        const s = try String.From("Jos\u{65}\u{301}t");
+        const s = try String.From("Jos\u{65}\u{301}");
         defer s.deinit();
         {
-            const idx = Index {.cp=2, .gr=2};
-            mtl.debug(@src(), "From {}: ", .{idx});
-            var it = String.Iterator.New(&s, idx);
-            while (it.next()) |gr| {
-                mtl.debug(@src(), "gr={}, gr.idx={}, iter.idx={}", .{gr, gr.idx, it.idx});
+            if (s.indexOf("s", .{})) |idx| { // iterate from letter "s"
+                mtl.debug(@src(), "From {}: ", .{idx});
+                var it = s.iteratorFrom(idx);
+                while (it.next()) |gr| {
+                    mtl.debug(@src(), "gr={}, gr.idx={}", .{gr, gr.idx});
+                }
             }
         }
 
         {
             mtl.debug(@src(), "From zero: ", .{});
-            var it = String.Iterator.New(&s, null);
+            var it = s.iterator();
             while (it.next()) |gr| {
-                mtl.debug(@src(), "gr={}, gr.idx={}, iter.idx={}", .{gr, gr.idx, it.idx});
+                mtl.debug(@src(), "gr={}, gr.idx={}", .{gr, gr.idx});
             }
         }
 
         {
             const idx = String.Index {.cp = 2, .gr = 2};
             mtl.debug(@src(), "Backwards from: {}", .{idx});
-            var it = String.Iterator.New(&s, idx);
+            var it = s.iteratorFrom(idx);
             while (it.prev()) |gr| {
-                mtl.debug(@src(), "gr={}, gr.idx={}, iter.idx={}", .{gr, gr.idx, it.idx});
+                mtl.debug(@src(), "gr={}, gr.idx={}", .{gr, gr.idx});
             }
         }
 
         {
             const idx = s.strEnd();
             mtl.debug(@src(), "Backwards from: {}", .{idx});
-            var it = String.Iterator.New(&s, idx);
+            var it = s.iteratorFrom(idx);
             while (it.prev()) |gr| {
-                mtl.debug(@src(), "gr={}, gr.idx={}, iter.idx={}", .{gr, gr.idx, it.idx});
+                mtl.debug(@src(), "gr={}, gr.idx={}", .{gr, gr.idx});
             }
         }
     }
