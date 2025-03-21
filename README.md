@@ -18,10 +18,12 @@ In this implementation under the hood each codepoint takes 21 bits (plus 1 separ
 Internally it uses SIMD or linear operations when needed. Under the hood it works with
  graphemes only unless explicitly otherwise specified in the API/docs. See the tests
  (from the /src folder) for examples.<br/>
-Tested on Zig 0.14dev
-<p/>
+Tested with Zig 0.14
+
+
 ### Regex support is a work in progress
-<p/>
+---
+
 Example:<br/>
  
  ```zig

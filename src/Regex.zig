@@ -5,6 +5,7 @@ const mtl = Str.mtl;
 const Cp = Str.Codepoint;
 const Regex = @This();
 const Allocator = std.mem.Allocator;
+const IdType = i16;
 
 const Meta = enum(u8) {
     Not,
@@ -77,14 +78,6 @@ const Token = union(TokenEnum) {
             .qtty => return true,
             else => return false,
         }
-    }
-
-    pub fn isGreater(self: Token) bool {
-        return self.isMeta(Meta.Greater);
-    }
-
-    pub fn isLesser(self: Token) bool {
-        return self.isMeta(Meta.Lesser);
     }
 
     pub fn isString(self: Token) bool {
@@ -245,26 +238,33 @@ pub const Group = struct {
     qtty: Qtty = .New(1, Qtty.inf()),
     regex: *Regex,
     tokens: ArrayList(Token) = undefined,
-    id: u16,
+    id: IdType = -1,
+    parent_id: IdType = -1,
 
-    pub fn New(regex: *Regex) Group {
-        var g = Group{.regex = regex, .id = regex.next_id};
-        regex.next_id += 1;
+    pub fn New(regex: *Regex, parent: ?*Group) Group {
+        const parent_id: IdType = if (parent) |p| p.id else -1;
+        var g = Group{.regex = regex, .id = regex.next_group_id, .parent_id = parent_id};
+        regex.next_group_id += 1;
+        
+        // mtl.debug(@src(), "g.id={}, p.id={}", .{g.id, parent_id});
         g.tokens = ArrayList(Token).init(regex.alloc);
 
         return g;
     }
 
+    inline fn printColoredText(writer: anytype, s: Str) !void {
+        try writer.print("{s}{s}{}{s}{s} ", .{Str.COLOR_BLACK, Str.BGCOLOR_YELLOW, s, Str.BGCOLOR_DEFAULT, Str.COLOR_DEFAULT});
+    }
+
     pub fn format(self: Group, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         _ = fmt;
         _ = options;
-        try writer.print("{s}Id={}{s} ", .{Str.COLOR_ORANGE, self.id, Str.COLOR_DEFAULT});
+        try writer.print("{s}Id={}({}) {s} ", .{Str.COLOR_ORANGE, self.id, self.parent_id, Str.COLOR_DEFAULT});
         for (self.tokens.items) |t| {
             switch (t) {
-                .group => {},
-                // .group => |g| {
-                //     try writer.print("g{}", .{g});
-                // },
+                .group => |g| {
+                    try writer.print("{s}Group={}{s} ", .{Str.COLOR_BLUE, g.id, Str.COLOR_DEFAULT});
+                },
                 .qtty => |q| {
                     try writer.print("{s}{}{s} ", .{Str.COLOR_GREEN, q, Str.COLOR_DEFAULT});
                 },
@@ -272,10 +272,10 @@ pub const Group = struct {
                     try writer.print("{s}{}{s} ", .{Str.COLOR_CYAN, m, Str.COLOR_DEFAULT});
                 },
                 .str => |s| {
-                    try writer.print("{s}{s}{}{s}{s} ", .{Str.COLOR_BLACK, Str.BGCOLOR_YELLOW, s, Str.BGCOLOR_DEFAULT, Str.COLOR_DEFAULT});
+                    try printColoredText(writer, s);
                 },
                 .name => |s| {
-                    try writer.print("{s}{s}{}{s}{s} ", .{Str.COLOR_BLUE, Str.BGCOLOR_YELLOW, s, Str.BGCOLOR_DEFAULT, Str.COLOR_DEFAULT});
+                    try printColoredText(writer, s);
                 }
             }
         }
@@ -302,35 +302,32 @@ pub const Group = struct {
     }
 
     fn analyze(self: *Group, index: Str.Index) !Str.Index {
-        var need_create_new = false;
         var it = Str.Iterator.New(&self.regex.pattern, index);
         while (it.next()) |gr| {
             if (gr.eqAscii('[')) {
                 if (self.hasContent()) {
-                    var g = Group.New(self.regex);
+                    var g = Group.New(self.regex, self);
                     g.setSquare();
                     const newg = it.next() orelse return Str.Error.Other;
                     it.continueFrom(try g.analyze(newg.idx));
                     try self.addGroup(g);
-                    return it.idx;
                 } else {
                     self.setSquare();
                 }
             } else if (gr.eqAscii(']')) {
-                need_create_new = self.is_enclosed();
+                return gr.idx.addRaw(1);
             } else if (gr.eqAscii('(')) {
                 if (self.hasContent()) {
-                    var g = Group.New(self.regex);
+                    var g = Group.New(self.regex, self);
                     g.setRound();
                     const newg = it.next() orelse return Str.Error.Other;
                     it.continueFrom(try g.analyze(newg.idx));
                     try self.addGroup(g);
-                    return it.idx;
                 } else {
                     self.setRound();
                 }
             } else if (gr.eqAscii(')')) {
-                need_create_new = self.is_enclosed();
+                return gr.idx.addRaw(1);
             } else if (gr.eqAscii('?')) {
                 const s: *Str = &self.regex.pattern;
                 if (s.matches("?:", gr.idx)) |idx| {
@@ -401,17 +398,7 @@ pub const Group = struct {
             } else if (gr.eqAscii('|')) {
                 try self.addMeta(Meta.Or);
             } else {
-                if (need_create_new) {
-                    need_create_new = false;
-                    var g = Group.New(self.regex);
-                    try g.addGrapheme(gr);
-                    const newg = it.next() orelse return Str.Error.Other;
-                    it.continueFrom(try g.analyze(newg.idx));
-                    try self.addGroup(g);
-                    return it.idx;
-                } else {
-                    try self.addGrapheme(gr);
-                }
+                try self.addGrapheme(gr);
             }
         }
 
@@ -483,22 +470,25 @@ tokens: ArrayList(Token),
 pattern: Str,
 alloc: Allocator,
 groups: ArrayList(Group) = undefined,
-next_id: u16 = 0,
+next_group_id: IdType = 0,
 
 // Regex takes ownership over `pattern`
-pub fn New(alloc: Allocator, pattern: Str) !Regex {
-    var r = Regex {
+pub fn New(alloc: Allocator, pattern: Str) !*Regex {
+    const ptr = try alloc.create(Regex);
+    ptr.* = Regex {
         .pattern = pattern,
         .tokens = ArrayList(Token).init(alloc),
         .alloc = alloc,
         .groups = ArrayList(Group).init(alloc),
     };
-    mtl.debug(@src(), "pattern: {}", .{pattern});
-    var g: Group = Group.New(&r);
+    
+    mtl.debug(@src(), "Regex: {}", .{pattern});
+    
+    var g: Group = Group.New(ptr, null);
     _ = try g.analyze(Str.strStart());
-    try r.groups.append(g);
+    try ptr.groups.append(g);
 
-    return r;
+    return ptr;
 }
 
 pub fn deinit(self: Regex) void {
@@ -510,6 +500,16 @@ pub fn deinit(self: Regex) void {
         g.deinit();
     }
     self.groups.deinit();
+}
+
+pub fn getGroup(self: *Regex, id: IdType) ?*Group {
+    for (self.groups.items) |*g| {
+        if (g.id == id) {
+            return g;
+        }
+    }
+
+    return null;
 }
 
 pub fn printGroups(self: Regex) void {
@@ -527,6 +527,7 @@ test "Test regex" {
 // ?! is the negative lookahead. The regex will only match if the capturing group does not match.
     const pattern = try Str.From("==[?<ClientName>\\w+](?:12[^A-Z]opq(?!345))xyz");
     const regex = try Regex.New(alloc, pattern);
+    defer alloc.destroy(regex);
     defer regex.deinit();
     regex.printGroups();
 
