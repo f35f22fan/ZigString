@@ -1,23 +1,27 @@
 # ZigString
 A string class for the Zig programming language to correctly manipulate UTF-8 strings
 by respecting grapheme cluster boundaries. As opposed to other String classes including
-in other programming languages that operate on raw bytes or codepoints which is inherently flawed.
+in other programming languages and tools such as Qt that operate on raw bytes or codepoints which is inherently flawed.
 <p/>
-When the user searches for a substring e.g. <code>my_str.indexOf("something")</code> he gets an <code>Index</code> struct in
- return which has two fields: <code>.gr</code> for grapheme index and
-<code>.cp</code> for codepoint index (the user only needs the <code>.gr</code> field). This way when the next search
- is done from this position onward the implementation doesn't have to do a linear search up to
-  that point while still respects grapheme boundaries. In short, this little user inconvenience 
-  exists to achieve fast and correct searches and string manipulations.
+The index of a char (grapheme cluster) inside a ZigString is represented by an Index struct which has 2 fields:
+<code>.cp</code> is the index of the codepoint, and <code>.gr</code> is the index of the grapheme,
+the latter is what the user actually needs.<br/>
+<code>.cp</code> is used internally by the library
+to avoid O(n) lookups when resuming a search from a given grapheme and instead do O(1).
+<br/>
+For example <code>my_str.indexOf("something", .{})</code> returns such an <code>Index</code>.
+
 <p/>
-A visible letter/character is a grapheme (or "grapheme cluster" to sound fancier) that might
+General info: a visible letter/character is a grapheme (or "grapheme cluster") that might
  be composed of more than one codepoints (but often it's one codepoint).
  <p/>
 In this implementation under the hood each codepoint takes 21 bits (plus 1 separate bit to
- mark grapheme boundaries) because 21 bits is enough to store every UTF-8 codepoint.
-Internally it uses SIMD or linear operations when needed. Under the hood it works with
- graphemes only unless explicitly otherwise specified in the API/docs. See the tests
- (from the /src folder) for examples.<br/>
+ mark grapheme boundaries) because 21 bits are enough to store every UTF-8 codepoint.
+Internally it uses SIMD or linear operations depending on the string length.
+
+<p/>
+For code examples check out the tests.
+<br/>
 Tested with Zig 0.14
 
 
