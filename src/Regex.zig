@@ -161,10 +161,18 @@ const Token = union(enum) {
     meta: Meta,
     str: Str,
     name: Str,
+    range: Range,
 
     inline fn isMeta(self: Token, param: Meta) bool {
         switch(self) {
             .meta => |m| return (m == param),
+            else => return false,
+        }
+    }
+
+    inline fn isRange(self: Token) bool {
+        switch(self) {
+            .range => return true,
             else => return false,
         }
     }
@@ -215,15 +223,23 @@ const Token = union(enum) {
             .name => |s| {
                 s.deinit();
             },
-            .qtty => |q| {
-                _ = q;
-                // mtl.debug(@src(), "{}", .{q});
-            },
-            .meta => |m| {
-                _ = m;
-                // mtl.debug(@src(), "{}", .{m});
-            }
+            else => {},
         }
+    }
+};
+
+pub const Range = struct {
+    a: Str.Codepoint,
+    b: Str.Codepoint,
+
+    pub fn New(a: Str.Codepoint, b: Str.Codepoint) Range {
+        return .{.a = a, .b = b};
+    }
+
+    pub fn format(self: Range, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = fmt;
+        _ = options;
+        try writer.print("Range{{{}-{}}}", .{self.a, self.b});
     }
 };
 
@@ -247,6 +263,9 @@ pub const Qtty = struct {
                 
                 return qtty;
             }
+        } else {
+            const n1: i32 = try input.parseInt(i32, 10);
+            return Qtty.ExactNumber(n1);
         }
 
         return Error.Parsing;
@@ -265,8 +284,12 @@ pub const Qtty = struct {
         if (self.b == inf()) {
             try writer.print("Qtty[{}+{s}]", .{self.a, lazy});
         } else {
-            s = if (self.b == inf()) "+" else try std.fmt.bufPrint(&buf, "{}", .{self.b});
-            try writer.print("Qtty[{}..{s}{s}]", .{self.a, s, lazy});
+            if (self.a == self.b) {
+                try writer.print("Qtty[{}{s}]", .{self.a, lazy});
+            } else {
+                s = if (self.b == inf()) "+" else try std.fmt.bufPrint(&buf, "{}", .{self.b});
+                try writer.print("Qtty[{}..{s}{s}]", .{self.a, s, lazy});
+            }
         }
     }
 
@@ -399,6 +422,9 @@ pub const Group = struct {
                 },
                 .name => |s| {
                     try writer.print("{dt} ", .{s});
+                },
+                .range => |r| {
+                    try writer.print("{s}{}{s} ", .{Str.COLOR_MAGENTA, r, Str.COLOR_DEFAULT});
                 }
             }
         }
@@ -424,7 +450,7 @@ pub const Group = struct {
         }
     }
 
-    fn matchAll2(self: *Group, needles: Str, haystack: Str, from: Str.Index) ?Str.Index {
+    fn matchStr2(self: *Group, needles: Str, haystack: Str, from: Str.Index) ?Str.Index {
         const past_match = haystack.matchesStr(needles, from);//, cs
         mtl.debug(@src(), "input.matchesStr={dt}, at={}, input={dt}, past_match={?}", .{needles, from, haystack, past_match});
         var ok = false;
@@ -438,7 +464,7 @@ pub const Group = struct {
         return if (ok) past_match else null;
     }
 
-    fn matchAll(self: *Group, iter: *Iterator(Token), input: Str, haystack: Str, from: Str.Index) ?Str.Index {
+    fn matchStr(self: *Group, iter: *Iterator(Token), input: Str, haystack: Str, from: Str.Index) ?Str.Index {
         var qtty = Qtty.ExactNumber(1);
         if (iter.peekNext()) |next_token| {
             switch(next_token) {
@@ -454,7 +480,6 @@ pub const Group = struct {
             return from;
         }
 
-        mtl.debug(@src(), "************** {}", .{qtty});
         var negative_lookahead = false;
         if (iter.peekPrev()) |prev_token| {
             if (prev_token.isMeta(Meta.NegativeLookAhead)) {
@@ -463,8 +488,7 @@ pub const Group = struct {
         }
         
         if (qtty.exactNumber(1)) {
-            mtl.debug(@src(), "exact number", .{});
-            const past_match = self.matchAll2(input, haystack, from);
+            const past_match = self.matchStr2(input, haystack, from);
             if (negative_lookahead) {
                 return if (past_match == null) from else null;
             } else {
@@ -477,7 +501,7 @@ pub const Group = struct {
         defer base_str.deinit();
         var at = from;
         {
-            const past_match = self.matchAll2(base_str, haystack, from);
+            const past_match = self.matchStr2(base_str, haystack, from);
             if (past_match) |pm| {
                 at = pm;
             } else {
@@ -492,7 +516,7 @@ pub const Group = struct {
         var count: usize = 0;
         
         while (true) {
-            if (self.matchAll2(last_char_str, haystack, at)) |idx| {
+            if (self.matchStr2(last_char_str, haystack, at)) |idx| {
                 count += 1;
                 at = idx;
                 if (count == qtty.b) {
@@ -508,6 +532,8 @@ pub const Group = struct {
 
     fn parseIntoTokens(self: *Group, index: Str.Index) !Str.Index {
         var it = Str.Iterator.New(&self.regex.pattern, index);
+        var ret_idx: ?Str.Index = null;
+
         while (it.next()) |gr| {
             if (gr.eqAscii('[')) {
                 if (self.hasContent()) {
@@ -520,7 +546,8 @@ pub const Group = struct {
                     self.setSquare();
                 }
             } else if (gr.eqAscii(']')) {
-                return gr.idx.addRaw(1);
+                ret_idx = gr.idx.addRaw(1);
+                break;
             } else if (gr.eqAscii('(')) {
                 if (self.hasContent()) {
                     var g = Group.New(self.regex, self);
@@ -532,7 +559,8 @@ pub const Group = struct {
                     self.setRound();
                 }
             } else if (gr.eqAscii(')')) {
-                return gr.idx.addRaw(1);
+                ret_idx = gr.idx.addRaw(1);
+                break;
             } else if (gr.eqAscii('?')) {
                 const s: *Str = &self.regex.pattern;
                 if (s.matches("?:", gr.idx)) |idx| {
@@ -565,10 +593,10 @@ pub const Group = struct {
                 }
             } else if (gr.eqAscii('{')) {
                 const s: *Str = &self.regex.pattern;
-                if (s.indexOf2("}", .{.from = gr.idx.addRaw(1)})) |closing_idx| {
-                    const qtty_in_curly = try s.betweenIndices(gr.idx.addRaw(1), closing_idx);
+                if (s.indexOf2("}", .{.from = gr.idx.addRaw(1)})) |idx| {
+                    const qtty_in_curly = try s.betweenIndices(gr.idx.addRaw("}".len), idx);
                     defer qtty_in_curly.deinit();
-                    it.continueFrom(closing_idx.addRaw(1));
+                    it.continueFrom(idx.addRaw("}".len));
                     const qtty = try Qtty.FromCurly(qtty_in_curly);
                     try self.addQtty(qtty);
                     // mtl.debug(@src(), "qtty_in_curly: {}", .{qtty});
@@ -635,7 +663,26 @@ pub const Group = struct {
             }
         }
 
+        try self.analyzeStrings();
+
+        if (ret_idx) |idx| {
+            return idx;
+        }
+
         return it.idx;
+    }
+
+    fn analyzeStrings(self: *Group) !void {
+        var token_iter = Iterator(Token).New(self.tokens.items);
+        // for (self.tokens.items, 0..) |*t, i| {
+        while (token_iter.nextPtr()) |t| {
+            switch (t.*) {
+                .str => |*s| {
+                    try self.checkRange(s, &token_iter);
+                },
+                else => {}
+            }
+        }
     }
 
     inline fn addGroup(self: *Group, g: Group) !void {
@@ -666,16 +713,68 @@ pub const Group = struct {
         self.result.deinit();
     }
 
+    fn checkRange(self: *Group, s: *Str, token_iter: *Iterator(Token)) !void {
+        const idx = s.indexOf("-", .{}) orelse return;
+        // const idx: Str.Index = .{};
+        var iter = s.iteratorFrom(idx);
+        const prev = iter.prevFrom(idx) orelse return;
+        const next = iter.nextFrom(idx) orelse return;
+        const cp1 = prev.getCodepoint() orelse return;
+        const cp2 = next.getCodepoint() orelse return;
+        const range = Range.New(cp1, cp2);
+        // mtl.debug(@src(), "Range: {}", .{range});
+        
+        if (s.size() == 3) {
+        // mtl.debug(@src(), "deinit start", .{});
+            s.deinit();
+            self.tokens.items[token_iter.at] = Token{.range = range};
+            // mtl.debug(@src(), "deinit end", .{});
+            return;
+        }
+
+        var left: Str = .{};
+        var right: Str = .{};
+        mtl.debug(@src(), "string {dt}", .{s});
+        if (prev.idx.gr != 0 and prev.idx.gr != 0) {
+            left = try s.betweenIndices(.{}, prev.idx);
+        }
+
+        const str_end = s.strEnd();
+        if (next.idx.gr < str_end.gr) {
+            const next_gr = iter.next() orelse return;
+            right = try s.midIndex(next_gr.idx);
+        }
+        
+        var offset: usize = 0;
+        if (!right.isEmpty()) {
+            offset += 1;
+            try self.tokens.insert(token_iter.at, Token{.str = right});
+        } else {
+            right.deinit();
+        }
+
+        try self.tokens.insert(token_iter.at, Token{.range = range});
+        offset += 1;
+        if (!left.isEmpty()) {
+            offset += 1;
+            try self.tokens.insert(token_iter.at, Token{.str = left});
+        } else {
+            left.deinit();
+        }
+
+        self.tokens.orderedRemove(token_iter.at + offset).deinit();
+    }
+
     pub fn hasContent(self: Group) bool {
         return self.tokens.items.len > 0;
     }
 
+/// Like Str.matches(..) the returned value is the position right after the matched string
     pub fn matches(self: *Group, input: Str, from: Str.Index) ?Str.Index {
         {
-            mtl.debug(@src(), "group:{}, at={}", .{self.id, from});
             const haystack = input.midIndex(from) catch return null;
             defer haystack.deinit();
-            mtl.debug(@src(), "group:{}, haystack:{dt}, at={}", .{self.id, haystack, from});
+            mtl.debug(@src(), "Group:{}, haystack:{dt}, at={}", .{self.id, haystack, from});
         }
         var at = from;
         const cs = Str.CaseSensitive.Yes;
@@ -686,10 +785,10 @@ pub const Group = struct {
             switch (t.*) {
                 .str => |needles| {
                     if (self.match == Match.All) {
-                        if (self.matchAll(&iter, needles, input, at)) |idx| {
-                            at = idx;
+                        if (self.matchStr(&iter, needles, input, at)) |past_idx| {
+                            at = past_idx;
                         } else {
-                            mtl.debug(@src(), "{s}self.matchAll failed{s}", .{Str.COLOR_RED, Str.COLOR_DEFAULT});
+                            // mtl.debug(@src(), "{s}self.matchAll failed{s}", .{Str.COLOR_RED, Str.COLOR_DEFAULT});
                             return null;
                         }
                     } else { // == Match.AnyOf
@@ -720,9 +819,36 @@ pub const Group = struct {
                     }
                 },
                 .group => |*g| {
-                    if (g.matches(input, at)) |idx| {
-                        at = idx;
-                    } else {
+                    var qtty: Qtty = Qtty.ExactNumber(1);
+                    if (iter.peekNext()) |next_token| {
+                        switch (next_token) {
+                            .qtty => |q| {
+                                qtty = q;
+                                iter.add(1);
+                            },
+                            else => {}
+                        }
+                    }
+
+                    mtl.debug(@src(), "#########Find a group, qtty:{}, at:{}, input:{}", .{qtty, at, input});
+                    var work = qtty.a > 0 or !qtty.lazy;
+                    var count: usize = 0;
+                    while (work) {
+                        if (g.matches(input, at)) |past_idx| {
+                            at = past_idx;
+                        } else {
+                            break;
+                        }
+                        count += 1;
+                        if (qtty.lazy and count >= qtty.a) {
+                            work = false; // break if lazy
+                        } else if (count >= qtty.b) {
+                            break; // break if maximum count reached
+                        }
+                        // otherwise keep finding as many as possible
+                    }
+
+                    if (count < qtty.a) {
                         return null;
                     }
                 },
@@ -885,13 +1011,13 @@ test "Test regex" {
 
 // ?: means make the capturing group a non capturing group, i.e. don't include its match as a back-reference.
 // ?! is the negative lookahead. The regex will only match if the capturing group does not match.
-    const pattern = try Str.From("==[?<ClientName>\\w+](?:БГД[^A-Z]opq(?!345))xyz{2,3}");
+    const pattern = try Str.From("=(=-){2,5}[?<ClientName>\\w+](?:БГД[^gbA-Z0-9c]opq(?!345))xyz{2,3}");
     const regex = try Regex.New(alloc, pattern);
     defer alloc.destroy(regex);
     defer regex.deinit();
     regex.printGroups();
 
-    const input = try Str.From("==MikeБГДopqxyzz");
+    const input = try Str.From("==-=-MikeБГДopqxyzz");
     defer input.deinit();
     if (regex.find(input, Str.Index.strStart())) |found| {
         mtl.debug(@src(), "Regex matched at {}", .{found});

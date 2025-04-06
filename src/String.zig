@@ -182,6 +182,12 @@ pub const Iterator = struct {
         return self.str.charAtIndex(index);
     }
 
+    pub fn nextFrom(self: *Iterator, idx: Index) ?Grapheme {
+        self.first_time = false;
+        self.idx = idx;
+        return self.next();
+    }
+
     pub fn prev(self: *Iterator) ?Grapheme {
         var idx: Index = undefined;
         if (self.first_time) {
@@ -192,6 +198,12 @@ pub const Iterator = struct {
         }
         
         return self.str.charAtIndex(idx);
+    }
+
+    pub fn prevFrom(self: *Iterator, idx: Index) ?Grapheme {
+        self.first_time = false;
+        self.idx = idx;
+        return self.prev();
     }
 };
 
@@ -416,10 +428,10 @@ pub fn addAscii(self: *String, c: comptime_int) !void {
 }
 
 pub fn addGrapheme(self: *String, gr: Grapheme) !void {
-    const slice = gr.getSlice() orelse return String.Error.Other;
+    const gr_slice = gr.getSlice() orelse return String.Error.Other;
     var sd = try self.getPointer();
     sd.grapheme_count += 1;
-    for (slice, 0..) |cp, i| {
+    for (gr_slice, 0..) |cp, i| {
         try sd.codepoints.append(cp);
         try sd.graphemes.append(if(i == 0) 1 else 0);
     }
@@ -1079,7 +1091,6 @@ pub fn graphemesToUtf8(alloc: Allocator, input: CpSlice) !ArrayList(u8) {
     return utf8_from_slice(alloc, input);
 }
 
-
 pub const Find = struct {
     from: usize = 0,
     cs: CaseSensitive = CaseSensitive.Yes,
@@ -1150,18 +1161,37 @@ pub fn indexOf(self: String, input: []const u8, find: Find) ?Index {
 }
 
 pub fn indexOf2(self: String, input: []const u8, find: FindIndex) ?Index {
+    if (input.len == 0)
+        return null;
     const sd = self.d orelse return null;
-    const needles = String.toCodepoints(ctx.a, input) catch return null;
-    defer needles.deinit();
     const from = find.from;
-    if (find.cs == CaseSensitive.Yes and sd.codepoints.items.len >= SimdVecLen) {
-        return self.findManySimd(needles.items, from, SimdVecLen);
+    var slice: ConstCpSlice = undefined;
+    var needles: ArrayList(Codepoint) = undefined;
+    if (input.len == 1) {
+        const cp = toCp(input) catch return null;
+        slice = &[_]Codepoint {cp};
+    } else {
+        needles = String.toCodepoints(ctx.a, input) catch return null;
+        slice = needles.items;
     }
 
-    return self.findManyLinear(needles.items, find.from, find.cs);
+    // mtl.debug(@src(), "slice: {any}, input: {s}", .{slice, input});
+    var idx: ?Index = undefined;
+    if (find.cs == CaseSensitive.Yes and sd.codepoints.items.len >= SimdVecLen) {
+        idx = self.findManySimd(slice, from, SimdVecLen);
+    } else {
+        idx = self.findManyLinear(slice, find.from, find.cs);
+    }
+
+    if (input.len != 1)
+        needles.deinit();
+
+    return idx;
 }
 
 pub fn indexOf3(self: String, needles: CpSlice, from_index: ?Index, cs: CaseSensitive) ?Index {
+    if (needles.len == 0)
+        return null;
     const sd = self.d orelse return null;
     const from = from_index orelse Index.strStart();
     if (cs == CaseSensitive.Yes and sd.codepoints.items.len >= SimdVecLen) {
@@ -1325,10 +1355,12 @@ pub fn matchesStr(self: String, input: String, from: Index) ?Index {
         return null;
     }
 
-    const arr1 = sd.codepoints.items[from.cp..end];
+    const str_cps = sd.codepoints.items[from.cp..end];
+    const str_graphemes = sd.graphemes.items[from.cp..end];
     var gr_count: usize = 0;
     const input_sd = input.d orelse return null;
-    for (arr1, input_sd.codepoints.items, sd.graphemes.items[from.cp..end])|a, b, gr| {
+    const needles_cps = input_sd.codepoints.items;
+    for (str_cps, needles_cps, str_graphemes)|a, b, gr| {
         if (a != b) {
             return null;
         }
