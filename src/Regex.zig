@@ -678,7 +678,15 @@ pub const Group = struct {
         while (token_iter.nextPtr()) |t| {
             switch (t.*) {
                 .str => |*s| {
-                    try self.checkRange(s, &token_iter);
+                    var result = ArrayList(Token).init(self.regex.alloc);
+                    defer result.deinit();
+                    try checkRange(s.*, &result);
+                    if (result.items.len > 0) {
+                        self.tokens.orderedRemove(token_iter.at).deinit();
+                        for (result.items) |item| {
+                            try self.tokens.insert(token_iter.at, item);
+                        }
+                    }
                 },
                 else => {}
             }
@@ -713,22 +721,22 @@ pub const Group = struct {
         self.result.deinit();
     }
 
-    fn checkRange(self: *Group, s: *Str, token_iter: *Iterator(Token)) !void {
+    fn checkRange(s: Str, result: *ArrayList(Token)) !void {
         const idx = s.indexOf("-", .{}) orelse return;
-        // const idx: Str.Index = .{};
         var iter = s.iteratorFrom(idx);
         const prev = iter.prevFrom(idx) orelse return;
         const next = iter.nextFrom(idx) orelse return;
         const cp1 = prev.getCodepoint() orelse return;
         const cp2 = next.getCodepoint() orelse return;
+        if (cp1 > cp2) {
+            mtl.debug(@src(), "Error: {}({}) > {}({})", .{prev, cp1, next, cp2});
+            return;
+        }
         const range = Range.New(cp1, cp2);
         // mtl.debug(@src(), "Range: {}", .{range});
         
         if (s.size() == 3) {
-        // mtl.debug(@src(), "deinit start", .{});
-            s.deinit();
-            self.tokens.items[token_iter.at] = Token{.range = range};
-            // mtl.debug(@src(), "deinit end", .{});
+            try result.append(Token{.range = range});
             return;
         }
 
@@ -745,24 +753,25 @@ pub const Group = struct {
             right = try s.midIndex(next_gr.idx);
         }
         
-        var offset: usize = 0;
         if (!right.isEmpty()) {
-            offset += 1;
-            try self.tokens.insert(token_iter.at, Token{.str = right});
+            const len = result.items.len;
+            try checkRange(right, result);
+            const items_added = len != result.items.len;
+            if (items_added) {
+                right.deinit();
+            } else {
+                try result.append(Token{.str = right});
+            }
         } else {
             right.deinit();
         }
 
-        try self.tokens.insert(token_iter.at, Token{.range = range});
-        offset += 1;
+        try result.append(Token{.range = range});
         if (!left.isEmpty()) {
-            offset += 1;
-            try self.tokens.insert(token_iter.at, Token{.str = left});
+            try result.append(Token{.str = left});
         } else {
             left.deinit();
         }
-
-        self.tokens.orderedRemove(token_iter.at + offset).deinit();
     }
 
     pub fn hasContent(self: Group) bool {
@@ -1011,7 +1020,7 @@ test "Test regex" {
 
 // ?: means make the capturing group a non capturing group, i.e. don't include its match as a back-reference.
 // ?! is the negative lookahead. The regex will only match if the capturing group does not match.
-    const pattern = try Str.From("=(=-){2,5}[?<ClientName>\\w+](?:БГД[^gbA-Z0-9c]opq(?!345))xyz{2,3}");
+    const pattern = try Str.From("=(=-){2,5}[?<ClientName>\\w+](?:БГД[^gbA-Z0-9c1-3]opq(?!345))xyz{2,3}");
     const regex = try Regex.New(alloc, pattern);
     defer alloc.destroy(regex);
     defer regex.deinit();
