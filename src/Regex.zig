@@ -236,6 +236,13 @@ pub const Range = struct {
         return .{.a = a, .b = b};
     }
 
+    // returns from+1 if found, null otherwise
+    pub fn matches(self: Range, input: Str, from: Str.Index) bool {
+        const g = input.charAtIndex(from) orelse return false;
+        const cp = g.getCodepoint() orelse return false;
+        return cp >= self.a and cp <= self.b;
+    }
+
     pub fn format(self: Range, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         _ = fmt;
         _ = options;
@@ -452,7 +459,9 @@ pub const Group = struct {
 
     fn matchStr2(self: *Group, needles: Str, haystack: Str, from: Str.Index) ?Str.Index {
         const past_match = haystack.matchesStr(needles, from);//, cs
-        mtl.debug(@src(), "input.matchesStr={dt}, at={}, input={dt}, past_match={?}", .{needles, from, haystack, past_match});
+        const actual = haystack.midIndex(from) catch return null;
+        defer actual.deinit();
+        mtl.debug(@src(), "needles={dt}, from={}, haystack={dt}, actual={dt}, past_match={?}", .{needles, from, haystack, actual, past_match});
         var ok = false;
         
         if (self.not) {
@@ -680,7 +689,7 @@ pub const Group = struct {
                 .str => |*s| {
                     var result = ArrayList(Token).init(self.regex.alloc);
                     defer result.deinit();
-                    try checkRange(s.*, &result);
+                    try parseRange(s.*, &result);
                     if (result.items.len > 0) {
                         self.tokens.orderedRemove(token_iter.at).deinit();
                         for (result.items) |item| {
@@ -721,7 +730,7 @@ pub const Group = struct {
         self.result.deinit();
     }
 
-    fn checkRange(s: Str, result: *ArrayList(Token)) !void {
+    fn parseRange(s: Str, result: *ArrayList(Token)) !void {
         const idx = s.indexOf("-", .{}) orelse return;
         var iter = s.iteratorFrom(idx);
         const prev = iter.prevFrom(idx) orelse return;
@@ -755,7 +764,7 @@ pub const Group = struct {
         
         if (!right.isEmpty()) {
             const len = result.items.len;
-            try checkRange(right, result);
+            try parseRange(right, result);
             const items_added = len != result.items.len;
             if (items_added) {
                 right.deinit();
@@ -793,6 +802,7 @@ pub const Group = struct {
         while (iter.nextPtr()) |t| {
             switch (t.*) {
                 .str => |needles| {
+                   
                     if (self.match == Match.All) {
                         if (self.matchStr(&iter, needles, input, at)) |past_idx| {
                             at = past_idx;
@@ -828,6 +838,8 @@ pub const Group = struct {
                     }
                 },
                 .group => |*g| {
+                    
+
                     var qtty: Qtty = Qtty.ExactNumber(1);
                     if (iter.peekNext()) |next_token| {
                         switch (next_token) {
@@ -839,7 +851,6 @@ pub const Group = struct {
                         }
                     }
 
-                    mtl.debug(@src(), "#########Find a group, qtty:{}, at:{}, input:{}", .{qtty, at, input});
                     var work = qtty.a > 0 or !qtty.lazy;
                     var count: usize = 0;
                     while (work) {
@@ -861,8 +872,28 @@ pub const Group = struct {
                         return null;
                     }
                 },
+                .range => |range| {
+                    const gr = input.charAtIndex(at);
+                    if (self.not == range.matches(input, at)) {
+                        mtl.debug(@src(), "Range did match {}, at:{}, for: {?}, not:{}", .{range, at, gr, self.not});
+                    } else {
+                        mtl.debug(@src(), "Range did not match {}, for: {?}", .{range, gr});
+                        return null;
+                    }
+                    
+                },
                 else => {}
             }
+        }
+
+        switch (self.match) {
+            .AnyOf => {
+                if (!self.not) {
+                    at.addOne();
+                    mtl.debug(@src(), "="**20, .{});
+                }
+            },
+            else => {},
         }
 
         return at;
@@ -1020,13 +1051,13 @@ test "Test regex" {
 
 // ?: means make the capturing group a non capturing group, i.e. don't include its match as a back-reference.
 // ?! is the negative lookahead. The regex will only match if the capturing group does not match.
-    const pattern = try Str.From("=(=-){2,5}[?<ClientName>\\w+](?:БГД[^gbA-Z0-9c1-3]opq(?!345))xyz{2,3}");
+    const pattern = try Str.From("=(=-){2,5}(?<ClientName>\\w+)(?:БГД[^gbA-Z0-9c1-3]opq(?!345))xyz{2,3}");
     const regex = try Regex.New(alloc, pattern);
     defer alloc.destroy(regex);
     defer regex.deinit();
     regex.printGroups();
 
-    const input = try Str.From("==-=-MikeБГДopqxyzz");
+    const input = try Str.From("==-=-MikeБГДaopqxyzz");
     defer input.deinit();
     if (regex.find(input, Str.Index.strStart())) |found| {
         mtl.debug(@src(), "Regex matched at {}", .{found});

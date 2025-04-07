@@ -66,6 +66,7 @@ const SeeAs = enum(u8) { CodepointOnly, PartOfGrapheme };
 pub const Grapheme = struct {
     len: u8 = 1,
     idx: Index,
+    codepoints: ArrayList(Codepoint) = undefined,
     s: *const String,
 
     pub fn getSlice(self: Grapheme) ?CpSlice {
@@ -214,6 +215,11 @@ pub const Index = struct {
     pub fn add(self: *Index, input: Index) void {
         self.cp += input.cp;
         self.gr += input.gr;
+    }
+
+    pub fn addOne(self: *Index) void {
+        self.cp += 1;
+        self.gr += 1;
     }
 
     // advance past grapheme
@@ -464,12 +470,20 @@ pub fn charAt(self: *const String, at: usize) ?Grapheme {
 
 pub fn charAtIndex(self: *const String, at: Index) ?Grapheme {
     const sd = self.d orelse return null;
-    const slice = sd.codepoints.items[0..];
-    if (at.cp >= slice.len)
+    
+    if (at.cp >= sd.codepoints.items.len)
         return null;
+
+    const cp_slice = sd.codepoints.items[at.cp..];
+    const gr_slice = sd.graphemes.items[at.cp..];
+    for (cp_slice, gr_slice, 0..) |cp, gr, i| {
+        _ = cp;
+        _ = gr;
+        _ = i;
+    }
     
     var g = Grapheme{.s = self, .idx = at};
-    const gr_slice = sd.graphemes.items[at.cp..];
+    
     if (gr_slice.len == 1) {
         return g;
     }
