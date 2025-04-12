@@ -397,6 +397,8 @@ pub const Group = struct {
     id: IdType = -1,
     parent_id: IdType = -1,
     result: Str = .{},
+    starts_at: ?Str.Index = null,
+
 
     pub fn New(regex: *Regex, parent: ?*Group) Group {
         const parent_id: IdType = if (parent) |p| p.id else -1;
@@ -410,8 +412,15 @@ pub const Group = struct {
     }
 
     pub fn format(self: Group, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        _ = fmt;
         _ = options;
+
+        if (fmt.len > 0) {
+            if (std.mem.eql(u8, fmt, "id")) {
+                try writer.print("Group(Id={d})", .{self.id});
+                return;
+            }
+        }
+
         try writer.print("{s}Id={}({}) {s} ", .{Str.COLOR_ORANGE, self.id, self.parent_id, Str.COLOR_DEFAULT});
         for (self.tokens.items) |t| {
             switch (t) {
@@ -459,16 +468,10 @@ pub const Group = struct {
 
     fn matchStr2(self: *Group, needles: Str, haystack: Str, from: Str.Index) ?Str.Index {
         const past_match = haystack.matchesStr(needles, from);//, cs
-        const actual = haystack.midIndex(from) catch return null;
-        defer actual.deinit();
-        mtl.debug(@src(), "needles={dt}, from={}, haystack={dt}, actual={dt}, past_match={?}", .{needles, from, haystack, actual, past_match});
-        var ok = false;
-        
-        if (self.not) {
-            ok = past_match == null;
-        } else {
-            ok = past_match != null;
-        }
+        // const actual = haystack.midIndex(from) catch return null;
+        // defer actual.deinit();
+        // mtl.debug(@src(), "needles={dt}, from={}, haystack={dt}, actual={dt}, past_match={?}", .{needles, from, haystack, actual, past_match});
+        const ok = self.not == (past_match == null);
 
         return if (ok) past_match else null;
     }
@@ -795,6 +798,7 @@ pub const Group = struct {
             mtl.debug(@src(), "Group:{}, haystack:{dt}, at={}", .{self.id, haystack, from});
         }
         var at = from;
+        self.starts_at = from;
         const cs = Str.CaseSensitive.Yes;
         _ = cs;
         // for (self.tokens.items) |*t| {
@@ -805,6 +809,7 @@ pub const Group = struct {
                    
                     if (self.match == Match.All) {
                         if (self.matchStr(&iter, needles, input, at)) |past_idx| {
+                            self.result.addSlice(input, at, past_idx) catch return null;
                             at = past_idx;
                         } else {
                             // mtl.debug(@src(), "{s}self.matchAll failed{s}", .{Str.COLOR_RED, Str.COLOR_DEFAULT});
@@ -827,9 +832,10 @@ pub const Group = struct {
                                     else => {}
                                 }
                             }
-                            mtl.debug(@src(), "find a word char, qtty:{?}, from:{}, input:{}", .{qtty, from, input});
-                            if (findWordChar(input, from, qtty)) |past_last| {
-                                at = past_last;
+                            // mtl.debug(@src(), "find a word char, qtty:{?}, from:{}, input:{}", .{qtty, from, input});
+                            if (findWordChar(input, from, qtty)) |past_idx| {
+                                at = past_idx;
+                                self.result.addSlice(input, from, past_idx) catch return null;
                             }
                         },
                         else => {
@@ -838,8 +844,6 @@ pub const Group = struct {
                     }
                 },
                 .group => |*g| {
-                    
-
                     var qtty: Qtty = Qtty.ExactNumber(1);
                     if (iter.peekNext()) |next_token| {
                         switch (next_token) {
@@ -890,7 +894,7 @@ pub const Group = struct {
             .AnyOf => {
                 if (!self.not) {
                     at.addOne();
-                    mtl.debug(@src(), "="**20, .{});
+                    // mtl.debug(@src(), "="**20, .{});
                 }
             },
             else => {},
@@ -1044,6 +1048,23 @@ pub fn printGroups(self: Regex) void {
     }
 }
 
+fn printResult(self: Group) void {
+    mtl.debug(@src(), "{id} captured string: {dt}, starts at: {?}", .{self, self.result, self.starts_at});
+}
+
+fn printGroupResult(self: Group) void {
+    printResult(self);
+    for (self.tokens.items) |item| {
+        switch (item) {
+            .group => |g| {
+                printGroupResult(g);
+            },
+            else => {},
+        }
+        
+    }
+}
+
 test "Test regex" {
     const alloc = std.testing.allocator;
     Str.ctx = try Str.Context.New(alloc);
@@ -1059,8 +1080,11 @@ test "Test regex" {
 
     const input = try Str.From("==-=-MikeБГДaopqxyzz");
     defer input.deinit();
-    if (regex.find(input, Str.Index.strStart())) |found| {
-        mtl.debug(@src(), "Regex matched at {}", .{found});
+    if (regex.find(input, Str.Index.strStart())) |idx| {
+        mtl.debug(@src(), "Regex matched at {}", .{idx});
+        for (regex.groups.items) |group| {
+            printGroupResult(group);
+        }
     } else {
         mtl.debug(@src(), "Regex didn't match", .{});
     }

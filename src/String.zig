@@ -23,7 +23,7 @@ pub const Codepoint = u21;
 pub const CpSlice = []Codepoint;
 pub const ConstCpSlice = []const Codepoint;
 pub const GraphemeSlice = []const u1;
-pub const Error = error{ NotFound, BadArg, Index, Alloc, Other };
+pub const Error = error{ NotFound, BadArg, Index, Alloc, OutOfBounds, Other };
 const SimdVecLen: u16 = 32;
 
 const BinaryHintByte: u8 = 0b0100_0000;
@@ -66,7 +66,6 @@ const SeeAs = enum(u8) { CodepointOnly, PartOfGrapheme };
 pub const Grapheme = struct {
     len: u8 = 1,
     idx: Index,
-    codepoints: ArrayList(Codepoint) = undefined,
     s: *const String,
 
     pub fn getSlice(self: Grapheme) ?CpSlice {
@@ -444,11 +443,22 @@ pub fn addGrapheme(self: *String, gr: Grapheme) !void {
 }
 
 pub fn addStr(self: *String, other: String) !void {
-    const sdo = other.d orelse return;
-    var sd = try self.getPointer();
-    try sd.codepoints.appendSlice(sdo.codepoints.items);
-    try sd.graphemes.appendSlice(sdo.graphemes.items);
-    sd.grapheme_count += sdo.grapheme_count;
+    const from_ptr = other.d orelse return;
+    var to_ptr = try self.getPointer();
+    try to_ptr.codepoints.appendSlice(from_ptr.codepoints.items);
+    try to_ptr.graphemes.appendSlice(from_ptr.graphemes.items);
+    to_ptr.grapheme_count += from_ptr.grapheme_count;
+}
+
+pub fn addSlice(self: *String, input: String, start: Index, end: Index) !void {
+    const from_ptr = input.d orelse return;
+    if (end.cp > from_ptr.codepoints.items.len) {
+        return Error.OutOfBounds;
+    }
+    var to_ptr = try self.getPointer();
+    try to_ptr.codepoints.appendSlice(from_ptr.codepoints.items[start.cp..end.cp]);
+    try to_ptr.graphemes.appendSlice(from_ptr.graphemes.items[start.cp..end.cp]);
+    to_ptr.grapheme_count = countGraphemes(to_ptr.graphemes.items);
 }
 
 pub fn At(self: String, gr_index: usize) ?Index {
@@ -586,7 +596,7 @@ pub fn computeSizeInBits(self: String) u64 {
 }
 
 inline fn countGraphemes(slice: GraphemeSlice) usize {
-    if (slice.len > SimdVecLen * 4) {
+    if (slice.len > SimdVecLen * 16) {
         return countGraphemesSimd(slice);
     }
     return countGraphemesLinear(slice);
@@ -1726,8 +1736,11 @@ pub fn strStart() Index {
     return Index{};
 }
 
-pub fn substr(self: String, start: Index, how_many_gr: usize) !String {
-    const sd = self.d orelse return Error.Other;
+fn appendTo(read_from: String, append_to: *String, start: Index, how_many_gr: usize) !void {
+    if (how_many_gr == 0) {
+        return {};
+    }
+    const sd = read_from.d orelse return;
     if (start.gr + how_many_gr > sd.grapheme_count) {
         return Error.Index;
     }
@@ -1744,16 +1757,20 @@ pub fn substr(self: String, start: Index, how_many_gr: usize) !String {
         cp_to_copy = i + 1;
     }
 
-    var s = String.New();
-    try s.ensureTotalCapacity(cp_to_copy);
-    errdefer s.deinit();
-    var sdo = try s.getPointer();
+    try append_to.ensureTotalCapacity(cp_to_copy);
+    errdefer append_to.deinit();
+    var sd_new = try append_to.getPointer();
     const end_cp: usize = start.cp + cp_to_copy;
-    try sdo.codepoints.appendSlice(sd.codepoints.items[start.cp..end_cp]);
-    try sdo.graphemes.appendSlice(sd.graphemes.items[start.cp..end_cp]);
-    sdo.grapheme_count = countGraphemes(sdo.graphemes.items);
+    try sd_new.codepoints.appendSlice(sd.codepoints.items[start.cp..end_cp]);
+    try sd_new.graphemes.appendSlice(sd.graphemes.items[start.cp..end_cp]);
+    sd_new.grapheme_count = countGraphemes(sd_new.graphemes.items);
+}
 
-    return s;
+pub fn substr(self: String, start: Index, how_many_gr: usize) !String {
+    var new_str = String.New();
+    try self.appendTo(&new_str, start, how_many_gr);
+
+    return new_str;
 }
 
 pub fn substring(self: String, start: usize, count: isize) !String {
