@@ -5,7 +5,7 @@ const mtl = Str.mtl;
 const Cp = Str.Codepoint;
 const Regex = @This();
 const Allocator = std.mem.Allocator;
-const IdType = i16;
+const IdType = u16;
 
 const Error = error {
     BadRange,
@@ -394,14 +394,14 @@ pub const Group = struct {
     qtty: Qtty = .New(1, Qtty.inf()),
     regex: *Regex,
     tokens: ArrayList(Token) = undefined,
-    id: IdType = -1,
-    parent_id: IdType = -1,
+    id: ?IdType = null,
+    parent_id: ?IdType = null,
     result: Str = .{},
     starts_at: ?Str.Index = null,
 
 
     pub fn New(regex: *Regex, parent: ?*Group) Group {
-        const parent_id: IdType = if (parent) |p| p.id else -1;
+        const parent_id = if (parent) |p| p.id else null;
         var g = Group{.regex = regex, .id = regex.next_group_id, .parent_id = parent_id};
         regex.next_group_id += 1;
         
@@ -416,16 +416,16 @@ pub const Group = struct {
 
         if (fmt.len > 0) {
             if (std.mem.eql(u8, fmt, "id")) {
-                try writer.print("Group(Id={d})", .{self.id});
+                try writer.print("Group:{?}", .{self.id});
                 return;
             }
         }
 
-        try writer.print("{s}Id={}({}) {s} ", .{Str.COLOR_ORANGE, self.id, self.parent_id, Str.COLOR_DEFAULT});
+        try writer.print("{s}Group:{?}(parent:{?}) {s}", .{Str.COLOR_ORANGE, self.id, self.parent_id, Str.COLOR_DEFAULT});
         for (self.tokens.items) |t| {
             switch (t) {
                 .group => |g| {
-                    try writer.print("{s}Group={}{s} ", .{Str.COLOR_BLUE, g.id, Str.COLOR_DEFAULT});
+                    try writer.print("{s}Group={?}{s} ", .{Str.COLOR_BLUE, g.id, Str.COLOR_DEFAULT});
                 },
                 .qtty => |q| {
                     try writer.print("{s}{}{s} ", .{Str.COLOR_GREEN, q, Str.COLOR_DEFAULT});
@@ -464,6 +464,26 @@ pub const Group = struct {
             try s.addGrapheme(gr);
             try self.tokens.append(Token{ .str = s });
         }
+    }
+
+    pub fn getResult(self: *const Group, name: Str) ?*const Str {
+        for (self.tokens.items) |*t| {
+            switch (t.*) {
+                .name => |gn| {
+                    if (gn.eqStr(name)) {
+                        return &self.result;
+                    }
+                },
+                .group => |*g| {
+                    if (g.getResult(name)) |result| {
+                        return result;
+                    }
+                },
+                else => {},
+            }
+        }
+
+        return null;
     }
 
     fn matchStr2(self: *Group, needles: Str, haystack: Str, from: Str.Index) ?Str.Index {
@@ -795,7 +815,7 @@ pub const Group = struct {
         {
             const haystack = input.midIndex(from) catch return null;
             defer haystack.deinit();
-            mtl.debug(@src(), "Group:{}, haystack:{dt}, at={}", .{self.id, haystack, from});
+            mtl.debug(@src(), "Group:{?}, haystack:{dt}, at={}", .{self.id, haystack, from});
         }
         var at = from;
         self.starts_at = from;
@@ -1023,6 +1043,18 @@ pub fn getGroup(self: *Regex, id: IdType) ?*Group { // method not used yet
     return null;
 }
 
+pub fn getResult(self: *const Regex, name: []const u8) ?*const Str {
+    const name_str = Str.From(name) catch return null;
+    defer name_str.deinit();
+    for (self.groups.items) |*g| {
+        if (g.getResult(name_str)) |result| {
+            return result;
+        }
+    }
+
+    return null;
+}
+
 pub fn find(self: *Regex, input: Str, from: Str.Index) ?Str.Index {
     self.clearResult();
     var at = from;
@@ -1072,7 +1104,7 @@ test "Test regex" {
 
 // ?: means make the capturing group a non capturing group, i.e. don't include its match as a back-reference.
 // ?! is the negative lookahead. The regex will only match if the capturing group does not match.
-    const pattern = try Str.From("=(=-){2,5}(?<ClientName>\\w+)(?:БГД[^gbA-Z0-9c1-3]opq(?!345))xyz{2,3}");
+    const pattern = try Str.From("=(=-){2,5}(?<Client Name>\\w+)(?:БГД[^gbA-Z0-9c1-3]opq(?!345))xyz{2,3}");
     const regex = try Regex.New(alloc, pattern);
     defer alloc.destroy(regex);
     defer regex.deinit();
@@ -1085,6 +1117,9 @@ test "Test regex" {
         for (regex.groups.items) |group| {
             printGroupResult(group);
         }
+        mtl.debug(@src(), "Client name: {?}", .{regex.getResult("Client Name")});
+        mtl.debug(@src(), "Pet name: {?}", .{regex.getResult("Pet Name")});
+        
     } else {
         mtl.debug(@src(), "Regex didn't match", .{});
     }
