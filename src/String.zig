@@ -328,7 +328,7 @@ pub const Slice = struct {
     }
 
     pub fn isEmpty(self: Slice) bool {
-        return self.end.gr < self.start.gr;
+        return self.end.gr > self.start.gr;
     }
 
     pub fn size(self: Slice) usize {
