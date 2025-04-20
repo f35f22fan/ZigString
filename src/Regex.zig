@@ -813,9 +813,7 @@ pub const Group = struct {
 /// Like Str.matches(..) the returned value is the position right after the matched string
     pub fn matches(self: *Group, input: Str, from: Str.Index) ?Str.Index {
         {
-            const haystack = input.midIndex(from) catch return null;
-            defer haystack.deinit();
-            mtl.debug(@src(), "Group:{?}, haystack:{dt}, at={}", .{self.id, haystack, from});
+            mtl.debug(@src(), "Group:{?}, haystack:{dt}, at={}", .{self.id, input.midSlice(from), from});
         }
         var at = from;
         self.starts_at = from;
@@ -1132,8 +1130,8 @@ test "Test regex" {
         for (regex.groups.items) |group| {
             printGroupResult(group);
         }
-        mtl.debug(@src(), "Client name: {?}", .{regex.getResult("Client Name")});
-        mtl.debug(@src(), "Pet name: {?}", .{regex.getResult("Pet Name")});
+        mtl.debug(@src(), "Client name: {?}", .{regex.getResult("Client Name")}); // should find it
+        mtl.debug(@src(), "Pet name: {?}", .{regex.getResult("Pet Name")}); // should not find it
         
     } else {
         mtl.debug(@src(), "Regex didn't match", .{});
