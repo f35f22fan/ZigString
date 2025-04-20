@@ -33,11 +33,11 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("Normalize", zg.module("Normalize"));
     exe.root_module.addImport("CaseFold", zg.module("CaseFold"));
 
-    const zigstr = b.dependency("zigstr", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    exe.root_module.addImport("zigstr", zigstr.module("zigstr"));
+    // const zigstr = b.dependency("zigstr", .{
+    //     .target = target,
+    //     .optimize = optimize,
+    // });
+    // exe.root_module.addImport("zigstr", zigstr.module("zigstr"));
 
      // Module
     _ = b.addModule("zigstring", .{
@@ -100,7 +100,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    speed_test.root_module.addImport("zigstr", zigstr.module("zigstr"));
+    // speed_test.root_module.addImport("zigstr", zigstr.module("zigstr"));
     speed_test.root_module.addImport("code_point", zg.module("code_point"));
     speed_test.root_module.addImport("grapheme", zg.module("grapheme"));
     speed_test.root_module.addImport("CaseData", zg.module("CaseData"));

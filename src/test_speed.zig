@@ -5,7 +5,7 @@ const expect = std.testing.expect;
 const expectEqualStrings = std.testing.expectEqualStrings;
 const alloc = std.testing.allocator;
 
-const zigstr = @import("zigstr");
+// const zigstr = @import("zigstr");
 const io = @import("io.zig");
 const mtl = @import("mtl.zig");
 
@@ -83,24 +83,24 @@ fn FindManyLinear(haystack: String, needles: ConstCpSlice, from: ?Index, correct
     return result;
 }
 
-fn FindManyLinearZigstr(haystack: []const u8, needles: []const u8, from: usize, correct: ?usize) !usize {
+// fn FindManyLinearZigstr(haystack: []const u8, needles: []const u8, from: usize, correct: ?usize) !usize {
     
-    const cd = try zigstr.Data.init(alloc);
-    defer cd.deinit();
-    const start_t = getTime();
-    var str = try zigstr.fromConstBytes(alloc, &cd, haystack[from..]);
-    defer str.deinit();
-    const zigstr_init_time = getTime() - start_t;
-    const start_time = getTime();
-    var result = str.indexOf(needles) orelse return Error.NotFound;
-    result += from;
-    const index_of_time = getTime() - start_time;
-    const print_color = getFgColor(result, correct);
-    mtl.debug(@src(), "{s}FoundAt={?}, From={}, Time={}{s}, StrInit={}{s}\n",
-    .{ print_color, result, from, index_of_time, TimeExt, zigstr_init_time, TimeExt});
+//     const cd = try zigstr.Data.init(alloc);
+//     defer cd.deinit();
+//     const start_t = getTime();
+//     var str = try zigstr.fromConstBytes(alloc, &cd, haystack[from..]);
+//     defer str.deinit();
+//     const zigstr_init_time = getTime() - start_t;
+//     const start_time = getTime();
+//     var result = str.indexOf(needles) orelse return Error.NotFound;
+//     result += from;
+//     const index_of_time = getTime() - start_time;
+//     const print_color = getFgColor(result, correct);
+//     mtl.debug(@src(), "{s}FoundAt={?}, From={}, Time={}{s}, StrInit={}{s}\n",
+//     .{ print_color, result, from, index_of_time, TimeExt, zigstr_init_time, TimeExt});
 
-    return result;
-}
+//     return result;
+// }
 
 fn FindBackwards() !void {
     String.ctx = try Context.New(alloc);
@@ -122,7 +122,7 @@ fn FindBackwards() !void {
     }
 }
 
-pub fn test_find_index(raw_str: []const u8, needles: ConstCpSlice, needles_raw: []const u8, froms: []const usize, answers: ?[]const usize) !void {
+pub fn test_find_index(raw_str: []const u8, needles: ConstCpSlice, froms: []const usize, answers: ?[]const usize) !void {
     std.debug.print("="**70++"\n", .{});
     const short_string_len: usize = 255;
     const needles_buf = try String.utf8_from_slice(alloc, needles);
@@ -152,7 +152,7 @@ pub fn test_find_index(raw_str: []const u8, needles: ConstCpSlice, needles_raw: 
         const from_i = haystack.graphemeAddress(from);
         _ = try FindManySimd(haystack, needles, from_i, depth, correct);
         _ = try FindManyLinear(haystack, needles, from_i, correct);
-        _ = try FindManyLinearZigstr(raw_str, needles_raw, from, correct);
+        // _ = try FindManyLinearZigstr(raw_str, needles_raw, from, correct);
     }
 }
 
@@ -169,7 +169,7 @@ test "From File" {
     defer needles.deinit();
     const from = [_]usize{0};
     const correct = [_]usize{966438};
-    try test_find_index(raw_str, needles.items, needles_raw, from[0..], correct[0..]);
+    try test_find_index(raw_str, needles.items, from[0..], correct[0..]);
 }
 
 test "Speed test 2" {
@@ -177,9 +177,8 @@ test "Speed test 2" {
     defer String.ctx.deinit();
 
     const needles = [_]Codepoint{ 's', 'e' };
-    const needles_raw = "se";
     const from = [_]usize{ 0, 2, 31 };
     const correct = [_]usize{ 5, 5, 31 };
-    try test_find_index(JoseStr, &needles, needles_raw, &from, &correct);
+    try test_find_index(JoseStr, &needles, &from, &correct);
 }
 

@@ -774,7 +774,7 @@ pub const Group = struct {
 
         var left: Str = .{};
         var right: Str = .{};
-        mtl.debug(@src(), "string {dt}", .{s});
+        // mtl.debug(@src(), "string {dt}", .{s});
         if (prev.idx.gr != 0 and prev.idx.gr != 0) {
             left = try s.betweenIndices(.{}, prev.idx);
         }
