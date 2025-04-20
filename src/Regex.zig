@@ -1031,6 +1031,8 @@ pub fn deinit(self: *Regex) void {
     self.groups.deinit();
 
    self.clearResult();
+
+   defer self.alloc.destroy(self);
 }
 
 pub fn getGroup(self: *Regex, id: IdType) ?*Group { // method not used yet
@@ -1059,15 +1061,29 @@ pub fn find(self: *Regex, input: Str, from: Str.Index) ?Str.Index {
     self.clearResult();
     var at = from;
     var starts_at: ?Str.Index = null;
-    for (self.groups.items) |*group| {
-        if (group.matches(input, at)) |idx| {
-            if (starts_at == null) {
-                starts_at = at;
+    var str_iter = input.iteratorFrom(from);
+    var need_to_find_first_match = true;
+    while (str_iter.next()) |gr| {
+        for (self.groups.items) |*group| {
+            if (group.matches(input, gr.idx)) |idx| {
+                if (starts_at == null) {
+                    starts_at = gr.idx;
+                }
+                // at.add(idx);
+                at = idx;
+                need_to_find_first_match = false;
+            } else {
+                if (!need_to_find_first_match) {
+                    mtl.debug(@src(), "Group not found: {}", .{group});
+                    return null;
+                } else {
+                    break;
+                }
             }
-            at.add(idx);
-        } else {
-            mtl.debug(@src(), "Group failed: {}", .{group});
-            return null;
+        }
+
+        if (!need_to_find_first_match) {
+            break;
         }
     }
 
@@ -1106,11 +1122,10 @@ test "Test regex" {
 // ?! is the negative lookahead. The regex will only match if the capturing group does not match.
     const pattern = try Str.From("=(=-){2,5}(?<Client Name>\\w+)(?:БГД[^gbA-Z0-9c1-3]opq(?!345))xyz{2,3}");
     const regex = try Regex.New(alloc, pattern);
-    defer alloc.destroy(regex);
     defer regex.deinit();
     regex.printGroups();
 
-    const input = try Str.From("==-=-MikeБГДaopqxyzz");
+    const input = try Str.From("GGG==-=-MikeБГДaopqxyzz");
     defer input.deinit();
     if (regex.find(input, Str.Index.strStart())) |idx| {
         mtl.debug(@src(), "Regex matched at {}", .{idx});
