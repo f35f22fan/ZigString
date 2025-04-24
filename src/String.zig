@@ -1407,10 +1407,10 @@ pub fn matches(self: String, needles: []const u8, from: Index) ?Index { // ADD C
     // defer input.deinit();
     const input = String.From(needles) catch return null;
     defer input.deinit();
-    return self.matchesStr(input, from);
+    return self.matchesStr(&input, from);
 }
 
-pub fn matchesStr(self: String, input: String, from: Index) ?Index {
+pub fn matchesStr(self: String, input: *const String, from: Index) ?Index {
     
     const sd = self.d orelse return null;
     const end = from.cp + input.size_cp();

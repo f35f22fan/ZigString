@@ -237,7 +237,7 @@ pub const Range = struct {
     }
 
     // returns from+1 if found, null otherwise
-    pub fn matches(self: Range, input: Str, from: Str.Index) bool {
+    pub fn matches(self: Range, input: *const Str, from: Str.Index) bool {
         const g = input.charAtIndex(from) orelse return false;
         const cp = g.getCodepoint() orelse return false;
         return cp >= self.a and cp <= self.b;
@@ -486,7 +486,7 @@ pub const Group = struct {
         return null;
     }
 
-    fn matchStr2(self: *Group, needles: Str, haystack: Str, from: Str.Index) ?Str.Index {
+    fn matchStr2(self: *Group, needles: *const Str, haystack: *const Str, from: Str.Index) ?Str.Index {
         const past_match = haystack.matchesStr(needles, from);//, cs
         // const actual = haystack.midIndex(from) catch return null;
         // defer actual.deinit();
@@ -496,7 +496,7 @@ pub const Group = struct {
         return if (ok) past_match else null;
     }
 
-    fn matchStr(self: *Group, iter: *Iterator(Token), input: Str, haystack: Str, from: Str.Index) ?Str.Index {
+    fn matchStr(self: *Group, iter: *Iterator(Token), input: *const Str, haystack: *const Str, from: Str.Index) ?Str.Index {
         var qtty = Qtty.ExactNumber(1);
         if (iter.peekNext()) |next_token| {
             switch(next_token) {
@@ -533,7 +533,7 @@ pub const Group = struct {
         defer base_str.deinit();
         var at = from;
         {
-            const past_match = self.matchStr2(base_str, haystack, from);
+            const past_match = self.matchStr2(&base_str, haystack, from);
             if (past_match) |pm| {
                 at = pm;
             } else {
@@ -548,7 +548,7 @@ pub const Group = struct {
         var count: usize = 0;
         
         while (true) {
-            if (self.matchStr2(last_char_str, haystack, at)) |idx| {
+            if (self.matchStr2(&last_char_str, haystack, at)) |idx| {
                 count += 1;
                 at = idx;
                 if (count == qtty.b) {
@@ -811,7 +811,7 @@ pub const Group = struct {
     }
 
 /// Like Str.matches(..) the returned value is the position right after the matched string
-    pub fn matches(self: *Group, input: Str, from: Str.Index) ?Str.Index {
+    pub fn matches(self: *Group, input: *const Str, from: Str.Index) ?Str.Index {
         mtl.debug(@src(), "Group:{?}, haystack:{dt}, at={}", .{self.id, input.midSlice(from), from});
         var at = from;
         const cs = Str.CaseSensitive.Yes;
@@ -820,11 +820,11 @@ pub const Group = struct {
         var iter = Iterator(Token).New(self.tokens.items);
         while (iter.nextPtr()) |t| {
             switch (t.*) {
-                .str => |needles| {
+                .str => |*needles| {
                    
                     if (self.match == Match.All) {
                         if (self.matchStr(&iter, needles, input, at)) |past_idx| {
-                            self.result.addSlice(input, at, past_idx) catch return null;
+                            self.result.addSlice(input.*, at, past_idx) catch return null;
                             at = past_idx;
                         } else {
                             // mtl.debug(@src(), "{s}self.matchAll failed{s}", .{Str.COLOR_RED, Str.COLOR_DEFAULT});
@@ -850,7 +850,7 @@ pub const Group = struct {
                             // mtl.debug(@src(), "find a word char, qtty:{?}, from:{}, input:{}", .{qtty, from, input});
                             if (findWordChar(input, from, qtty)) |past_idx| {
                                 at = past_idx;
-                                self.result.addSlice(input, from, past_idx) catch return null;
+                                self.result.addSlice(input.*, from, past_idx) catch return null;
                             }
                         },
                         else => {
@@ -922,7 +922,7 @@ pub const Group = struct {
     }
 
     // returns past last found grapheme, or null
-    pub fn findWordChar(input: Str, from: Str.Index, qtty: ?Qtty) ?Str.Index {
+    pub fn findWordChar(input: *const Str, from: Str.Index, qtty: ?Qtty) ?Str.Index {
         var iter = input.iteratorFrom(from);
         var count: usize = 0;
         var matched = false;
@@ -1046,7 +1046,7 @@ pub fn getResult(self: *const Regex, name: []const u8) ?*const Str {
     return null;
 }
 
-pub fn find(self: *Regex, input: Str, from: Str.Index) ?Str.Index {
+pub fn find(self: *Regex, input: *const Str, from: Str.Index) ?Str.Slice {
     self.start_pos = null;
     self.end_pos = null;
     var at = from;
@@ -1077,7 +1077,9 @@ pub fn find(self: *Regex, input: Str, from: Str.Index) ?Str.Index {
         }
     }
 
-    return self.start_pos;
+    const start = self.start_pos orelse return null;
+    const end = self.end_pos orelse return null;
+    return input.slice(start, end);
 }
 
 pub fn matchedSlice(self: *const Regex, input: *const Str) ?Str.Slice {
@@ -1124,17 +1126,15 @@ test "Test regex" {
 
     const input = try Str.From("GGG==-=-MikeБГДaopqxyzz");
     defer input.deinit();
-    if (regex.find(input, Str.Index.strStart())) |idx| {
-        mtl.debug(@src(), "Regex matched at {}", .{idx});
+    if (regex.find(&input, Str.Index.strStart())) |matched_slice| {
+        mtl.debug(@src(), "Regex matched at {}", .{matched_slice.start});
         for (regex.groups.items) |group| {
             printGroupResult(group);
         }
 
-        const slice = regex.matchedSlice(&input);
-        mtl.debug(@src(), "Matched string slice: {?}", .{slice});
+        mtl.debug(@src(), "Matched string slice: {dt}", .{matched_slice});
         mtl.debug(@src(), "Client name: {?}", .{regex.getResult("Client Name")}); // should find it
         mtl.debug(@src(), "Pet name: {?}", .{regex.getResult("Pet Name")}); // should not find it
-        
     } else {
         mtl.debug(@src(), "Regex didn't match", .{});
     }
