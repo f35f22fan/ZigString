@@ -155,12 +155,12 @@ test "Equals" {
     defer filename.deinit();
     const ext = ".desKtop";
     {
-        const result = filename.endsWith(ext, String.CaseSensitive.Yes);
+        const result = filename.endsWith(ext, .{});
         try expect(!result);
         //std.debug.print("\"{s}\" ends with {s}(cs.Yes): {}\n", .{ c_str, ext, result });
     }
     {
-        const result = filename.endsWith(ext, String.CaseSensitive.No);
+        const result = filename.endsWith(ext, .{.cs = .No});
         try expect(result);
         //std.debug.print("\"{s}\" ends with {s}(cs.No): {}\n", .{ c_str, ext, result });
     }
@@ -169,10 +169,8 @@ test "Equals" {
     defer str1.deinit();
     const str2 = try String.From(".desKtop");
     defer str2.deinit();
-    const cs = str1.equalsStr(str2, String.CaseSensitive.Yes);
-    const ncs = str1.equalsStr(str2, String.CaseSensitive.No);
-    //std.debug.print("'{}' equals '{}': CaseSensitive: {}, NonCaseSensitive: {}\n", .{ str1, str2, cs, ncs });
-    try expect (!cs and ncs);
+    try expect(!str1.equalsStr(str2, String.CaseSensitive.Yes));
+    try expect(str1.equalsStr(str2, String.CaseSensitive.No));
 }
 
 test "FindInsertRemove" {
@@ -243,19 +241,19 @@ test "FindInsertRemove" {
         defer s.deinit();
         var jo_str = try String.From("JO");
         defer jo_str.deinit();
-        try expect(s.startsWithStr(jo_str, String.CaseSensitive.Yes) == false);
-        try expect(s.startsWithStr(jo_str, String.CaseSensitive.No));
+        try expect(s.startsWithStr(jo_str, .{}) == false);
+        try expect(s.startsWithStr(jo_str, .{.cs = .No}));
 
         var foo = try String.From("Foo");
         defer foo.deinit();
         const foo_buf = try foo.toString();
         defer foo_buf.deinit();
 
-        try expect(s.startsWithStr(foo, String.CaseSensitive.Yes) == false);
+        try expect(s.startsWithStr(foo, .{}) == false);
         
         const str_end = "se va";
-        try expect(s.endsWith(str_end, String.CaseSensitive.Yes));
-        try expect(s.endsWithStr(foo, String.CaseSensitive.Yes) == false);
+        try expect(s.endsWith(str_end, .{}));
+        try expect(!s.endsWithStr(foo, .{}));
     }
 }
 

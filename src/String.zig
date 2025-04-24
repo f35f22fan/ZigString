@@ -573,8 +573,7 @@ pub fn isBetweenCp(self: String, l: Codepoint, r: Codepoint) ?String {
 }
 
 pub fn isBetweenSlices(self: String, l: CpSlice, r: CpSlice) ?String {
-    const cs = CaseSensitive.Yes;
-    if (!self.startsWithSlice(l, cs) or !self.endsWithSlice(r, cs))
+    if (!self.startsWithSlice(l, .{}) or !self.endsWithSlice(r, .{}))
         return null;
     return self.between(l.len, self.size() - r.len) catch return null;
 }
@@ -716,10 +715,14 @@ pub fn dupAsCstrAlloc(self: String, a: Allocator) ![]u8 {
     return a.dupe(u8, buf.items);
 }
 
-pub fn endsWith(self: String, phrase: []const u8, cs: CaseSensitive) bool {
+const Comparison = struct {
+    cs: CaseSensitive = CaseSensitive.Yes,
+};
+
+pub fn endsWith(self: String, phrase: []const u8, cmp: Comparison) bool {
     const needles = toCodepoints(ctx.a, phrase) catch return false;
     defer needles.deinit();
-    return self.endsWithSlice(needles.items, cs);
+    return self.endsWithSlice(needles.items, cmp);
 }
 
 pub fn endsWithChar(self: String, letter: []const u8) bool {
@@ -737,7 +740,7 @@ pub fn endsWithCp(self: String, cp: Codepoint) bool {
     return glist[glist.len - 1] == 1;
 }
 
-pub fn endsWithSlice(self: String, needles: CpSlice, cs: CaseSensitive) bool {
+pub fn endsWithSlice(self: String, needles: CpSlice, cmp: Comparison) bool {
     const sd = self.d orelse return false;
     const start_index: usize = sd.codepoints.items.len - needles.len;
     // The starting codepoint must be a grapheme
@@ -745,7 +748,7 @@ pub fn endsWithSlice(self: String, needles: CpSlice, cs: CaseSensitive) bool {
         return false;
     }
 
-    if (cs == CaseSensitive.Yes) {
+    if (cmp.cs == CaseSensitive.Yes) {
         return std.mem.endsWith(Codepoint, sd.codepoints.items, needles);
     }
 
@@ -762,9 +765,9 @@ pub fn endsWithSlice(self: String, needles: CpSlice, cs: CaseSensitive) bool {
     return true;
 }
 
-pub fn endsWithStr(self: String, needles: String, cs: CaseSensitive) bool {
+pub fn endsWithStr(self: String, needles: String, cmp: Comparison) bool {
     const sdn = needles.d orelse return false;
-    return self.endsWithSlice(sdn.codepoints.items, cs);
+    return self.endsWithSlice(sdn.codepoints.items, cmp);
 }
 
 pub fn ensureTotalCapacity(self: *String, cp_count: usize) !void {
@@ -1709,10 +1712,10 @@ pub fn split(self: String, sep: []const u8, cs: CaseSensitive, kep: KeepEmptyPar
     return array;
 }
 
-pub fn startsWith(self: String, phrase: []const u8, cs: CaseSensitive) !bool {
+pub fn startsWith(self: String, phrase: []const u8, cmp: Comparison) !bool {
     const needles = try String.toCodepoints(ctx.a, phrase);
     defer needles.deinit();
-    return self.startsWithSlice(needles.items, cs);
+    return self.startsWithSlice(needles.items, cmp);
 }
 
 /// `letter` must resolve to one codepoint, which all ASCII chars are.
@@ -1731,7 +1734,7 @@ pub fn startsWithCp(self: String, cp: Codepoint) bool {
     return gr_list.len == 1 or gr_list[1] == 1; // it's either the end or the next cp is a grapheme
 }
 
-pub fn startsWithSlice(self: String, needles: CpSlice, cs: CaseSensitive) bool {
+pub fn startsWithSlice(self: String, needles: CpSlice, cmp: Comparison) bool {
     const sd = self.d orelse return false;
     if (sd.graphemes.items.len > needles.len) {
         // make sure it ends on a grapheme boundary:
@@ -1740,7 +1743,7 @@ pub fn startsWithSlice(self: String, needles: CpSlice, cs: CaseSensitive) bool {
         }
     }
 
-    if (cs == CaseSensitive.Yes) {
+    if (cmp.cs == CaseSensitive.Yes) {
         return std.mem.startsWith(Codepoint, sd.codepoints.items, needles);
     }
 
@@ -1757,9 +1760,9 @@ pub fn startsWithSlice(self: String, needles: CpSlice, cs: CaseSensitive) bool {
     return true;
 }
 
-pub fn startsWithStr(self: String, needles: String, cs: CaseSensitive) bool {
+pub fn startsWithStr(self: String, needles: String, cmp: Comparison) bool {
     const sdn = needles.d orelse return false;
-    return self.startsWithSlice(sdn.codepoints.items, cs);
+    return self.startsWithSlice(sdn.codepoints.items, cmp);
 }
 
 pub fn strEnd(self: String) Index { // returns index before last grapheme

@@ -812,11 +812,8 @@ pub const Group = struct {
 
 /// Like Str.matches(..) the returned value is the position right after the matched string
     pub fn matches(self: *Group, input: Str, from: Str.Index) ?Str.Index {
-        {
-            mtl.debug(@src(), "Group:{?}, haystack:{dt}, at={}", .{self.id, input.midSlice(from), from});
-        }
+        mtl.debug(@src(), "Group:{?}, haystack:{dt}, at={}", .{self.id, input.midSlice(from), from});
         var at = from;
-        self.starts_at = from;
         const cs = Str.CaseSensitive.Yes;
         _ = cs;
         // for (self.tokens.items) |*t| {
@@ -918,6 +915,9 @@ pub const Group = struct {
             else => {},
         }
 
+        if (self.starts_at == null)
+            self.starts_at = from;
+
         return at;
     }
 
@@ -985,7 +985,8 @@ pattern: Str,
 alloc: Allocator,
 groups: ArrayList(Group) = undefined,
 next_group_id: IdType = 0,
-result: ArrayList(Str),
+start_pos: ?Str.Index = null,
+end_pos: ?Str.Index = null,
 
 // Regex takes ownership over `pattern`
 pub fn New(alloc: Allocator, pattern: Str) !*Regex {
@@ -995,7 +996,6 @@ pub fn New(alloc: Allocator, pattern: Str) !*Regex {
     ptr.* = Regex {
         .pattern = pattern,
         .tokens = ArrayList(Token).init(alloc),
-        .result = ArrayList(Str).init(alloc),
         .alloc = alloc,
         .groups = ArrayList(Group).init(alloc),
     };
@@ -1010,13 +1010,6 @@ pub fn New(alloc: Allocator, pattern: Str) !*Regex {
     return ptr;
 }
 
-inline fn clearResult(self: *Regex) void {
-     for (self.result.items) |s| {
-        s.deinit();
-    }
-    self.result.deinit();
-}
-
 pub fn deinit(self: *Regex) void {
     for (self.tokens.items) |g| {
         g.deinit();
@@ -1028,9 +1021,7 @@ pub fn deinit(self: *Regex) void {
     }
     self.groups.deinit();
 
-   self.clearResult();
-
-   defer self.alloc.destroy(self);
+    defer self.alloc.destroy(self);
 }
 
 pub fn getGroup(self: *Regex, id: IdType) ?*Group { // method not used yet
@@ -1056,19 +1047,20 @@ pub fn getResult(self: *const Regex, name: []const u8) ?*const Str {
 }
 
 pub fn find(self: *Regex, input: Str, from: Str.Index) ?Str.Index {
-    self.clearResult();
+    self.start_pos = null;
+    self.end_pos = null;
     var at = from;
-    var starts_at: ?Str.Index = null;
     var str_iter = input.iteratorFrom(from);
     var need_to_find_first_match = true;
     while (str_iter.next()) |gr| {
         for (self.groups.items) |*group| {
-            if (group.matches(input, gr.idx)) |idx| {
-                if (starts_at == null) {
-                    starts_at = gr.idx;
+            if (group.matches(input, gr.idx)) |end_pos| {
+                if (self.start_pos == null) {
+                    self.start_pos = gr.idx;
                 }
                 // at.add(idx);
-                at = idx;
+                at = end_pos;
+                self.end_pos = end_pos;
                 need_to_find_first_match = false;
             } else {
                 if (!need_to_find_first_match) {
@@ -1085,7 +1077,14 @@ pub fn find(self: *Regex, input: Str, from: Str.Index) ?Str.Index {
         }
     }
 
-    return starts_at;
+    return self.start_pos;
+}
+
+pub fn matchedSlice(self: *const Regex, input: *const Str) ?Str.Slice {
+    const start = self.start_pos orelse return null;
+    const end = self.end_pos orelse return null;
+    // mtl.debug(@src(), "start: {}, end: {}, input: {dt}", .{start, end, input});
+    return input.slice(start, end);
 }
 
 pub fn printGroups(self: Regex) void {
@@ -1130,6 +1129,9 @@ test "Test regex" {
         for (regex.groups.items) |group| {
             printGroupResult(group);
         }
+
+        const slice = regex.matchedSlice(&input);
+        mtl.debug(@src(), "Matched string slice: {?}", .{slice});
         mtl.debug(@src(), "Client name: {?}", .{regex.getResult("Client Name")}); // should find it
         mtl.debug(@src(), "Pet name: {?}", .{regex.getResult("Pet Name")}); // should not find it
         
