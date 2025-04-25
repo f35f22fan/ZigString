@@ -124,7 +124,7 @@ fn readString(in: anytype, correct: []const u8) !void {
     mtl.debug(@src(), "Done reading binary in {}{s}", .{Num{.value = t2-t1}, TimeExt});
     //read_str.printInfo(@src(), null);
     //try read_str.printCodepoints(@src());
-    try expect(read_str.eq(correct));
+    try expect(read_str.eqBytes(correct));
 }
 
 test "Binary read/write string to file" {

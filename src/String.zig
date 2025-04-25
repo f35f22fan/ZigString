@@ -84,7 +84,7 @@ pub const Grapheme = struct {
         return sd.codepoints.items[self.idx.cp];
     }
 
-    pub fn eq(self: Grapheme, input: []const u8) bool {
+    pub fn eqBytes(self: Grapheme, input: []const u8) bool {
         if (input.len == 1) {
             const cp = toCp(input) catch return false;
             return self.eqCp(cp);
@@ -710,7 +710,7 @@ pub fn dupAsCstr(self: String) ![]u8 {
 }
 
 pub fn dupAsCstrAlloc(self: String, a: Allocator) ![]u8 {
-    const buf = try self.toString();
+    const buf = try self.toBytes();
     defer buf.deinit();
     return a.dupe(u8, buf.items);
 }
@@ -719,7 +719,7 @@ const Comparison = struct {
     cs: CaseSensitive = CaseSensitive.Yes,
 };
 
-pub fn endsWith(self: String, phrase: []const u8, cmp: Comparison) bool {
+pub fn endsWithBytes(self: String, phrase: []const u8, cmp: Comparison) bool {
     const needles = toCodepoints(ctx.a, phrase) catch return false;
     defer needles.deinit();
     return self.endsWithSlice(needles.items, cmp);
@@ -741,6 +741,9 @@ pub fn endsWithCp(self: String, cp: Codepoint) bool {
 }
 
 pub fn endsWithSlice(self: String, needles: CpSlice, cmp: Comparison) bool {
+    if (needles.len == 1 and cmp.cs == .Yes) {
+        return self.endsWithCp(needles[0]);
+    }
     const sd = self.d orelse return false;
     const start_index: usize = sd.codepoints.items.len - needles.len;
     // The starting codepoint must be a grapheme
@@ -765,7 +768,7 @@ pub fn endsWithSlice(self: String, needles: CpSlice, cmp: Comparison) bool {
     return true;
 }
 
-pub fn endsWithStr(self: String, needles: String, cmp: Comparison) bool {
+pub fn endsWith(self: String, needles: String, cmp: Comparison) bool {
     const sdn = needles.d orelse return false;
     return self.endsWithSlice(sdn.codepoints.items, cmp);
 }
@@ -776,27 +779,27 @@ pub fn ensureTotalCapacity(self: *String, cp_count: usize) !void {
     try sd.codepoints.ensureTotalCapacity(cp_count);
 }
 
-pub fn eq(self: String, input: []const u8) bool {
-    return self.equals(input, CaseSensitive.Yes);
+pub fn eqBytes(self: String, input: []const u8) bool {
+    return self.equalsBytes(input, .{});
 }
 
-pub fn eqStr(self: String, other: String) bool {
-    return self.equalsStr(other, CaseSensitive.Yes);
+pub fn eq(self: String, other: String) bool {
+    return self.equals(other, .{});
 }
 
-pub fn equals(self: String, input: []const u8, cs: CaseSensitive) bool {
+pub fn equalsBytes(self: String, input: []const u8, cmp: Comparison) bool {
     const list = toCodepoints(ctx.a, input) catch return false;
     defer list.deinit();
-    return self.equalsSlice(list.items, cs);
+    return self.equalsSlice(list.items, cmp);
 }
 
-pub fn equalsSlice(self: String, cp_slice: CpSlice, cs: CaseSensitive) bool {
+pub fn equalsSlice(self: String, cp_slice: CpSlice, cmp: Comparison) bool {
     if (cp_slice.len == 0) {
         return self.isEmpty();
     }
     
     const sd = self.d orelse return false;
-    if (cs == CaseSensitive.Yes) {
+    if (cmp.cs == CaseSensitive.Yes) {
         return std.mem.eql(Codepoint, sd.codepoints.items, cp_slice);
     }
 
@@ -813,9 +816,9 @@ pub fn equalsSlice(self: String, cp_slice: CpSlice, cs: CaseSensitive) bool {
     return true;
 }
 
-pub fn equalsStr(self: String, other: String, cs: CaseSensitive) bool {
+pub fn equals(self: String, other: String, cmp: Comparison) bool {
     const sdo = other.d orelse return false;
-    return self.equalsSlice(sdo.codepoints.items, cs);
+    return self.equalsSlice(sdo.codepoints.items, cmp);
 }
 
 fn findCaseInsensitive(graphemes: []u1, haystack: ConstCpSlice, needles: ConstCpSlice) ?usize {
@@ -1003,7 +1006,7 @@ pub fn findOneSimdFromEnd(self: String, needle: Codepoint, start: ?usize, compti
 /// format implements the `std.fmt` format interface for printing types.
 pub fn format(self: String, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
     _ = options;
-    const buf = self.toString() catch return;
+    const buf = self.toBytes() catch return;
     defer buf.deinit();
     try printBytes(buf, fmt, writer);
 }
@@ -1159,71 +1162,20 @@ pub const Find = struct {
     cs: CaseSensitive = CaseSensitive.Yes,
 };
 
-pub fn indexOfAscii(self: String, input: []const u8, find: Find) ?Index {
-    var from = Index.strStart();
-    if (find.from != 0) {
-        from = self.graphemeAddress(find.from) orelse return null;
-    }
-
-    if (input.len == 1) {
-        const cp: Codepoint = input[0];
-        var arr = [_]Codepoint {cp};
-        const cps: CpSlice = arr[0..1];
-        return self.indexOfCp2(cps, from, find.cs);
-    } else {
-        return self.indexOfCp(input, from, find.cs);
-    }
-}
-
-// each char in the array must be one codepoint
-pub fn indexOfCp(self: String, input: []const u8, from: Index, cs: CaseSensitive) ?Index {
-    var input_cps = toCodepoints(ctx.a, input) catch return null;
-    defer input_cps.deinit();
-    return self.indexOfCp2(input_cps.items, from, cs);
-}
-
-pub fn indexOfCp2(self: String, input: CpSlice, from: Index, cs: CaseSensitive) ?Index {
-    const sd = self.d orelse return null;
-    if (cs == CaseSensitive.No) {
-        toUpper2(input) catch return null;
-    }
-    var grapheme_count: isize = @intCast(from.gr);
-    for (sd.codepoints.items[from.cp..], 0..) |cp, cp_index| {
-        const at = from.cp + cp_index;
-        if (!self.isGrapheme(at)) {
-            continue;
-        }
-        grapheme_count += 1;
-        const l = if (cs == CaseSensitive.Yes) cp else (toUpperCp(cp) catch return null);
-        for (input) |r| {
-            if (l == r) {
-                // Make sure the next codepoint is the end of the string or a new grapheme
-                // so that we don't return a part of a multi-codepoint grapheme.
-                const next = at + 1;
-                if (next >= sd.graphemes.items.len or sd.graphemes.items[next] == 1) {
-                    return Index{ .cp = at, .gr = @intCast(grapheme_count - 1) };
-                }
-            }
-        }
-    }
-
-    return null;
-}
-
 pub const FindIndex = struct {
     from: Index = Index.strStart(),
     cs: CaseSensitive = CaseSensitive.Yes,
 };
 
-pub fn indexOf(self: String, input: []const u8, find: Find) ?Index {
+pub fn indexOfBytes(self: String, input: []const u8, find: Find) ?Index {
     if (find.from == 0) {
-        return self.indexOf2(input, .{.cs = find.cs});
+        return self.indexOfBytes2(input, .{.cs = find.cs});
     }
     const index = self.graphemeAddress(find.from) orelse return null;
-    return self.indexOf2(input, .{.from=index, .cs=find.cs});
+    return self.indexOfBytes2(input, .{.from=index, .cs=find.cs});
 }
 
-pub fn indexOf2(self: String, input: []const u8, find: FindIndex) ?Index {
+pub fn indexOfBytes2(self: String, input: []const u8, find: FindIndex) ?Index {
     if (input.len == 0)
         return null;
     const sd = self.d orelse return null;
@@ -1252,15 +1204,14 @@ pub fn indexOf2(self: String, input: []const u8, find: FindIndex) ?Index {
     return idx;
 }
 
-pub fn indexOf3(self: String, needles: CpSlice, from_index: ?Index, cs: CaseSensitive) ?Index {
+pub fn indexOfCpSlice(self: String, needles: CpSlice, find: FindIndex) ?Index {
     if (needles.len == 0)
         return null;
     const sd = self.d orelse return null;
-    const from = from_index orelse Index.strStart();
-    if (cs == CaseSensitive.Yes and sd.codepoints.items.len >= SimdVecLen) {
-        return self.findManySimd(needles, from, SimdVecLen);
+    if (find.cs == CaseSensitive.Yes and sd.codepoints.items.len >= SimdVecLen) {
+        return self.findManySimd(needles, find.from, SimdVecLen);
     }
-    return self.findManyLinear(needles, from, cs);
+    return self.findManyLinear(needles, find.from, find.cs);
 }
 
 inline fn endsWithGrapheme(a: []const u1, end: usize) bool {
@@ -1303,13 +1254,13 @@ pub fn init(self: *String, input: []const u8, clear: Clear) !void {
 }
 
 /// inserts `what` at grapheme index `at(.gr)`
-pub fn insert(self: *String, at_gr_pos: ?Index, what: []const u8) !void {
-    var input = try String.From(what);
+pub fn insertBytes(self: *String, at_gr_pos: ?Index, what: []const u8) !void {
+    const input = try String.From(what);
     defer input.deinit();
-    try self.insertStr(at_gr_pos, input);
+    try self.insert(at_gr_pos, input);
 }
 
-pub fn insertStr(self: *String, at_pos: ?Index, input: String) !void {
+pub fn insert(self: *String, at_pos: ?Index, input: String) !void {
     if (input.isEmpty())
         return;
     const index = at_pos orelse return;
@@ -1452,14 +1403,14 @@ pub fn midSlice(self: *const String, from_index: Index) Slice {
 
 /// parseInt tries to parse this Zigstr as an integer of type `T` in base `radix`.
 pub fn parseInt(self: String, comptime T: type, radix: u8) !T {
-    const buf = try self.toString();
+    const buf = try self.toBytes();
     defer buf.deinit();
     return std.fmt.parseInt(T, buf.items, radix);
 }
 
 /// parseFloat tries to parse this Zigstr as an floating point number of type `T`.
 pub fn parseFloat(self: String, comptime T: type) !T {
-    const buf = try self.toString();
+    const buf = try self.toBytes();
     defer buf.deinit();
     return std.fmt.parseFloat(T, buf.items);
 }
@@ -1595,7 +1546,7 @@ fn readCpCount(reader: anytype) !usize {
 }
 
 pub fn remove(self: *String, needles: []const u8) !void {
-    const from = self.indexOf(needles, .{});
+    const from = self.indexOfBytes(needles, .{});
     const count = countGraphemesRaw(ctx.a, needles);
     try self.removeByIndex(from, count);
 }
@@ -1640,14 +1591,14 @@ pub fn removeLowLevel(self: *String, from_cp: usize, cp_count: usize) !void {
     sd.grapheme_count -= cp_count;
 }
 
-pub fn replace(self: *String, start_index: ?Index, gr_count_to_remove: usize, replacement: []const u8) !void {
+pub fn replaceBytes(self: *String, start_index: ?Index, gr_count_to_remove: usize, replacement: []const u8) !void {
     try self.removeByIndex(start_index, gr_count_to_remove);
-    try self.insert(start_index, replacement);
+    try self.insertBytes(start_index, replacement);
 }
 
-pub fn replaceStr(self: *String, start_index: ?Index, gr_count_to_remove: usize, replacement: String) !void {
+pub fn replace(self: *String, start_index: ?Index, gr_count_to_remove: usize, replacement: String) !void {
     try self.removeByIndex(start_index, gr_count_to_remove);
-    try self.insertStr(start_index, replacement);
+    try self.insert(start_index, replacement);
 }
 
 pub fn resetTo(self: *String, str: []const u8) !void {
@@ -1684,7 +1635,7 @@ pub fn split(self: String, sep: []const u8, cs: CaseSensitive, kep: KeepEmptyPar
     }
 
     var from = Index.strStart();
-    while (self.indexOfCp(sep, from, cs)) |found| {
+    while (self.indexOfBytes2(sep, .{.from = from, .cs = cs})) |found| {
         const s = try self.mid(from.gr, @intCast(found.gr - from.gr));
         from = Index{ .cp = found.cp + 1, .gr = found.gr + 1 };
 
@@ -1712,16 +1663,14 @@ pub fn split(self: String, sep: []const u8, cs: CaseSensitive, kep: KeepEmptyPar
     return array;
 }
 
-pub fn startsWith(self: String, phrase: []const u8, cmp: Comparison) !bool {
-    const needles = try String.toCodepoints(ctx.a, phrase);
-    defer needles.deinit();
-    return self.startsWithSlice(needles.items, cmp);
-}
-
-/// `letter` must resolve to one codepoint, which all ASCII chars are.
-pub fn startsWithChar(self: String, letter: []const u8) bool {
-    const cp = toCp(letter) catch return false;
-    return self.startsWithCp(cp);
+pub fn startsWithBytes(self: String, needles: []const u8, cmp: Comparison) bool {
+    if (needles.len == 1) {
+        const cp = toCp(needles) catch return false;
+        return self.startsWithCp(cp);
+    }
+    const cps = String.toCodepoints(ctx.a, needles) catch return false;
+    defer cps.deinit();
+    return self.startsWithSlice(cps.items, cmp);
 }
 
 // returns true if the codepoint is a whole grapheme
@@ -1760,7 +1709,7 @@ pub fn startsWithSlice(self: String, needles: CpSlice, cmp: Comparison) bool {
     return true;
 }
 
-pub fn startsWithStr(self: String, needles: String, cmp: Comparison) bool {
+pub fn startsWith(self: String, needles: String, cmp: Comparison) bool {
     const sdn = needles.d orelse return false;
     return self.startsWithSlice(sdn.codepoints.items, cmp);
 }
@@ -1876,13 +1825,13 @@ pub fn toLower2(list: CpSlice) !void {
     }
 }
 
-pub fn toString(self: String) !ArrayList(u8) {
+pub fn toBytes(self: String) !ArrayList(u8) {
     const sd = self.d orelse return ArrayList(u8).init(ctx.a);
     return utf8_from_slice(ctx.a, sd.codepoints.items);
 }
 
 pub fn toOwnedSlice(self: String) ![]const u8 {
-    const arr = try self.toString();
+    const arr = try self.toBytes();
     defer arr.deinit();
     var memory = try ctx.a.alloc(u8, arr.items.len);
     for (0..arr.items.len) |i| {

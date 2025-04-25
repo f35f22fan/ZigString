@@ -256,7 +256,7 @@ pub const Qtty = struct {
     lazy: bool = false,
 
     pub fn FromCurly(input: Str) !Qtty {
-        if (input.indexOfAscii(",", .{})) |comma_idx| {
+        if (input.indexOfBytes(",", .{})) |comma_idx| {
             const s1 = try input.betweenIndices(Str.strStart(), comma_idx);
             defer s1.deinit();
             const n1: i32 = try s1.parseInt(i32, 10);
@@ -470,7 +470,7 @@ pub const Group = struct {
         for (self.tokens.items) |*t| {
             switch (t.*) {
                 .name => |gn| {
-                    if (gn.eqStr(name)) {
+                    if (gn.eq(name)) {
                         return &self.result;
                     }
                 },
@@ -544,7 +544,7 @@ pub const Group = struct {
         }
         const last_char_str = input.midIndex(last_gr_index) catch return null;
         defer last_char_str.deinit();
-        mtl.debug(@src(), "base_str:{dt}, last_char:{}", .{base_str, last_char_str});
+        // mtl.debug(@src(), "base_str:{dt}, last_char:{}", .{base_str, last_char_str});
         var count: usize = 0;
         
         while (true) {
@@ -613,7 +613,7 @@ pub const Group = struct {
                 } else if (s.matches("?<", gr.idx)) |idx| { //(?<name>\\w+) = name = e.g."Jordan"
                     it.continueFrom(idx);
                     // named capture
-                    if (s.indexOf2(">", .{.from = idx.addRaw("?<".len)})) |closing_idx| {
+                    if (s.indexOfBytes2(">", .{.from = idx.addRaw("?<".len)})) |closing_idx| {
                         const name = try s.betweenIndices(idx, closing_idx);
                         // mtl.debug(@src(), "Name: \"{}\"", .{name});
                         try self.addMeta(Meta.NamedCapture);
@@ -625,7 +625,7 @@ pub const Group = struct {
                 }
             } else if (gr.eqAscii('{')) {
                 const s: *Str = &self.regex.pattern;
-                if (s.indexOf2("}", .{.from = gr.idx.addRaw(1)})) |idx| {
+                if (s.indexOfBytes2("}", .{.from = gr.idx.addRaw(1)})) |idx| {
                     const qtty_in_curly = try s.betweenIndices(gr.idx.addRaw("}".len), idx);
                     defer qtty_in_curly.deinit();
                     it.continueFrom(idx.addRaw("}".len));
@@ -754,7 +754,7 @@ pub const Group = struct {
     }
 
     fn parseRange(s: Str, result: *ArrayList(Token)) !void {
-        const idx = s.indexOf("-", .{}) orelse return;
+        const idx = s.indexOfBytes("-", .{}) orelse return;
         var iter = s.iteratorFrom(idx);
         const prev = iter.prevFrom(idx) orelse return;
         const next = iter.nextFrom(idx) orelse return;
@@ -812,7 +812,6 @@ pub const Group = struct {
 
 /// Like Str.matches(..) the returned value is the position right after the matched string
     pub fn matches(self: *Group, input: *const Str, from: Str.Index) ?Str.Index {
-        mtl.debug(@src(), "Group:{?}, haystack:{dt}, at={}", .{self.id, input.midSlice(from), from});
         var at = from;
         const cs = Str.CaseSensitive.Yes;
         _ = cs;
@@ -893,10 +892,11 @@ pub const Group = struct {
                 },
                 .range => |range| {
                     const gr = input.charAtIndex(at);
+                    _ = gr;                        
                     if (self.not == range.matches(input, at)) {
-                        mtl.debug(@src(), "Range did match {}, at:{}, for: {?}, not:{}", .{range, at, gr, self.not});
+                        // mtl.debug(@src(), "Range did match {}, at:{}, for: {?}, not:{}", .{range, at, gr, self.not});
                     } else {
-                        mtl.debug(@src(), "Range did not match {}, for: {?}", .{range, gr});
+                        // mtl.debug(@src(), "Range did not match {}, for: {?}", .{range, gr});
                         return null;
                     }
                     
@@ -917,6 +917,8 @@ pub const Group = struct {
 
         if (self.starts_at == null)
             self.starts_at = from;
+
+        // mtl.debug(@src(), "Group:{?}, haystack:{dt}, at={}", .{self.id, input.midSlice(from), from});
 
         return at;
     }
@@ -950,7 +952,7 @@ pub const Group = struct {
             }
         }
 
-        mtl.debug(@src(), "q:{?}, count:{}", .{qtty, count});
+        // mtl.debug(@src(), "q:{?}, count:{}", .{qtty, count});
         return if (matched) ret_idx else null;
     }
 
@@ -1095,12 +1097,8 @@ pub fn printGroups(self: Regex) void {
     }
 }
 
-fn printResult(self: Group) void {
-    mtl.debug(@src(), "{id} captured string: {dt}, starts at: {?}", .{self, self.result, self.starts_at});
-}
-
 fn printGroupResult(self: Group) void {
-    printResult(self);
+    mtl.debug(@src(), "{id} captured string: {dt}, starts at: {?}", .{self, self.result, self.starts_at});
     for (self.tokens.items) |item| {
         switch (item) {
             .group => |g| {
@@ -1128,13 +1126,12 @@ test "Test regex" {
     defer input.deinit();
     if (regex.find(&input, Str.Index.strStart())) |matched_slice| {
         mtl.debug(@src(), "Regex matched at {}", .{matched_slice.start});
-        for (regex.groups.items) |group| {
-            printGroupResult(group);
-        }
-
         mtl.debug(@src(), "Matched string slice: {dt}", .{matched_slice});
         mtl.debug(@src(), "Client name: {?}", .{regex.getResult("Client Name")}); // should find it
         mtl.debug(@src(), "Pet name: {?}", .{regex.getResult("Pet Name")}); // should not find it
+        for (regex.groups.items) |group| {
+            printGroupResult(group);
+        }
     } else {
         mtl.debug(@src(), "Regex didn't match", .{});
     }
