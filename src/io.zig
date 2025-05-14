@@ -1,4 +1,5 @@
 const std = @import("std");
+const Str = @import("String.zig");
 const Allocator = std.mem.Allocator;
 
 pub const Error = error{NotFound};
@@ -35,4 +36,12 @@ pub fn readFile(alloc: Allocator, full_path: []const u8) ![]u8 {
     const file = try std.fs.openFileAbsolute(full_path, .{});
     defer file.close();
     return file.reader().readAllAlloc(alloc, std.math.maxInt(usize));
+}
+
+pub fn changeExtension(filename: Str, ext: []const u8) !Str {
+    const pt_idx = filename.lastIndexOfBytes(".") orelse return Str.Error.Other;
+    var out_name = try filename.betweenIndices(.{}, pt_idx);
+    try out_name.addBytes(ext);
+
+    return out_name;
 }

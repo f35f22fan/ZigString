@@ -164,11 +164,12 @@ test "From File" {
     defer alloc.free(path);
     const raw_str = try io.readFile(alloc, path);
     defer alloc.free(raw_str);
-    const needles_raw = "Это подтверждается разговором арестованного Иисуса";
+    const needles_raw = "CONCAT(&quot;EC.TYPE=&quot;;[SLAVE1_CAN.G181]))\"";
+    // "Это подтверждается разговором арестованного Иисуса";
     const needles = try String.toCodepoints(alloc, needles_raw);
     defer needles.deinit();
     const from = [_]usize{0};
-    const correct = [_]usize{966438};
+    const correct = [_]usize{7753055};
     try test_find_index(raw_str, needles.items, from[0..], correct[0..]);
 }
 

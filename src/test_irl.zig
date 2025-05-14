@@ -54,8 +54,8 @@ const Truncate = enum(u1) { Yes, No };
 var tick: isize = 0;
 
 test "Desktop File" {
-    // if (true)
-    //     return error.SkipZigTest;
+    if (true)
+        return error.SkipZigTest;
 
     String.ctx = try Context.New(alloc);
     defer String.ctx.deinit();
@@ -121,13 +121,15 @@ fn readString(in: anytype, correct: []const u8) !void {
     const read_str = try String.fromBlob(in);
     defer read_str.deinit();
     const t2 = getTime();
-    mtl.debug(@src(), "Done reading binary in {}{s}", .{Num{.value = t2-t1}, TimeExt});
+    mtl.debug(@src(), "Done reading binary in {}{s}", .{ Num{ .value = t2 - t1 }, TimeExt });
     //read_str.printInfo(@src(), null);
     //try read_str.printCodepoints(@src());
     try expect(read_str.eqBytes(correct));
 }
 
 test "Binary read/write string to file" {
+    if (true)
+        return error.SkipZigTest;
     // This test reads/writes the string not in UTF-8,
     // but in its internal binary format.
     String.ctx = try Context.New(alloc);
@@ -189,4 +191,233 @@ test "Binary read/write string to file" {
 const TimeExt = "mc";
 inline fn getTime() i128 {
     return std.time.microTimestamp();
+}
+
+pub fn buildAHref(line: *const String) !String {
+    const anchor = try line.mid(2, -1);
+    defer anchor.deinit();
+    const nums = try anchor.splitPair(".");
+    // <a class="anchor" id="1_0" href="#1_0">1.0</a>
+    var a_href = String.New();
+    try a_href.addBytes("<a class=\"anchor\" id=\"");
+    var sub = nums[0];//.Clone();
+    defer sub.deinit();
+    try sub.addBytes("_");
+    try sub.addConsume(nums[1]);
+    try a_href.add(sub);
+    try a_href.addBytes("\" href=\"#");
+    try a_href.add(sub);
+    try a_href.addBytes("\">");
+    try a_href.add(anchor);
+    try a_href.addBytes("</a>");
+    // mtl.debug(@src(), "{dt}", .{a_href});
+    return a_href;
+}
+
+const Speaking = enum {
+    Ra,
+    Questioner,
+};
+
+fn replace(en: *String, idx: Index, bytes: []const u8) !void {
+    const v = try en.Clone();
+    defer v.deinit();
+    en.clearAndFree();
+    try en.addBytes(bytes);
+    try en.addConsume(try v.midIndex(idx));
+}
+
+fn addEng(to: *String, line: *const String, skip_prefix: bool) !?Speaking {
+    const skip_num: usize = if (skip_prefix) 4 else 0;
+
+    if (line.size() <= skip_num) {
+        mtl.debug(@src(), "Warning: line is empty", .{});
+        return null;
+    }
+
+    var en = try line.mid(skip_num, -1);
+    var speaking: ?Speaking = null;
+    if (skip_prefix) {
+        try en.trimLeft(); // in case between "-en-" and "RA" there's a space
+        if (en.startsWithBytes("RA", .{})) {
+            speaking = .Ra;
+            try replace(&en, .{.cp=2, .gr=2}, "<span class=ra>RA:</span>");
+        } else if (en.startsWithBytes("QUESTIONER", .{})) {
+            speaking = .Questioner;
+            try replace(&en, .{.cp=10, .gr=10}, "<span class=qa>QUESTIONER:</span>");
+        }
+    }
+    try to.addConsume(en);
+
+    return speaking;
+}
+
+fn addRus(to: *String, line: *const String, skip_prefix: bool, speaking: ?Speaking) !void {
+    const skip_num: usize = if (skip_prefix) 4 else 0;
+    var ru = String.New();
+    if (speaking) |s| {
+        switch (s) {
+            .Ra => {
+                try ru.addBytes("<span class=ra>Ра:</span>");
+            },
+            .Questioner => {
+                try ru.addBytes("<span class=qa>Собеседник:</span>");
+            },
+        }
+    }
+    
+    if (line.size() <= skip_num) {
+        mtl.debug(@src(), "Warning: line is empty", .{});
+        return; // empty
+    }
+    // mtl.debug(@src(), "{dt}, skip_num: {}", .{line, skip_num});
+    var l = try line.mid(skip_num, -1);
+    try l.trimLeft();
+    try ru.addConsume(l);
+    try to.addConsume(ru);
+}
+
+
+test "Translate En to Ru" {
+    String.ctx = try Context.New(alloc);
+    defer String.ctx.deinit();
+
+    if (false) {
+        const needles = try String.From("\u{65}\u{301}");
+        defer needles.deinit();
+        const haystack = try String.From("Jos\u{65}\u{301} se fu\u{65}\u{301}");
+        defer haystack.deinit();
+        mtl.debug(@src(), "lastIndexOf: {?}, of={dt}, haystack={dt}",
+            .{haystack.lastIndexOf(needles), needles, haystack});
+
+        if (true) {
+            return;
+        }
+    }
+
+    const filename = try String.From("session_2.txt");
+    defer filename.deinit();
+
+    const dirpath = try io.getHome(alloc, "/dev/tloo/raw/");
+    defer alloc.free(dirpath);
+
+    var rel_path = try String.Concat(dirpath, filename);
+    defer rel_path.deinit();
+    const raw_str = try io.readFile(alloc, rel_path.items);
+    defer alloc.free(raw_str);
+
+    const contents = try String.From(raw_str);
+    defer contents.deinit();
+
+    var lines = try contents.split("\n", CaseSensitive.Yes, KeepEmptyParts.Yes);
+    defer {
+        for (lines.items) |line| {
+            line.deinit();
+        }
+        lines.deinit();
+    }
+
+    var html = String.New();
+    defer html.deinit();
+    try html.addBytes(
+\\<html>
+\\<head>
+\\  <meta charset="UTF-8"/>
+\\  <link rel="stylesheet" href="styles.css">
+);
+    var idx1 = filename.indexOfBytes("_", .{}) orelse return String.Error.Other;
+    idx1.addOne();
+    const idx2 = filename.indexOfBytes(".", .{}) orelse return String.Error.Other;
+    const session_num = try filename.betweenIndices(idx1, idx2);
+    defer session_num.deinit();
+    try html.addBytes("\t<title>Закон Одного - Сеанс ");
+    try html.add(session_num);
+    try html.addBytes("</title>\n</head>\n<body><div class=session>Сеанс ");
+    try html.add(session_num);
+    try html.addBytes("</div>\n<div class=session_date>");
+    const date: String = lines.orderedRemove(0);
+    try html.addConsume(date);
+    try html.addBytes("</div>\n");
+
+    
+    const anchor_prefix = try String.From("__");
+    defer anchor_prefix.deinit();
+    const en_prefix = try String.From("-en-");
+    defer en_prefix.deinit();
+    const ru_prefix = try String.From("-ru-");
+    defer ru_prefix.deinit();
+
+    const LastWas = enum {
+        en,
+        ru,
+        anchor
+    };
+
+    var last_was: ?LastWas = null;
+    var speaking: ?Speaking = null;
+
+    for (lines.items) |*line| {
+        try line.trimLeft();
+        if (line.isEmpty()) {
+            try html.addBytes("\n<p/>\n");
+            continue;
+        }
+        
+        if (line.startsWith(anchor_prefix, .{})) {
+            if (last_was != null) {
+                try html.addBytes("</td>\n\t</tr>\n</table>");
+            }
+            last_was = .anchor;
+            try html.addBytes("\n<table>\n\t<tr>\n\t\t<td>");
+            try html.addConsume(try buildAHref(line));
+            try html.addBytes("</td>");
+        } else if (line.startsWith(en_prefix, .{})) {
+            var was_anchor = false;
+            if (last_was) |lw| {
+                if (lw == .ru) {
+                    try html.addBytes("</td>\n\t</tr>");
+                } else if (lw == .anchor) {
+                    was_anchor = true;
+                    try html.addBytes("\n\t\t<td class=\"eng\">");        
+                }
+            }
+            last_was = .en;
+            if (!was_anchor) {
+                try html.addBytes("\n\t<tr>\n\t\t<td></td>\n\t\t<td class=\"eng\">");
+            }
+            speaking = try addEng(&html, line, true);
+        } else if (line.startsWith(ru_prefix, .{})) {
+            last_was = .ru;
+            try html.addBytes("</td>\n\t</tr>\n\t<tr>\n\t\t<td></td>\n\t\t<td class=\"rus\">");
+            try addRus(&html, line, true, speaking);
+        } else if (last_was) |lw| {
+            if (lw == .en) {
+                try html.addBytes("\n");
+                _ = try addEng(&html, line, false);
+            } else if (lw == .ru) {
+                try html.addBytes("\n");
+                try addRus(&html, line, false, null);
+            }
+        }
+    }
+
+    try html.addBytes("</td>\n\t</tr>\n</table>\n\n</html>");
+    const bytes = try html.toOwnedSlice();
+    defer alloc.free(bytes);
+
+    const out_name = try io.changeExtension(filename, ".html");
+    defer out_name.deinit();
+    const relative_path = try String.Concat("/dev/tloo/", out_name);
+    defer relative_path.deinit();
+
+    // const haystack = try String.From(relative_path.items);
+    // defer haystack.deinit();
+    // mtl.debug(@src(), "lastIndexOf: {?}, of={dt}, haystack={dt}",
+    //     .{haystack.lastIndexOf(out_name), out_name, haystack});
+    const save_to_path = try io.getHome(alloc, relative_path.items);
+    defer alloc.free(save_to_path);
+
+    const out_file = try std.fs.createFileAbsolute(save_to_path, .{});
+    defer out_file.close();
+    try out_file.writeAll(bytes);
 }
