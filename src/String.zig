@@ -559,6 +559,13 @@ pub fn Concat(part1: []const u8, part2: String) !ArrayList(u8) {
     return s.toBytes();
 }
 
+pub fn ConcatBytes(part1: []const u8, part2: []const u8) !ArrayList(u8) {
+    var s = try String.From(part1);
+    defer s.deinit();
+    try s.addBytes(part2);
+    return s.toBytes();
+}
+
 pub fn isBetween(self: String, l: []const u8, r: []const u8) ?String {
     if (l.len > 1 or r.len > 1) {
         const a = toCodepoints(ctx.a, l) catch return null;
@@ -685,17 +692,12 @@ fn countGraphemesSimd(gr_slice: GraphemeSlice) usize {
     return count;
 }
 
-pub fn contains(self: String, str: []const u8) bool {
-    return self.indexOf(str, null) != null;
+pub fn containsBytes(self: String, str: []const u8) bool {
+    return self.indexOf(str, .{}) != null;
 }
 
-pub fn contains2(self: String, str: CpSlice) bool {
-    return self.indexOf2(str, null) != null;
-}
-
-pub fn containsStr(self: String, needles: String) bool {
-    const sdn = needles.d orelse return false;
-    return self.indexOf2(sdn.codepoints.items, null) != null;
+pub fn contains(self: String, needles: String) bool {
+    return self.indexOf(needles, .{}) != null;
 }
 
 pub fn countGraphemesRaw(alloc: Allocator, input: []const u8) usize {
@@ -1182,6 +1184,12 @@ pub const FindIndex = struct {
     cs: CaseSensitive = CaseSensitive.Yes,
 };
 
+pub fn indexOf(self: String, input: String, find: FindIndex) ?Index {
+    const sd = input.d orelse return null;
+    const cps: CpSlice = sd.codepoints.items;
+    return self.indexOfCpSlice(cps, find);
+}
+
 pub fn indexOfBytes(self: String, input: []const u8, find: Find) ?Index {
     if (find.from == 0) {
         return self.indexOfBytes2(input, .{.cs = find.cs});
@@ -1358,7 +1366,6 @@ pub fn lastIndexOf(self: *const String, needles: String) ?Index {
 
     return idx;
 }
-
 
 pub fn lastIndexOfBytes(self: String, needles: []const u8) ?Index {
     const s = String.From(needles) catch return null;
@@ -1628,11 +1635,6 @@ pub fn reset(self: *String) void {
     self.clearAndFree();
 }
 
-/// returns the graphemes count in string
-pub fn size(self: String) usize {
-    return if (self.d) |sd| sd.grapheme_count else 0;
-}
-
 /// returns the codepoints count in string
 pub fn size_cp(self: String) usize {
     return if (self.d) |sd| sd.codepoints.items.len else 0;
@@ -1643,7 +1645,7 @@ pub fn slice(self: *const String, start: Index, end: Index) Slice {
 }
 
 pub fn splitPair(self: String, sep: []const u8) ![2]String {
-    const arr = try self.split(sep, CaseSensitive.Yes, KeepEmptyParts.Yes);
+    const arr = try self.split(sep, .{});
     defer arr.deinit();
     if (arr.items.len != 2) {
         for (arr.items) |item| {
@@ -1655,8 +1657,18 @@ pub fn splitPair(self: String, sep: []const u8) ![2]String {
     return .{arr.items[0], arr.items[1]};
 }
 
-// Each `sep` grapheme must be 1 codepoint long
-pub fn split(self: String, sep: []const u8, cs: CaseSensitive, kep: KeepEmptyParts) !ArrayList(String) {
+/// returns the graphemes count in string
+pub fn size(self: String) usize {
+    const sd = self.d orelse return 0;
+    return sd.grapheme_count;
+}
+
+const SplitArgs = struct {
+    keep: KeepEmptyParts = KeepEmptyParts.Yes,
+    cs: CaseSensitive = CaseSensitive.Yes,
+};
+
+pub fn split(self: String, sep: []const u8, sa: SplitArgs) !ArrayList(String) {
     const sd = self.d orelse return Error.Alloc;
     var array = std.ArrayList(String).init(ctx.a);
     errdefer {
@@ -1667,11 +1679,11 @@ pub fn split(self: String, sep: []const u8, cs: CaseSensitive, kep: KeepEmptyPar
     }
 
     var from = Index.strStart();
-    while (self.indexOfBytes2(sep, .{.from = from, .cs = cs})) |found| {
+    while (self.indexOfBytes2(sep, .{.from = from, .cs = sa.cs})) |found| {
         const s = try self.mid(from.gr, @intCast(found.gr - from.gr));
         from = Index{ .cp = found.cp + 1, .gr = found.gr + 1 };
 
-        if (kep == KeepEmptyParts.No and s.isEmpty()) {
+        if (sa.keep == KeepEmptyParts.No and s.isEmpty()) {
             s.deinit();
             continue;
         }
@@ -1684,7 +1696,7 @@ pub fn split(self: String, sep: []const u8, cs: CaseSensitive, kep: KeepEmptyPar
 
     if (from.cp < sd.codepoints.items.len) {
         const s = try self.mid(from.gr, -1);
-        if (kep == KeepEmptyParts.No and s.isEmpty()) {
+        if (sa.keep == KeepEmptyParts.No and s.isEmpty()) {
             //try s.print(std.debug, "Skipping2: ");
             s.deinit();
         } else {

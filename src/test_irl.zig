@@ -129,7 +129,7 @@ fn readString(in: anytype, correct: []const u8) !void {
 
 test "Binary read/write string to file" {
     if (true)
-        return error.SkipZigTest;
+         return error.SkipZigTest;
     // This test reads/writes the string not in UTF-8,
     // but in its internal binary format.
     String.ctx = try Context.New(alloc);
@@ -200,7 +200,7 @@ pub fn buildAHref(line: *const String) !String {
     // <a class="anchor" id="1_0" href="#1_0">1.0</a>
     var a_href = String.New();
     try a_href.addBytes("<a class=\"anchor\" id=\"");
-    var sub = nums[0];//.Clone();
+    var sub = nums[0];
     defer sub.deinit();
     try sub.addBytes("_");
     try sub.addConsume(nums[1]);
@@ -220,11 +220,11 @@ const Speaking = enum {
 };
 
 fn replace(en: *String, idx: Index, bytes: []const u8) !void {
-    const v = try en.Clone();
-    defer v.deinit();
+    const en_cloned = try en.Clone();
+    defer en_cloned.deinit();
     en.clearAndFree();
     try en.addBytes(bytes);
-    try en.addConsume(try v.midIndex(idx));
+    try en.addConsume(try en_cloned.midIndex(idx));
 }
 
 fn addEng(to: *String, line: *const String, skip_prefix: bool) !?Speaking {
@@ -241,10 +241,10 @@ fn addEng(to: *String, line: *const String, skip_prefix: bool) !?Speaking {
         try en.trimLeft(); // in case between "-en-" and "RA" there's a space
         if (en.startsWithBytes("RA", .{})) {
             speaking = .Ra;
-            try replace(&en, .{.cp=2, .gr=2}, "<span class=ra>RA:</span>");
+            try replace(&en, .{.cp=2, .gr=2}, "<span class=ra_en>RA:</span>");
         } else if (en.startsWithBytes("QUESTIONER", .{})) {
             speaking = .Questioner;
-            try replace(&en, .{.cp=10, .gr=10}, "<span class=qa>QUESTIONER:</span>");
+            try replace(&en, .{.cp=10, .gr=10}, "<span class=qa_en>QUESTIONER:</span>");
         }
     }
     try to.addConsume(en);
@@ -258,10 +258,10 @@ fn addRus(to: *String, line: *const String, skip_prefix: bool, speaking: ?Speaki
     if (speaking) |s| {
         switch (s) {
             .Ra => {
-                try ru.addBytes("<span class=ra>Ра:</span>");
+                try ru.addBytes("<span class=ra_ru>Ра:</span>");
             },
             .Questioner => {
-                try ru.addBytes("<span class=qa>Собеседник:</span>");
+                try ru.addBytes("<span class=qa_ru>Собеседник:</span>");
             },
         }
     }
@@ -282,34 +282,43 @@ test "Translate En to Ru" {
     String.ctx = try Context.New(alloc);
     defer String.ctx.deinit();
 
-    if (false) {
-        const needles = try String.From("\u{65}\u{301}");
-        defer needles.deinit();
-        const haystack = try String.From("Jos\u{65}\u{301} se fu\u{65}\u{301}");
-        defer haystack.deinit();
-        mtl.debug(@src(), "lastIndexOf: {?}, of={dt}, haystack={dt}",
-            .{haystack.lastIndexOf(needles), needles, haystack});
+    const dirpath = try io.getHome(alloc, "/dev/tloo/raw/");
+    defer alloc.free(dirpath);
+    
+    var dir = try io.openDirBytes(dirpath);
+    defer dir.close();
 
-        if (true) {
-            return;
+    const only_last = true;
+    var last_name = String.New();
+    defer last_name.deinit();
+
+    var dir_iter = dir.iterate();
+    while (try dir_iter.next()) |entry| {
+        if (only_last) {
+            last_name.clearRetainingCapacity();
+            try last_name.addBytes(entry.name);
+        } else {
+            try Translate(dirpath, entry.name);
         }
     }
 
-    const filename = try String.From("session_2.txt");
-    defer filename.deinit();
+    if (only_last) {
+        try Translate(dirpath, last_name);
+    }
+}
 
-    const dirpath = try io.getHome(alloc, "/dev/tloo/raw/");
-    defer alloc.free(dirpath);
 
-    var rel_path = try String.Concat(dirpath, filename);
-    defer rel_path.deinit();
-    const raw_str = try io.readFile(alloc, rel_path.items);
-    defer alloc.free(raw_str);
+fn Translate(dirpath: []const u8, filename: String) !void {
+    const txt_session_path = try String.Concat(dirpath, filename);
+    defer txt_session_path.deinit();
+    mtl.debug(@src(), "path:\"{s}\"", .{txt_session_path.items});
+    const contents_u8 = try io.readFile(alloc, txt_session_path.items);
+    defer alloc.free(contents_u8);
 
-    const contents = try String.From(raw_str);
+    const contents = try String.From(contents_u8);
     defer contents.deinit();
 
-    var lines = try contents.split("\n", CaseSensitive.Yes, KeepEmptyParts.Yes);
+    var lines = try contents.split("\n", .{});
     defer {
         for (lines.items) |line| {
             line.deinit();
@@ -330,9 +339,9 @@ test "Translate En to Ru" {
     const idx2 = filename.indexOfBytes(".", .{}) orelse return String.Error.Other;
     const session_num = try filename.betweenIndices(idx1, idx2);
     defer session_num.deinit();
-    try html.addBytes("\t<title>Закон Одного - Сеанс ");
+    try html.addBytes("\t<title>Сеанс ");
     try html.add(session_num);
-    try html.addBytes("</title>\n</head>\n<body><div class=session>Сеанс ");
+    try html.addBytes(" - Закон Одного</title>\n</head>\n<body><div class=session>Сеанс ");
     try html.add(session_num);
     try html.addBytes("</div>\n<div class=session_date>");
     const date: String = lines.orderedRemove(0);
@@ -410,10 +419,6 @@ test "Translate En to Ru" {
     const relative_path = try String.Concat("/dev/tloo/", out_name);
     defer relative_path.deinit();
 
-    // const haystack = try String.From(relative_path.items);
-    // defer haystack.deinit();
-    // mtl.debug(@src(), "lastIndexOf: {?}, of={dt}, haystack={dt}",
-    //     .{haystack.lastIndexOf(out_name), out_name, haystack});
     const save_to_path = try io.getHome(alloc, relative_path.items);
     defer alloc.free(save_to_path);
 

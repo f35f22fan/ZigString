@@ -265,7 +265,7 @@ test "Split" {
     // try main_str.printCodepoints(@src());
 
     // split(..) returns !ArrayList(String)
-    const words = try main_str.split(" ", CaseSensitive.Yes, KeepEmptyParts.No);
+    const words = try main_str.split(" ", .{.keep = .No});
     defer {
         for (words.items) |item| {
             item.deinit();
@@ -283,7 +283,7 @@ test "Split" {
     //============= another test
     const hello_world = try String.From("Hello, World!");
     defer hello_world.deinit();
-    const hello_split = try hello_world.split(" ", CaseSensitive.Yes, KeepEmptyParts.No);
+    const hello_split = try hello_world.split(" ", .{.keep = .No});
     defer {
         for(hello_split.items) |s| {
             s.deinit();
@@ -315,7 +315,7 @@ test "Split" {
     //============= another test
     const empty_str = try String.From("Foo  Bar");
     defer empty_str.deinit();
-    const empty_arr = try empty_str.split(" ", CaseSensitive.Yes, KeepEmptyParts.Yes);
+    const empty_arr = try empty_str.split(" ", .{});
     defer {
         for (empty_arr.items) |item| {
             item.deinit();
@@ -355,6 +355,12 @@ test "Char At" {
 
     const str = try String.From(JoseStr);
     defer str.deinit();
+
+    const needles = try String.From("se");
+    defer needles.deinit();
+    if (str.indexOf(needles, .{})) |idx| {
+        mtl.debug(@src(), "{dt} found at {}", .{needles, idx});
+    }
 
     // toCpAscii() is slightly faster than toCp()
     const letter_s: Codepoint = try String.toCpAscii('s');
