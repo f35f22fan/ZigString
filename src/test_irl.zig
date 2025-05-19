@@ -227,33 +227,26 @@ fn replace(en: *String, idx: Index, bytes: []const u8) !void {
     try en.addConsume(try en_cloned.midIndex(idx));
 }
 
-fn addEng(to: *String, line: *const String, skip_prefix: bool) !?Speaking {
-    const skip_num: usize = if (skip_prefix) 4 else 0;
-
-    if (line.size() <= skip_num) {
-        mtl.debug(@src(), "Warning: line is empty", .{});
-        return null;
-    }
-
-    var en = try line.mid(skip_num, -1);
-    var speaking: ?Speaking = null;
-    if (skip_prefix) {
-        try en.trimLeft(); // in case between "-en-" and "RA" there's a space
+fn addEng(to: *String, line: *const String, speaking: ?Speaking) !?Speaking {
+    var en = try line.Clone();
+    try en.trimLeft(); // in case between "-en-" and "RA" there's a space
+    var ret_speaking: ?Speaking = speaking;
+    if (speaking == null) {
         if (en.startsWithBytes("RA", .{})) {
-            speaking = .Ra;
+            ret_speaking = .Ra;
             try replace(&en, .{.cp=2, .gr=2}, "<span class=ra_en>RA:</span>");
         } else if (en.startsWithBytes("QUESTIONER", .{})) {
-            speaking = .Questioner;
+            ret_speaking = .Questioner;
             try replace(&en, .{.cp=10, .gr=10}, "<span class=qa_en>QUESTIONER:</span>");
+        } else {
         }
     }
     try to.addConsume(en);
 
-    return speaking;
+    return ret_speaking;
 }
 
-fn addRus(to: *String, line: *const String, skip_prefix: bool, speaking: ?Speaking) !void {
-    const skip_num: usize = if (skip_prefix) 4 else 0;
+fn addRus(to: *String, line: *const String, speaking: ?Speaking) !void {
     var ru = String.New();
     if (speaking) |s| {
         switch (s) {
@@ -266,17 +259,9 @@ fn addRus(to: *String, line: *const String, skip_prefix: bool, speaking: ?Speaki
         }
     }
     
-    if (line.size() <= skip_num) {
-        mtl.debug(@src(), "Warning: line is empty", .{});
-        return; // empty
-    }
-    // mtl.debug(@src(), "{dt}, skip_num: {}", .{line, skip_num});
-    var l = try line.mid(skip_num, -1);
-    try l.trimLeft();
-    try ru.addConsume(l);
+    try ru.add(line.*);
     try to.addConsume(ru);
 }
-
 
 test "Translate En to Ru" {
     String.ctx = try Context.New(alloc);
@@ -306,7 +291,6 @@ test "Translate En to Ru" {
         try Translate(dirpath, last_name);
     }
 }
-
 
 fn Translate(dirpath: []const u8, filename: String) !void {
     const txt_session_path = try String.Concat(dirpath, filename);
@@ -364,48 +348,68 @@ fn Translate(dirpath: []const u8, filename: String) !void {
 
     var last_was: ?LastWas = null;
     var speaking: ?Speaking = null;
+    const new_line = try String.From("\n<p/>\n");
+    defer new_line.deinit();
+    const start_table = try String.From("\n<table>\n\t<tr>\n\t\t<td>");
+    defer start_table.deinit();
+    const end_table = try String.From("</td>\n\t</tr>\n</table>");
+    defer end_table.deinit();
+    const eng_td = try String.From("\n\t\t<td class=\"eng\">");
+    defer eng_td.deinit();
+    const ru_td = try String.From("</td>\n\t</tr>\n\t<tr>\n\t\t<td></td>\n\t\t<td class=\"rus\">");
+    defer ru_td.deinit();
+    const new_tr = try String.From("\n\t<tr>\n\t\t<td></td>\n\t\t<td class=\"eng\">");
+    defer new_tr.deinit();
 
     for (lines.items) |*line| {
         try line.trimLeft();
         if (line.isEmpty()) {
-            try html.addBytes("\n<p/>\n");
+            try html.add(new_line);
             continue;
         }
         
         if (line.startsWith(anchor_prefix, .{})) {
+            speaking = null;
             if (last_was != null) {
-                try html.addBytes("</td>\n\t</tr>\n</table>");
+                try html.add(end_table);
             }
             last_was = .anchor;
-            try html.addBytes("\n<table>\n\t<tr>\n\t\t<td>");
+            try html.add(start_table);
             try html.addConsume(try buildAHref(line));
             try html.addBytes("</td>");
         } else if (line.startsWith(en_prefix, .{})) {
             var was_anchor = false;
-            if (last_was) |lw| {
-                if (lw == .ru) {
+            if (last_was) |lastwas| {
+                if (lastwas == .ru) {
                     try html.addBytes("</td>\n\t</tr>");
-                } else if (lw == .anchor) {
+                } else if (lastwas == .anchor) {
                     was_anchor = true;
-                    try html.addBytes("\n\t\t<td class=\"eng\">");        
+                    try html.add(eng_td);        
                 }
             }
             last_was = .en;
             if (!was_anchor) {
-                try html.addBytes("\n\t<tr>\n\t\t<td></td>\n\t\t<td class=\"eng\">");
+                try html.add(new_tr);
             }
-            speaking = try addEng(&html, line, true);
+            
+            const en = try line.mid(4, -1);
+            defer en.deinit();
+            speaking = try addEng(&html, &en, speaking);
         } else if (line.startsWith(ru_prefix, .{})) {
             last_was = .ru;
-            try html.addBytes("</td>\n\t</tr>\n\t<tr>\n\t\t<td></td>\n\t\t<td class=\"rus\">");
-            try addRus(&html, line, true, speaking);
+            try html.add(ru_td);
+            const ru = try line.mid(4, -1);
+            defer ru.deinit();
+            try addRus(&html, &ru, speaking);
+            speaking = null;
         } else if (last_was) |lw| {
             if (lw == .en) {
                 try html.addBytes("\n");
-                _ = try addEng(&html, line, false);
+                speaking = try addEng(&html, line, speaking);
             } else if (lw == .ru) {
                 try html.addBytes("\n");
-                try addRus(&html, line, false, null);
+                try addRus(&html, line, null);
+                speaking = null;
             }
         }
     }

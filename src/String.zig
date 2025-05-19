@@ -1132,8 +1132,12 @@ pub fn graphemeAddressFromCp(self: String, codepoint_index: usize) ?Index {
 
 pub fn graphemeAddress(self: String, grapheme_index: usize) ?Index {
     const sd = self.d orelse return null;
-    if (grapheme_index >= sd.grapheme_count) {
+    if (grapheme_index > sd.grapheme_count) {
         return null;
+    }
+
+    if (grapheme_index == sd.grapheme_count) {
+        return self.strEnd2();
     }
     
     const gr_slice = sd.graphemes.items[0..];
