@@ -83,7 +83,9 @@ pub fn deinit(self: *DesktopFile) void {
 fn buildKeyname(name: []const u8, lang: []const u8) !ArrayList(u8) {
     var key = try String.From(name);
     defer key.deinit();
-    try key.add3("[", lang, "]");
+    try key.addChar('[');
+    try key.addUtf8(lang);
+    try key.addChar(']');
     return key.toBytes();
 }
 
@@ -141,7 +143,7 @@ pub fn init(self: *DesktopFile) !void {
     const data_str = try String.From(data_cstr);
     self.alloc.free(data_cstr);
     defer data_str.deinit();
-    var lines = try data_str.split("\n", CaseSensitive.Yes, KeepEmptyParts.No);
+    var lines = try data_str.split("\n", .{.keep = .No});
     defer {
         for (lines.items) |line| {
             line.deinit();
@@ -166,7 +168,7 @@ pub fn init(self: *DesktopFile) !void {
         }
         //try line.print(std.debug, "Line: ");
         var current_hash: *KVHash = current_hash_opt orelse break;
-        var kv = try line.split("=", CaseSensitive.Yes, KeepEmptyParts.Yes);
+        var kv = try line.split("=", .{});
         defer {
             for (kv.items) |s| {
                 s.deinit();

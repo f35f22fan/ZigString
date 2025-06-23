@@ -23,7 +23,7 @@ test "Append Test" {
     var main_str = try String.From(JoseStr);
     defer main_str.deinit();
     const correct_cstr = JoseStr ++ additional;
-    try main_str.addBytes(additional);
+    try main_str.addUtf8(additional);
     var test_buf = try main_str.toBytes();
     defer test_buf.deinit();
     try expectEqualStrings(test_buf.items, correct_cstr);

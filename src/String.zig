@@ -440,7 +440,18 @@ pub fn deinit(self: String) void {
 }
 
 const ST=[]const u8;
-pub fn addBytes(self: *String, what: ST) !void {
+
+pub fn addBS(self: *String, what: ST, s: String) !void {
+    try self.addUtf8(what);
+    try self.add(s);
+}
+
+pub fn addSB(self: *String, s: String, what: ST) !void {
+    try self.add(s);
+    try self.addUtf8(what);
+}
+
+pub fn addUtf8(self: *String, what: ST) !void {
     if (what.len == 1) {
         const cp = try toCp(what);
         var sd = try self.getPointer();
@@ -452,15 +463,42 @@ pub fn addBytes(self: *String, what: ST) !void {
     }
 }
 
-pub fn addBytes2(self: *String, a1: ST, a2: ST) !void {
-    try self.addBytes(a1);
-    try self.addBytes(a2);
+pub fn addUtf8_2(self: *String, a1: ST, a2: ST) !void {
+    try self.addUtf8(a1);
+    try self.addUtf8(a2);
 }
 
-pub fn addAscii(self: *String, c: comptime_int) !void {
-    const ch: u8 = @intCast(c);
-    const arr = [_]u8 {ch};
-    try self.add(&arr);
+pub fn addChar(self: *String, c: Codepoint) !void {
+    // const ch: Codepoint = @intCast(c);
+    // const arr = [_]u8 {ch};
+    var dest = try self.getPointer();
+    try dest.codepoints.append(c);
+    try dest.graphemes.append(1);
+    dest.grapheme_count += 1;
+}
+
+pub fn addAsciiSlice(self: *String, letters: []const u8) !void {
+    var dest = try self.getPointer();
+    var arr = try dest.codepoints.addManyAsSlice(letters.len);
+
+    for (letters, 0..) |letter, i| {
+        arr[i] = letter;
+    }
+    
+    try dest.graphemes.appendNTimes(1, letters.len);
+    dest.grapheme_count += letters.len;
+}
+
+pub fn addAscii(self: *String, comptime letters: []const u8) !void {
+    var dest = try self.getPointer();
+    var arr = try dest.codepoints.addManyAsArray(letters.len);
+
+    for (letters, 0..) |letter, i| {
+        arr[i] = letter;
+    }
+    
+    try dest.graphemes.appendNTimes(1, letters.len);
+    dest.grapheme_count += letters.len;
 }
 
 pub fn addGrapheme(self: *String, gr: Grapheme) !void {
@@ -562,7 +600,7 @@ pub fn Concat(part1: []const u8, part2: String) !ArrayList(u8) {
 pub fn ConcatBytes(part1: []const u8, part2: []const u8) !ArrayList(u8) {
     var s = try String.From(part1);
     defer s.deinit();
-    try s.addBytes(part2);
+    try s.addUtf8(part2);
     return s.toBytes();
 }
 
@@ -1482,9 +1520,9 @@ fn printCpBuf(out: anytype, cp_buf: ArrayList(Codepoint), gr_index: isize, see_a
 
     for (cp_buf.items, 0..) |k, i| {
         const num_as_str = try std.fmt.bufPrint(&temp_str_buf, "{d}", .{k});
-        try codepoints_str.addBytes(num_as_str);
-        const s = if (i < cp_buf.items.len - 1) "+" else " ";
-        try codepoints_str.addBytes(s);
+        try codepoints_str.addAsciiSlice(num_as_str);
+        const s: Codepoint = if (i < cp_buf.items.len - 1) '+' else ' ';
+        try codepoints_str.addChar(s);
     }
 
     var utf8: ArrayList(u8) = try utf8_from_slice(ctx.a, cp_buf.items);
@@ -1502,14 +1540,17 @@ fn printCpBuf(out: anytype, cp_buf: ArrayList(Codepoint), gr_index: isize, see_a
             cp_as_str = crnl_chars;
         }
     }
+
     const cp_color: []const u8 = if (see_as == SeeAs.PartOfGrapheme) COLOR_GREEN else COLOR_MAGENTA;
     var final_fg: []const u8 = if (theme == Theme.Light) COLOR_BLACK else cp_color;
     if (attr == Attr.Codepoint) {
         final_fg = COLOR_RED ++ BOLD_START;
     }
+
     const end_final_fg = if (attr == Attr.Codepoint) COLOR_DEFAULT ++ BOLD_END else COLOR_DEFAULT;
     const num_color = if (theme == Theme.Light) "\x1B[38;5;196m" else COLOR_YELLOW;
-    out.print(print_format_str, .{ COLOR_BLUE, gr_index, COLOR_DEFAULT, final_fg, cp_as_str, end_final_fg, num_color, codepoints_str, COLOR_DEFAULT });
+    out.print(print_format_str, .{ COLOR_BLUE, gr_index, COLOR_DEFAULT, final_fg,
+        cp_as_str, end_final_fg, num_color, codepoints_str, COLOR_DEFAULT });
 }
 
 pub fn printCodepoints(self: String, src: std.builtin.SourceLocation) !void {

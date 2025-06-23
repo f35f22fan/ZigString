@@ -22,7 +22,7 @@ Internally it uses SIMD or linear operations depending on the string length.
 <p/>
 For code examples check out the tests.
 <br/>
-Tested with Zig 0.14
+Tested with Zig 0.14.1
 
 
 ### Regex support is a work in progress
@@ -37,7 +37,7 @@ Example:<br/>
 
     const hello_world = try String.From("Hello, World!");
     defer hello_world.deinit();
-    const hello_split = try hello_world.split(" ", CaseSensitive.Yes, KeepEmptyParts.No);
+    const hello_split = try hello_world.split(" ", .{});
     defer {
         for(hello_split.items) |s| {
             s.deinit();
@@ -47,7 +47,7 @@ Example:<br/>
 
     const correct2 = [_][]const u8 {"Hello,", "World!"};
     for (hello_split.items, correct2) |l, r| {
-        try expect(l.equals(r, CaseSensitive.Yes));
+        try expect(l.equals(r, .{}));
     }
 
     const start_from: usize = 0;
@@ -60,11 +60,11 @@ Example:<br/>
 
     const sub = try hello_world.substring(3, 5);
     defer sub.deinit();
-    try expect(sub.equals("lo, W", CaseSensitive.Yes));
+    try expect(sub.equals("lo, W", .{}));
 
     const sub2 = try hello_world.substring(3, -1);
     defer sub2.deinit();
-    try expect(sub2.equals("lo, World!", CaseSensitive.Yes));
+    try expect(sub2.equals("lo, World!", .{}));
     
     // Efficient iteration over graphemes:
     const both_ways = try String.From("Jos\u{65}\u{301}"); // "José"

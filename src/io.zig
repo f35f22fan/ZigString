@@ -13,9 +13,15 @@ pub const Folder = enum(u8) {
 pub fn changeExtension(filename: Str, ext: []const u8) !Str {
     const pt_idx = filename.lastIndexOfBytes(".") orelse return Str.Error.Other;
     var out_name = try filename.betweenIndices(.{}, pt_idx);
-    try out_name.addBytes(ext);
+    try out_name.addUtf8(ext);
 
     return out_name;
+}
+
+pub fn changeExtensionBytes(filename: []const u8, ext: []const u8) !Str {
+    const s = try Str.From(filename);
+    defer s.deinit();
+    return changeExtension(s, ext);
 }
 
 pub fn getEnv(a: Allocator, folder: Folder) ![]const u8 {

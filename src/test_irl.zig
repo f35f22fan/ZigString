@@ -54,20 +54,12 @@ const Truncate = enum(u1) { Yes, No };
 var tick: isize = 0;
 
 test "Desktop File" {
-    if (true)
-        return error.SkipZigTest;
+    // if (true)
+    //     return error.SkipZigTest;
 
     String.ctx = try Context.New(alloc);
     defer String.ctx.deinit();
 
-    // const home_cstr = try io.getEnv(alloc, io.Folder.Home);
-    // defer alloc.free(home_cstr);
-    // var fullpath = try String.From(home_cstr);
-    // defer fullpath.deinit();
-    // try fullpath.append("/Desktop/Firefox.desktop");
-    // try fullpath.print(std.debug, "Fullpath: ");
-    // var df = try DesktopFile.New(dctx, try fullpath.Clone());
-    // defer df.deinit();
     var chromium = try DesktopFile.NewCstr(alloc, "/usr/share/applications/chromium-browser.desktop");
     defer chromium.deinit();
 
@@ -199,17 +191,17 @@ pub fn buildAHref(line: *const String) !String {
     const nums = try anchor.splitPair(".");
     // <a class="anchor" id="1_0" href="#1_0">1.0</a>
     var a_href = String.New();
-    try a_href.addBytes("<a class=\"anchor\" id=\"");
+    try a_href.addAscii("<a class=\"anchor\" id=\"");
     var sub = nums[0];
     defer sub.deinit();
-    try sub.addBytes("_");
+    try sub.addChar('_');
     try sub.addConsume(nums[1]);
     try a_href.add(sub);
-    try a_href.addBytes("\" href=\"#");
+    try a_href.addAscii("\" href=\"#");
     try a_href.add(sub);
-    try a_href.addBytes("\">");
+    try a_href.addAscii("\">");
     try a_href.add(anchor);
-    try a_href.addBytes("</a>");
+    try a_href.addAscii("</a>");
     // mtl.debug(@src(), "{dt}", .{a_href});
     return a_href;
 }
@@ -219,11 +211,14 @@ const Speaking = enum {
     Questioner,
 };
 
+const tloo_path = "/dev/tloo/";
+const all_sessions = "<div class=session><a href=\"index.html\">Все сеансы</a></div>";
+
 fn replace(en: *String, idx: Index, bytes: []const u8) !void {
     const en_cloned = try en.Clone();
     defer en_cloned.deinit();
     en.clearAndFree();
-    try en.addBytes(bytes);
+    try en.addUtf8(bytes);
     try en.addConsume(try en_cloned.midIndex(idx));
 }
 
@@ -251,10 +246,10 @@ fn addRus(to: *String, line: *const String, speaking: ?Speaking) !void {
     if (speaking) |s| {
         switch (s) {
             .Ra => {
-                try ru.addBytes("<span class=ra_ru>Ра:</span>");
+                try ru.addUtf8("<span class=ra_ru>Ра:</span>");
             },
             .Questioner => {
-                try ru.addBytes("<span class=qa_ru>Собеседник:</span>");
+                try ru.addUtf8("<span class=qa_ru>Собеседник:</span>");
             },
         }
     }
@@ -264,6 +259,9 @@ fn addRus(to: *String, line: *const String, speaking: ?Speaking) !void {
 }
 
 test "Translate En to Ru" {
+    if (true)
+        return error.SkipZigTest;
+    
     String.ctx = try Context.New(alloc);
     defer String.ctx.deinit();
 
@@ -277,19 +275,114 @@ test "Translate En to Ru" {
     var last_name = String.New();
     defer last_name.deinit();
 
+    var filenames = ArrayList(String).init(alloc);
+    defer {
+        for (filenames.items) |item| {
+            item.deinit();
+        }
+
+        filenames.deinit();
+    }
+
     var dir_iter = dir.iterate();
     while (try dir_iter.next()) |entry| {
+        const name = try String.From(entry.name);
+        defer name.deinit();
+        const html_fn = try io.changeExtension(name, ".html");
+        errdefer html_fn.deinit();
+        try filenames.append(html_fn);
         if (only_last) {
             last_name.clearRetainingCapacity();
-            try last_name.addBytes(entry.name);
+            try last_name.add(name);
         } else {
-            try Translate(dirpath, entry.name);
+            try Translate(dirpath, name);
         }
     }
 
     if (only_last) {
         try Translate(dirpath, last_name);
     }
+
+    // for (filenames.items) |n| {
+    //     mtl.debug(@src(), "filename: {dt}", .{n});
+    // }
+
+    try CreateHtmlIndex(filenames);
+}
+
+fn parseSession(name: String) !String {
+    var idx = name.lastIndexOfBytes("_") orelse return String.Error.Other;
+    idx.addOne(); // skipping past "_"
+    const idx2 = name.lastIndexOfBytes(".") orelse return String.Error.Other;
+
+    const number = try name.betweenIndices(idx, idx2);
+    var ret = try String.From("Сеанс ");
+    try ret.addConsume(number);
+    return ret;
+}
+
+fn CreateHtmlIndex(filenames: ArrayList(String)) !void {
+    var html = String.New();
+    defer html.deinit();
+    try html.addUtf8(
+\\<!DOCTYPE html>
+\\<head>
+\\  <title>Закон Одного</title>
+\\  <meta charset="UTF-8"/>
+\\  <link rel="stylesheet" href="styles.css">
+\\</head>
+\\<body>
+\\<div class=session>Книга "Закон Одного" (Материалы Ра)</div>
+\\<br><br>
+\\<div class=session_date>Список сеансов</div><br>
+\\
+);
+
+    for (filenames.items) |name| {
+        try html.addBS("<a href=\"", name);
+        const session = try parseSession(name);
+        defer session.deinit();
+        try html.addBS("\">", session); // name);
+        try html.addUtf8("</a><br>\n");
+    }
+
+    try html.addUtf8(
+\\ <br><hr/><br>
+\\
+\\ <span class=book_footnote>Сноски из книги оригинала внесены прямо в текст и имеют такой
+\\фон и окраску поскольку это HTML и не делится на страницы, а на сеансы.</span>
+\\
+\\<p/>
+\\<span class=pp>Пояснения переводчика имеют такой фон и окраску.</span>
+\\
+\\ <br><br><br><br><br>
+\\<div style="font-size:12px;">Переводчик и пояснения: Владимир
+\\ (f35f22fan AT gmail DOT com)<br>
+\\ Перевод доступен на: <a href="https://github.com/f35f22fan/tloo">
+\\https://github.com/f35f22fan/tloo</a>
+\\<br><br>
+\\Чтобы начинающие могли легче и правильнее понять содержимое книги переводчик
+\\добавил в содержимое книги свои пояснения, выделенные другим цветом
+\\в том числе чтобы те кому это не нужно
+\\могли легко это пропускать. Переводчик не претендует что его пояснения являются
+\\истиной в последней инстанции, а лишь надеется на их полезность для начинающих.</div>
+    );
+    try html.addUtf8("</body></html>");
+    const index_html = try String.From("index.html");
+    defer index_html.deinit();
+
+    const relative_path = try String.Concat(tloo_path, index_html);
+    defer relative_path.deinit();
+
+    const save_to_path = try io.getHome(alloc, relative_path.items);
+    defer alloc.free(save_to_path);
+
+    const out_file = try std.fs.createFileAbsolute(save_to_path, .{});
+    defer out_file.close();
+
+    const bytes = try html.toOwnedSlice();
+    defer alloc.free(bytes);
+    try out_file.writeAll(bytes);
 }
 
 fn Translate(dirpath: []const u8, filename: String) !void {
@@ -312,8 +405,8 @@ fn Translate(dirpath: []const u8, filename: String) !void {
 
     var html = String.New();
     defer html.deinit();
-    try html.addBytes(
-\\<html>
+    try html.addUtf8(
+\\<!DOCTYPE html>
 \\<head>
 \\  <meta charset="UTF-8"/>
 \\  <link rel="stylesheet" href="styles.css">
@@ -323,14 +416,15 @@ fn Translate(dirpath: []const u8, filename: String) !void {
     const idx2 = filename.indexOfBytes(".", .{}) orelse return String.Error.Other;
     const session_num = try filename.betweenIndices(idx1, idx2);
     defer session_num.deinit();
-    try html.addBytes("\t<title>Сеанс ");
+    try html.addUtf8("\t<title>Сеанс ");
     try html.add(session_num);
-    try html.addBytes(" - Закон Одного</title>\n</head>\n<body><div class=session>Сеанс ");
+    try html.addUtf8(" - Закон Одного</title>\n</head>\n<body><div class=session>Сеанс ");
     try html.add(session_num);
-    try html.addBytes("</div>\n<div class=session_date>");
+    try html.addUtf8("</div>\n<div class=session_date>");
     const date: String = lines.orderedRemove(0);
     try html.addConsume(date);
-    try html.addBytes("</div>\n");
+    try html.addAscii("</div>\n");
+    try html.addUtf8(all_sessions);
 
     
     const anchor_prefix = try String.From("__");
@@ -348,48 +442,36 @@ fn Translate(dirpath: []const u8, filename: String) !void {
 
     var last_was: ?LastWas = null;
     var speaking: ?Speaking = null;
-    const new_line = try String.From("\n<p/>\n");
-    defer new_line.deinit();
-    const start_table = try String.From("\n<table>\n\t<tr>\n\t\t<td>");
-    defer start_table.deinit();
-    const end_table = try String.From("</td>\n\t</tr>\n</table>");
-    defer end_table.deinit();
-    const eng_td = try String.From("\n\t\t<td class=\"eng\">");
-    defer eng_td.deinit();
-    const ru_td = try String.From("</td>\n\t</tr>\n\t<tr>\n\t\t<td></td>\n\t\t<td class=\"rus\">");
-    defer ru_td.deinit();
-    const new_tr = try String.From("\n\t<tr>\n\t\t<td></td>\n\t\t<td class=\"eng\">");
-    defer new_tr.deinit();
-
+    
     for (lines.items) |*line| {
         try line.trimLeft();
         if (line.isEmpty()) {
-            try html.add(new_line);
+            try html.addAscii("\n<p>\n");
             continue;
         }
         
         if (line.startsWith(anchor_prefix, .{})) {
             speaking = null;
             if (last_was != null) {
-                try html.add(end_table);
+                try html.addAscii("</td>\n\t</tr>\n</table>");
             }
             last_was = .anchor;
-            try html.add(start_table);
+            try html.addAscii("\n<table>\n\t<tr>\n\t\t<td>");
             try html.addConsume(try buildAHref(line));
-            try html.addBytes("</td>");
+            try html.addAscii("</td>");
         } else if (line.startsWith(en_prefix, .{})) {
             var was_anchor = false;
             if (last_was) |lastwas| {
                 if (lastwas == .ru) {
-                    try html.addBytes("</td>\n\t</tr>");
+                    try html.addAscii("</td>\n\t</tr>");
                 } else if (lastwas == .anchor) {
                     was_anchor = true;
-                    try html.add(eng_td);        
+                    try html.addAscii("\n\t\t<td class=\"eng\">");        
                 }
             }
             last_was = .en;
             if (!was_anchor) {
-                try html.add(new_tr);
+                try html.addAscii("\n\t<tr>\n\t\t<td></td>\n\t\t<td class=\"eng\">");
             }
             
             const en = try line.mid(4, -1);
@@ -397,30 +479,35 @@ fn Translate(dirpath: []const u8, filename: String) !void {
             speaking = try addEng(&html, &en, speaking);
         } else if (line.startsWith(ru_prefix, .{})) {
             last_was = .ru;
-            try html.add(ru_td);
+            try html.addAscii("</td>\n\t</tr>\n\t<tr>\n\t\t<td></td>\n\t\t<td class=\"rus\">");
             const ru = try line.mid(4, -1);
             defer ru.deinit();
             try addRus(&html, &ru, speaking);
             speaking = null;
         } else if (last_was) |lw| {
             if (lw == .en) {
-                try html.addBytes("\n");
+                try html.addChar('\n');
                 speaking = try addEng(&html, line, speaking);
             } else if (lw == .ru) {
-                try html.addBytes("\n");
+                try html.addChar('\n');
                 try addRus(&html, line, null);
                 speaking = null;
             }
         }
     }
 
-    try html.addBytes("</td>\n\t</tr>\n</table>\n\n</html>");
+    try html.addAsciiSlice("Hello!");
+
+    try html.addAscii("</td>\n\t</tr>\n</table>\n\n");
+    try html.addAscii("<br><br><br>");
+    try html.addUtf8(all_sessions);
+    try html.addAscii("</body></html>");
     const bytes = try html.toOwnedSlice();
     defer alloc.free(bytes);
 
-    const out_name = try io.changeExtension(filename, ".html");
-    defer out_name.deinit();
-    const relative_path = try String.Concat("/dev/tloo/", out_name);
+    const html_fn = try io.changeExtension(filename, ".html");
+    defer html_fn.deinit();
+    const relative_path = try String.Concat(tloo_path, html_fn);
     defer relative_path.deinit();
 
     const save_to_path = try io.getHome(alloc, relative_path.items);
