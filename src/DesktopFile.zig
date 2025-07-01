@@ -84,9 +84,9 @@ fn buildKeyname(name: []const u8, lang: []const u8) !ArrayList(u8) {
     var key = try String.From(name);
     defer key.deinit();
     try key.addChar('[');
-    try key.addUtf8(lang);
+    try key.addAsciiSlice(lang);
     try key.addChar(']');
-    return key.toBytes();
+    return key.toUtf8();
 }
 
 pub fn getActions(self: DesktopFile) ?*const String {
@@ -136,9 +136,7 @@ pub fn getName(self: DesktopFile, lang: ?[]const u8) ?*const String {
 
 pub fn init(self: *DesktopFile) !void {
     const fp = self.fullpath orelse return String.Error.NotFound;
-    const path_buf = try fp.toBytes();
-    defer path_buf.deinit();
-    const data_cstr = try io.readFile(self.alloc, path_buf.items);
+    const data_cstr = try io.readFile(self.alloc, fp);
 
     const data_str = try String.From(data_cstr);
     self.alloc.free(data_cstr);
@@ -154,7 +152,7 @@ pub fn init(self: *DesktopFile) !void {
     var current_hash_opt: ?*KVHash = null;
 
     for (lines.items) |line| {
-        if (line.startsWithBytes("#", .{})) {
+        if (line.startsWithAscii("#", .{})) {
             line.print(@src(), "Comment: ");
             continue;
         }

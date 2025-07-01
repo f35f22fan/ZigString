@@ -10,20 +10,6 @@ pub const Folder = enum(u8) {
     Config,
 };
 
-pub fn changeExtension(filename: Str, ext: []const u8) !Str {
-    const pt_idx = filename.lastIndexOfBytes(".") orelse return Str.Error.Other;
-    var out_name = try filename.betweenIndices(.{}, pt_idx);
-    try out_name.addUtf8(ext);
-
-    return out_name;
-}
-
-pub fn changeExtensionBytes(filename: []const u8, ext: []const u8) !Str {
-    const s = try Str.From(filename);
-    defer s.deinit();
-    return changeExtension(s, ext);
-}
-
 pub fn getEnv(a: Allocator, folder: Folder) ![]const u8 {
     const var_name = switch (folder) {
         Folder.Home => "HOME",
@@ -33,24 +19,32 @@ pub fn getEnv(a: Allocator, folder: Folder) ![]const u8 {
     return std.process.getEnvVarOwned(a, var_name) catch return Error.NotFound;
 }
 
-pub fn getHome(alloc: Allocator, subpath: ?[] const u8) ![]const u8 {
+pub fn getHome(alloc: Allocator, subpath: ?Str) !Str {
     const home = try getEnv(alloc, Folder.Home);
+    defer alloc.free(home);
     if (subpath) |s| {
-        defer alloc.free(home);
-        var list = std.ArrayList(u8).init(alloc);
-        defer list.deinit();
-        try list.appendSlice(home);
-        try list.appendSlice(s);
-        return list.toOwnedSlice();
+        var ret = Str.New();
+        try ret.addAsciiSlice(home);
+        try ret.add(s);
+        return ret;
     } else {
-        return home;
+        return Str.From(home);
     }
 }
 
+pub fn getHomeSlice(alloc: Allocator, subpath: ?[]const u8) !Str {
+    if (subpath) |utf8| {
+        const s = try Str.From(utf8);
+        defer s.deinit();
+        return try getHome(alloc, s);
+    }
+    return try getHome(alloc, null);
+}
+
 pub fn listFiles(alloc: Allocator, fullpath: Str) !std.ArrayList(std.fs.Dir.Entry) {
-    const bytes = try fullpath.toBytes();
+    const bytes = try fullpath.toUtf8();
     defer bytes.deinit();
-    var dir = try std.fs.openDirAbsolute(bytes.items, .{.iterate=true, .no_follow = true});
+    var dir = try openDirUtf8(bytes.items);
     defer dir.close();
     var iter = dir.iterate();
 
@@ -65,17 +59,23 @@ pub fn listFiles(alloc: Allocator, fullpath: Str) !std.ArrayList(std.fs.Dir.Entr
 }
 
 pub fn openDir(fullpath: Str) !std.fs.Dir {
-    const bytes = try fullpath.toBytes();
+    const bytes = try fullpath.toUtf8();
     defer bytes.deinit();
-    return openDirBytes(bytes.items);
+    return openDirUtf8(bytes.items);
 }
 
-pub fn openDirBytes(fullpath: []const u8) !std.fs.Dir {
+pub fn openDirUtf8(fullpath: []const u8) !std.fs.Dir {
     const dir = try std.fs.openDirAbsolute(fullpath, .{.iterate=true, .no_follow = true});
     return dir;
 }
 
-pub fn readFile(alloc: Allocator, full_path: []const u8) ![]u8 {
+pub fn readFile(alloc: Allocator, full_path: Str) ![]u8 {
+    const bytes = try full_path.toUtf8();
+    defer bytes.deinit();
+    return readFileUtf8(alloc, bytes.items);
+}
+
+pub fn readFileUtf8(alloc: Allocator, full_path: []const u8) ![]u8 {
     const file = try std.fs.openFileAbsolute(full_path, .{});
     defer file.close();
     return file.reader().readAllAlloc(alloc, std.math.maxInt(usize));

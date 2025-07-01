@@ -24,7 +24,7 @@ test "Append Test" {
     defer main_str.deinit();
     const correct_cstr = JoseStr ++ additional;
     try main_str.addUtf8(additional);
-    var test_buf = try main_str.toBytes();
+    var test_buf = try main_str.toUtf8();
     defer test_buf.deinit();
     try expectEqualStrings(test_buf.items, correct_cstr);
 }
@@ -68,7 +68,7 @@ test "Trim Left" {
     defer main_str.deinit();
     { // trim tabs and empty spaces
         try main_str.trimLeft();
-        const buf = try main_str.toBytes();
+        const buf = try main_str.toUtf8();
         defer buf.deinit();
         // std.debug.print("{s}(): \"{s}\" => \"{s}\"\n", .{@src().fn_name, trim_left_str, buf.items});
         try expectEqualStrings(buf.items, "Привет!");
@@ -79,7 +79,7 @@ test "Trim Left" {
         var s = try String.From(orig_str);
         defer s.deinit();
         try s.trimLeft();
-        const buf = try s.toBytes();
+        const buf = try s.toUtf8();
         defer buf.deinit();
         // std.debug.print("{s}(): \"{s}\" => \"{s}\"\n", .{@src().fn_name, orig_str, buf.items});
         try expectEqualStrings(orig_str, buf.items);
@@ -95,7 +95,7 @@ test "Trim Right" {
     defer main_str.deinit();
     {
         try main_str.trimRight();
-        const buf = try main_str.toBytes();
+        const buf = try main_str.toUtf8();
         defer buf.deinit();
         // std.debug.print("{s}(): \"{s}\" => \"{s}\"\n", .{@src().fn_name, trim_right_str, buf.items});
         try expectEqualStrings(buf.items, "Привет!");
@@ -106,7 +106,7 @@ test "Trim Right" {
         var s = try String.From(orig_str);
         defer s.deinit();
         try s.trimRight();
-        const buf = try s.toBytes();
+        const buf = try s.toUtf8();
         defer buf.deinit();
         // std.debug.print("{s}(): \"{s}\" => \"{s}\"\n", .{@src().fn_name, orig_str, buf.items});
         try expectEqualStrings(orig_str, buf.items);
@@ -122,7 +122,7 @@ test "Substring" {
     {
         const sub = try main_str.substring(4, 6);
         defer sub.deinit();
-        const buf = try sub.toBytes();
+        const buf = try sub.toUtf8();
         defer buf.deinit();
         //std.debug.print("{s}:{} \"{s}\"\n", .{@src().fn_name, @src().line, buf.items});
         try expectEqualStrings(buf.items, " se fu");
@@ -131,7 +131,7 @@ test "Substring" {
     {
         const sub = try main_str.substring(1, 3);
         defer sub.deinit();
-        const buf = try sub.toBytes();
+        const buf = try sub.toUtf8();
         defer buf.deinit();
         //std.debug.print("{s}:{} \"{s}\"\n", .{@src().fn_name, @src().line, buf.items});
         try expectEqualStrings(buf.items, "osé");
@@ -139,7 +139,7 @@ test "Substring" {
     {
         const sub = try main_str.substring(8, -1); //-1=till the end of string
         defer sub.deinit();
-        const buf = try sub.toBytes();
+        const buf = try sub.toUtf8();
         defer buf.deinit();
         //std.debug.print("{s}:{} \"{s}\"\n", .{@src().fn_name, @src().line, buf.items});
         try expectEqualStrings(buf.items, "fué");
@@ -205,7 +205,7 @@ test "FindInsertRemove" {
         var s = try String.From(initial_str);
         defer s.deinit();
         try s.remove("os\u{65}\u{301}");
-        const buf = try s.toBytes();
+        const buf = try s.toUtf8();
         defer buf.deinit();
         try expectEqualStrings(buf.items, "J no se va");
     }
@@ -215,7 +215,7 @@ test "FindInsertRemove" {
         const needles = "no";
         const from = s.indexOfBytes(needles, .{.cs = cs});
         try s.removeByIndex(from, 200);
-        const buf = try s.toBytes();
+        const buf = try s.toUtf8();
         defer buf.deinit();
         try expectEqualStrings(buf.items, "Jos\u{65}\u{301} ");
     }
@@ -223,7 +223,7 @@ test "FindInsertRemove" {
         var s = try String.From(initial_str);
         defer s.deinit(); 
         try s.insertBytes(s.At(5), "举报");
-        const buf = try s.toBytes();
+        const buf = try s.toUtf8();
         defer buf.deinit();
         try expectEqualStrings("José 举报no se va", buf.items);
     }
@@ -232,7 +232,7 @@ test "FindInsertRemove" {
         defer s.deinit();
         const start_from = s.indexOfBytes("no", .{.cs = cs});
         try s.replaceBytes(start_from, 2, "si\u{301}");
-        const buf = try s.toBytes();
+        const buf = try s.toUtf8();
         defer buf.deinit();
         try expectEqualStrings("José sí se va", buf.items);
     }

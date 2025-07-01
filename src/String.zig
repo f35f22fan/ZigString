@@ -322,7 +322,7 @@ pub const Slice = struct {
 
     pub fn format(self: Slice, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         _ = options;
-        const buf = self.toBytes() catch return;
+        const buf = self.toUtf8() catch return;
         defer buf.deinit();
         try printBytes(buf, fmt, writer);
     }
@@ -335,7 +335,7 @@ pub const Slice = struct {
         return self.end.gr - self.start.gr;
     }
 
-    pub fn toBytes(self: Slice) !ArrayList(u8) {
+    pub fn toUtf8(self: Slice) !ArrayList(u8) {
         const sd = self.str.d orelse return ArrayList(u8).init(ctx.a);
         return utf8_from_slice(ctx.a, sd.codepoints.items[self.start.cp..self.end.cp]);
     }
@@ -423,6 +423,12 @@ pub fn From(input: []const u8) !String {
     return s;
 }
 
+pub fn From2(a: String, b: String) !String {
+    var s = try a.Clone();
+    try s.add(b);
+    return s;
+}
+
 fn initEmpty(self: *String) void {
     if (self.d != null)
         return;
@@ -439,38 +445,15 @@ pub fn deinit(self: String) void {
     sd.graphemes.deinit();
 }
 
-const ST=[]const u8;
-
-pub fn addBS(self: *String, what: ST, s: String) !void {
-    try self.addUtf8(what);
-    try self.add(s);
-}
-
-pub fn addSB(self: *String, s: String, what: ST) !void {
-    try self.add(s);
-    try self.addUtf8(what);
-}
-
-pub fn addUtf8(self: *String, what: ST) !void {
+pub fn addUtf8(self: *String, what: []const u8) !void {
     if (what.len == 1) {
-        const cp = try toCp(what);
-        var sd = try self.getPointer();
-        try sd.codepoints.append(cp);
-        try sd.graphemes.append(1);
-        sd.grapheme_count += 1;
+        try self.addChar(what[0]);
     } else {
         try self.addConsume(try String.From(what));
     }
 }
 
-pub fn addUtf8_2(self: *String, a1: ST, a2: ST) !void {
-    try self.addUtf8(a1);
-    try self.addUtf8(a2);
-}
-
 pub fn addChar(self: *String, c: Codepoint) !void {
-    // const ch: Codepoint = @intCast(c);
-    // const arr = [_]u8 {ch};
     var dest = try self.getPointer();
     try dest.codepoints.append(c);
     try dest.graphemes.append(1);
@@ -479,10 +462,10 @@ pub fn addChar(self: *String, c: Codepoint) !void {
 
 pub fn addAsciiSlice(self: *String, letters: []const u8) !void {
     var dest = try self.getPointer();
-    var arr = try dest.codepoints.addManyAsSlice(letters.len);
+    var new_codepoints = try dest.codepoints.addManyAsSlice(letters.len);
 
     for (letters, 0..) |letter, i| {
-        arr[i] = letter;
+        new_codepoints[i] = letter;
     }
     
     try dest.graphemes.appendNTimes(1, letters.len);
@@ -491,10 +474,10 @@ pub fn addAsciiSlice(self: *String, letters: []const u8) !void {
 
 pub fn addAscii(self: *String, comptime letters: []const u8) !void {
     var dest = try self.getPointer();
-    var arr = try dest.codepoints.addManyAsArray(letters.len);
+    var new_codepoints = try dest.codepoints.addManyAsArray(letters.len);
 
     for (letters, 0..) |letter, i| {
-        arr[i] = letter;
+        new_codepoints[i] = letter;
     }
     
     try dest.graphemes.appendNTimes(1, letters.len);
@@ -547,6 +530,20 @@ pub fn betweenIndices(self: String, start: Index, end: Index) !String {
     return self.substr(start, end.gr - start.gr);
 }
 
+pub fn changeExtension(self: String, ext: []const u8) !String {
+    const pt_idx = self.lastIndexOfBytes(".") orelse return String.Error.Other;
+    var out_name = try self.betweenIndices(Index.strStart(), pt_idx);
+    try out_name.addUtf8(ext);
+
+    return out_name;
+}
+
+pub fn changeExtensionUtf8(filename: []const u8, ext: []const u8) !String {
+    const s = try String.From(filename);
+    defer s.deinit();
+    return changeExtension(s, ext);
+}
+
 pub fn charAt(self: *const String, at: usize) ?Grapheme {
     const index = self.At(at) orelse return null;
     return self.charAtIndex(index);
@@ -590,22 +587,20 @@ pub fn codepointsPtr(self: *const String) ?ConstCpSlice {
     return null;
 }
 
-pub fn Concat(part1: []const u8, part2: String) !ArrayList(u8) {
+pub fn Concat(part1: []const u8, part2: String) !String {
     var s = try String.From(part1);
-    defer s.deinit();
     try s.add(part2);
-    return s.toBytes();
+    return s;
 }
 
-pub fn ConcatBytes(part1: []const u8, part2: []const u8) !ArrayList(u8) {
+pub fn ConcatUtf8(part1: []const u8, part2: []const u8) !String {
     var s = try String.From(part1);
-    defer s.deinit();
     try s.addUtf8(part2);
-    return s.toBytes();
+    return s;
 }
 
 pub fn isBetween(self: String, l: []const u8, r: []const u8) ?String {
-    if (l.len > 1 or r.len > 1) {
+    if (l.len != 1 or r.len != 1) {
         const a = toCodepoints(ctx.a, l) catch return null;
         defer a.deinit();
         const b = toCodepoints(ctx.a, r) catch return null;
@@ -620,7 +615,7 @@ pub fn isBetween(self: String, l: []const u8, r: []const u8) ?String {
 pub fn isBetweenCp(self: String, l: Codepoint, r: Codepoint) ?String {
     if (!self.startsWithCp(l) or !self.endsWithCp(r))
         return null;
-    return self.between(1, self.size() - 1) catch return null;
+    return self.betweenIndices(.{.cp=1, .gr=1}, self.strEnd()) catch return null;
 }
 
 pub fn isBetweenSlices(self: String, l: CpSlice, r: CpSlice) ?String {
@@ -756,7 +751,7 @@ pub fn dupAsCstr(self: String) ![]u8 {
 }
 
 pub fn dupAsCstrAlloc(self: String, a: Allocator) ![]u8 {
-    const buf = try self.toBytes();
+    const buf = try self.toUtf8();
     defer buf.deinit();
     return a.dupe(u8, buf.items);
 }
@@ -1052,7 +1047,7 @@ pub fn findOneSimdFromEnd(self: String, needle: Codepoint, start: ?usize, compti
 /// format implements the `std.fmt` format interface for printing types.
 pub fn format(self: String, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
     _ = options;
-    const buf = self.toBytes() catch return;
+    const buf = self.toUtf8() catch return;
     defer buf.deinit();
     try printBytes(buf, fmt, writer);
 }
@@ -1471,14 +1466,14 @@ pub fn midSlice(self: *const String, from_index: Index) Slice {
 
 /// parseInt tries to parse this Zigstr as an integer of type `T` in base `radix`.
 pub fn parseInt(self: String, comptime T: type, radix: u8) !T {
-    const buf = try self.toBytes();
+    const buf = try self.toUtf8();
     defer buf.deinit();
     return std.fmt.parseInt(T, buf.items, radix);
 }
 
 /// parseFloat tries to parse this Zigstr as an floating point number of type `T`.
 pub fn parseFloat(self: String, comptime T: type) !T {
-    const buf = try self.toBytes();
+    const buf = try self.toUtf8();
     defer buf.deinit();
     return std.fmt.parseFloat(T, buf.items);
 }
@@ -1757,7 +1752,44 @@ pub fn startsWith(self: String, needles: String, cmp: Comparison) bool {
     return self.startsWithSlice(sdn.codepoints.items, cmp);
 }
 
-pub fn startsWithBytes(self: String, needles: []const u8, cmp: Comparison) bool {
+pub fn startsWithAscii(self: String, needles: []const u8, cmp: Comparison) bool {
+    if (needles.len == 1) {
+        return self.startsWithCp(needles[0]);
+    }
+
+    const sd = self.d orelse return false;
+    const cp_count = sd.codepoints.items.len;
+    if (cp_count < needles.len) {
+        return false;
+    }
+
+    if (cmp.cs == .Yes) {
+        if (cp_count > needles.len) {
+            if (sd.graphemes.items[needles.len] != 1) {
+                return false;
+            }
+        }
+
+        for (0..needles.len) |i| {
+            if (sd.codepoints.items[i] != needles[i]) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    var cps = std.ArrayList(Codepoint).init(String.ctx.a);
+    defer cps.deinit();
+    var arr = cps.addManyAsSlice(needles.len) catch return false;
+    for (0..needles.len) |i| {
+        arr[i] = needles[i];
+    }
+
+    return self.startsWithSlice(cps.items, cmp);
+}
+
+pub fn startsWithUtf8(self: String, needles: []const u8, cmp: Comparison) bool {
     if (needles.len == 1) {
         const cp = toCp(needles) catch return false;
         return self.startsWithCp(cp);
@@ -1914,13 +1946,13 @@ pub fn toLower2(list: CpSlice) !void {
     }
 }
 
-pub fn toBytes(self: String) !ArrayList(u8) {
+pub fn toUtf8(self: String) !ArrayList(u8) {
     const sd = self.d orelse return ArrayList(u8).init(ctx.a);
     return utf8_from_slice(ctx.a, sd.codepoints.items);
 }
 
 pub fn toOwnedSlice(self: String) ![]const u8 {
-    const arr = try self.toBytes();
+    const arr = try self.toUtf8();
     defer arr.deinit();
     var memory = try ctx.a.alloc(u8, arr.items.len);
     for (0..arr.items.len) |i| {
