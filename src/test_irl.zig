@@ -11,11 +11,11 @@ const BitData = @import("bit_data.zig").BitData;
 const mtl = @import("mtl.zig");
 const Num = @import("Num.zig");
 
-const c = @cImport({
-    // See https://github.com/ziglang/zig/issues/515
-    @cDefine("_NO_CRT_STDIO_INLINE", "1");
-    @cInclude("stdio.h");
-});
+// const c_ = @cImport({
+//     // See https://github.com/ziglang/zig/issues/515
+//     @cDefine("_NO_CRT_STDIO_INLINE", "1");
+//     @cInclude("stdio.h");
+// });
 
 const Normalize = @import("Normalize");
 const CaseFold = @import("CaseFold");
@@ -34,27 +34,25 @@ const KeepEmptyParts = String.KeepEmptyParts;
 const DesktopFile = @import("DesktopFile.zig").DesktopFile;
 const theme = String.Theme.Dark;
 
-const COLOR_BLUE = "\x1B[34m";
-const COLOR_DEFAULT = "\x1B[0m";
-const COLOR_GREEN = "\x1B[32m";
-const COLOR_RED = "\x1B[0;91m";
-const COLOR_YELLOW = "\x1B[93m";
-const COLOR_MAGENTA = "\x1B[35m";
-const COLOR_CYAN = "\x1B[36m";
-const COLOR_BLACK = "\x1B[38;5;16m";
-const BLINK_START = "\x1B[5m";
-const BLINK_END = "\x1B[25m";
-const BOLD_START = "\x1B[1m";
-const BOLD_END = "\x1B[0m";
-const UNDERLINE_START = "\x1B[4m";
-const UNDERLINE_END = "\x1B[0m";
+test "Random Stuff" {
+    if (true)
+        return error.SkipZigTest;
 
-const Truncate = enum(u1) { Yes, No };
+    String.ctx = try Context.New(alloc);
+    defer String.ctx.deinit();
 
-var tick: isize = 0;
+    const list = try io.listFilesUtf8(alloc, .Home, "Documents");
+    defer {
+        for (list.items) |item| {
+            mtl.debug(@src(), "{s}", .{item.name});
+            item.deinit(alloc);
+        }
+        list.deinit();
+    }
+}
 
 test "Desktop File" {
-    if (false)
+    if (true)
         return error.SkipZigTest;
 
     String.ctx = try Context.New(alloc);
@@ -185,22 +183,46 @@ inline fn getTime() i128 {
     return std.time.microTimestamp();
 }
 
-pub fn buildAHref(line: *const String) !String {
+pub fn buildAHref(line: *const String, session_num: String) !String {
+    // Generates: <a class="anchor" id="1_0" href="#1_0">1.0</a>
     const anchor = try line.mid(2, -1);
     defer anchor.deinit();
-    const nums = try anchor.splitPair(".");
-    // <a class="anchor" id="1_0" href="#1_0">1.0</a>
+    var nums = ArrayList(String).init(String.ctx.a);
+    defer {
+        for (nums.items) |item| {
+            item.deinit();
+        }
+        nums.deinit();
+    }
+    var has_both = false;
+    if (anchor.indexOfAscii(".", .{})) |idx| {
+        _ = idx;
+        has_both = true;
+        const pair = try anchor.splitPair(".");
+        try nums.append(pair[0]);
+        try nums.append(pair[1]);
+    } else {
+        try nums.append(try session_num.Clone());
+        try nums.append(try anchor.Clone());
+    }
+    
     var a_href = String.New();
     try a_href.addAscii("<a class=\"anchor\" id=\"");
-    var sub = nums[0];
+    var sub = try nums.items[0].Clone();
     defer sub.deinit();
     try sub.addChar('_');
-    try sub.addConsume(nums[1]);
+    try sub.add(nums.items[1]);
     try a_href.add(sub);
     try a_href.addAscii("\" href=\"#");
     try a_href.add(sub);
     try a_href.addAscii("\">");
-    try a_href.add(anchor);
+    if (has_both) {
+        try a_href.add(anchor);
+    } else {
+        try a_href.add(nums.items[0]);
+        try a_href.addAscii(".");
+        try a_href.add(nums.items[1]);
+    }
     try a_href.addAscii("</a>");
     // mtl.debug(@src(), "{dt}", .{a_href});
     return a_href;
@@ -224,14 +246,14 @@ fn replace(en: *String, idx: Index, bytes: []const u8) !void {
 
 fn addEng(to: *String, line: *const String, speaking: ?Speaking) !?Speaking {
     var en = try line.Clone();
-    try en.trimLeft(); // in case between "-en-" and "RA" there's a space
+    en.trimLeft(); // in case between "-en-" and "RA" there's a space
     var ret_speaking: ?Speaking = speaking;
     if (speaking == null) {
-        const r = "RA";
+        const ra = "RA";
         const q = "QUESTIONER";
-        if (en.startsWithAscii(r, .{})) {
+        if (en.startsWithAscii(ra, .{})) {
             ret_speaking = .Ra;
-            try replace(&en, .{.cp=r.len, .gr=r.len}, "<span class=ra_en>RA:</span>");
+            try replace(&en, .{.cp=ra.len, .gr=ra.len}, "<span class=ra_en>RA:</span>");
         } else if (en.startsWithAscii(q, .{})) {
             ret_speaking = .Questioner;
             try replace(&en, .{.cp=q.len, .gr=q.len}, "<span class=qa_en>QUESTIONER:</span>");
@@ -260,10 +282,31 @@ fn addRus(to: *String, line: *const String, speaking: ?Speaking) !void {
     try to.addConsume(ru);
 }
 
-test "Translate En to Ru" {
+test "Matrix" {
     if (true)
         return error.SkipZigTest;
-    
+
+    const mat = [_][5]f32{
+        [_]f32{ 1.0, 0.0, 0.0, 0.0, 0.0 },
+        [_]f32{ 0.0, 1.0, 0.0, 1.0, 0.0 },
+        [_]f32{ 0.0, 0.0, 1.0, 0.0, 0.0 },
+        [_]f32{ 0.0, 0.0, 0.0, 1.0, 9.9 },
+    };
+    //mtl.debug(@src(), "Matrix: {any}", .{mat});
+    const stdout = std.io.getStdOut().writer();
+    for (mat) |row| {
+        for (row) |col| {
+            try stdout.print("{d} \n", .{col});
+        }
+    }
+
+    try stdout.print("\n", .{});
+}
+
+test "Translate En to Ru" {
+    if (false)
+        return error.SkipZigTest;
+
     String.ctx = try Context.New(alloc);
     defer String.ctx.deinit();
 
@@ -289,8 +332,10 @@ test "Translate En to Ru" {
     while (try dir_iter.next()) |entry| {
         const txt_name = try String.From(entry.name);
         defer txt_name.deinit();
-        const html_fname = try txt_name.changeExtension(".html");
-        try filenames.append(html_fname);
+        var html_name = try txt_name.Clone();
+        try html_name.changeExtension(".html");
+        // const html_fname = try txt_name.changeExtension(".html");
+        try filenames.append(html_name);
         if (only_last) {
             if (last_txt_name) |ln| {
                 // mtl.debug(@src(), "Skipped {dt}", .{ln});
@@ -315,9 +360,9 @@ test "Translate En to Ru" {
 }
 
 fn parseSession(name: String) !String {
-    var idx = name.lastIndexOfBytes("_") orelse return String.Error.Other;
+    var idx = name.lastIndexOfUtf8("_") orelse return error.Index;
     idx.addOne(); // skipping past "_"
-    const idx2 = name.lastIndexOfBytes(".") orelse return String.Error.Other;
+    const idx2 = name.lastIndexOfUtf8(".") orelse return error.Index;
 
     const number = try name.betweenIndices(idx, idx2);
     var ret = try String.From("Сеанс ");
@@ -419,9 +464,9 @@ fn Translate(dirpath: String, filename: String) !void {
 \\  <meta charset="UTF-8"/>
 \\  <link rel="stylesheet" href="styles.css">
 );
-    var idx1 = filename.indexOfBytes("_", .{}) orelse return String.Error.Other;
+    var idx1 = filename.indexOfAscii("_", .{}) orelse return String.Error.Other;
     idx1.addOne();
-    const idx2 = filename.indexOfBytes(".", .{}) orelse return String.Error.Other;
+    const idx2 = filename.indexOfAscii(".", .{}) orelse return String.Error.Other;
     const session_num = try filename.betweenIndices(idx1, idx2);
     defer session_num.deinit();
     try html.addUtf8("\t<title>Сеанс ");
@@ -448,7 +493,7 @@ fn Translate(dirpath: String, filename: String) !void {
     var speaking: ?Speaking = null;
     
     for (lines.items) |*line| {
-        try line.trimLeft();
+        line.trimLeft();
         if (line.isEmpty()) {
             try html.addAscii("\n<p>\n");
             continue;
@@ -461,7 +506,7 @@ fn Translate(dirpath: String, filename: String) !void {
             }
             last_was = .anchor;
             try html.addAscii("\n<table>\n\t<tr>\n\t\t<td>");
-            try html.addConsume(try buildAHref(line));
+            try html.addConsume(try buildAHref(line, session_num));
             try html.addAscii("</td>");
         } else if (line.startsWithAscii(en_prefix, .{})) {
             var was_anchor = false;
@@ -505,7 +550,8 @@ fn Translate(dirpath: String, filename: String) !void {
     try html.addUtf8(all_sessions);
     try html.addAscii("</body></html>");
 
-    const html_fn = try filename.changeExtension(".html");
+    var html_fn = try filename.Clone();
+    try html_fn.changeExtension(".html");
     defer html_fn.deinit();
     const relative_path = try String.Concat(tloo_path, html_fn);
     defer relative_path.deinit();

@@ -256,14 +256,14 @@ pub const Qtty = struct {
     lazy: bool = false,
 
     pub fn FromCurly(input: Str) !Qtty {
-        if (input.indexOfBytes(",", .{})) |comma_idx| {
+        if (input.indexOfAscii(",", .{})) |comma_idx| {
             const s1 = try input.betweenIndices(Str.strStart(), comma_idx);
             defer s1.deinit();
             const n1: i32 = try s1.parseInt(i32, 10);
-            if (comma_idx.equals(input.strEnd())) {
+            if (comma_idx.equals(input.beforeLast())) {
                 return Qtty.ExactNumber(n1);
             } else {
-                const s2 = try input.betweenIndices(comma_idx.addRaw(1), input.strEnd().addRaw(1));
+                const s2 = try input.betweenIndices(comma_idx.addRaw(1), input.beforeLast().addRaw(1));
                 defer s2.deinit();
                 const n2: i32 = try s2.parseInt(i32, 10);
                 const qtty = Qtty.FixedRange(n1, n2);
@@ -398,6 +398,7 @@ pub const Group = struct {
     parent_id: ?IdType = null,
     result: Str = .{},
     starts_at: ?Str.Index = null,
+    non_capture: bool = false,
 
 
     pub fn New(regex: *Regex, parent: ?*Group) Group {
@@ -528,7 +529,7 @@ pub const Group = struct {
             }
         }
 
-        const last_gr_index = input.strEnd();
+        const last_gr_index = input.beforeLast();
         const base_str = input.betweenIndices(.{}, last_gr_index) catch return null;
         defer base_str.deinit();
         var at = from;
@@ -598,6 +599,7 @@ pub const Group = struct {
                 if (s.matches("?:", gr.idx)) |idx| {
                     it.continueFrom(idx);
                     try self.addMeta(Meta.NonCapture);
+                    self.non_capture = true;
                 } else if (s.matches("?!", gr.idx)) |idx| {
                     it.continueFrom(idx);
                     try self.addMeta(Meta.NegativeLookAhead);
@@ -613,7 +615,7 @@ pub const Group = struct {
                 } else if (s.matches("?<", gr.idx)) |idx| { //(?<name>\\w+) = name = e.g."Jordan"
                     it.continueFrom(idx);
                     // named capture
-                    if (s.indexOfBytes2(">", .{.from = idx.addRaw("?<".len)})) |closing_idx| {
+                    if (s.indexOfAscii(">", .{.from = idx.addRaw("?<".len)})) |closing_idx| {
                         const name = try s.betweenIndices(idx, closing_idx);
                         // mtl.debug(@src(), "Name: \"{}\"", .{name});
                         try self.addMeta(Meta.NamedCapture);
@@ -625,7 +627,7 @@ pub const Group = struct {
                 }
             } else if (gr.eqAscii('{')) {
                 const s: *Str = &self.regex.pattern;
-                if (s.indexOfBytes2("}", .{.from = gr.idx.addRaw(1)})) |idx| {
+                if (s.indexOfAscii("}", .{.from = gr.idx.addRaw(1)})) |idx| {
                     const qtty_in_curly = try s.betweenIndices(gr.idx.addRaw("}".len), idx);
                     defer qtty_in_curly.deinit();
                     it.continueFrom(idx.addRaw("}".len));
@@ -754,7 +756,7 @@ pub const Group = struct {
     }
 
     fn parseRange(s: Str, result: *ArrayList(Token)) !void {
-        const idx = s.indexOfBytes("-", .{}) orelse return;
+        const idx = s.indexOfAscii("-", .{}) orelse return;
         var iter = s.iteratorFrom(idx);
         const prev = iter.prevFrom(idx) orelse return;
         const next = iter.nextFrom(idx) orelse return;
@@ -779,7 +781,7 @@ pub const Group = struct {
             left = try s.betweenIndices(.{}, prev.idx);
         }
 
-        const str_end = s.strEnd();
+        const str_end = s.beforeLast();
         if (next.idx.gr < str_end.gr) {
             const next_gr = iter.next() orelse return;
             right = try s.midIndex(next_gr.idx);
@@ -1098,7 +1100,12 @@ pub fn printGroups(self: Regex) void {
 }
 
 fn printGroupResult(self: Group) void {
-    mtl.debug(@src(), "{id} captured string: {dt}, starts at: {?}", .{self, self.result, self.starts_at});
+    if (self.non_capture) {
+        mtl.debug(@src(), "{id} [non capture], starts at: {?}", .{self, self.starts_at});
+    } else {
+        mtl.debug(@src(), "{id} captured string: {dt}, starts at: {?}", .{self,
+            self.result, self.starts_at});
+    }
     for (self.tokens.items) |item| {
         switch (item) {
             .group => |g| {

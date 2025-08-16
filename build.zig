@@ -33,6 +33,9 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("Normalize", zg.module("Normalize"));
     exe.root_module.addImport("CaseFold", zg.module("CaseFold"));
 
+    const installAssembly = b.addInstallBinFile(exe.getEmittedAsm(), "assembly.s");
+    b.getInstallStep().dependOn(&installAssembly.step);
+
     // const zigstr = b.dependency("zigstr", .{
     //     .target = target,
     //     .optimize = optimize,

@@ -37,7 +37,7 @@ Example:<br/>
 
     const hello_world = try String.From("Hello, World!");
     defer hello_world.deinit();
-    const hello_split = try hello_world.split(" ", .{});
+    const hello_split = try hello_world.split(" ", .{.keep = .No});
     defer {
         for(hello_split.items) |s| {
             s.deinit();
@@ -47,11 +47,10 @@ Example:<br/>
 
     const correct2 = [_][]const u8 {"Hello,", "World!"};
     for (hello_split.items, correct2) |l, r| {
-        try expect(l.equals(r, .{}));
+        try expect(l.equalsUtf8(r, .{}));
     }
 
-    const start_from: usize = 0;
-    const at = hello_world.indexOf("lo", .{.from=start_from});
+    const at = hello_world.indexOfAscii("lo", .{});
     if (at) |index| {
         try expect(index.gr == 3); // .gr=grapheme, .cp=codepoint
     } else {
@@ -60,14 +59,14 @@ Example:<br/>
 
     const sub = try hello_world.substring(3, 5);
     defer sub.deinit();
-    try expect(sub.equals("lo, W", .{}));
+    try expect(sub.equalsUtf8("lo, W", .{}));
 
     const sub2 = try hello_world.substring(3, -1);
     defer sub2.deinit();
-    try expect(sub2.equals("lo, World!", .{}));
+    try expect(sub2.equalsUtf8("lo, World!", .{}));
     
     // Efficient iteration over graphemes:
-    const both_ways = try String.From("Jos\u{65}\u{301}"); // "José"
+     const both_ways = try String.From("Jos\u{65}\u{301}"); // "José"
     defer both_ways.deinit();
     {
         var it = both_ways.iterator();
@@ -78,7 +77,7 @@ Example:<br/>
     }
     
     {
-        var it = both_ways.iteratorFrom(both_ways.strEnd());
+        var it = both_ways.iteratorFrom(both_ways.beforeLast());
         while (it.prev()) |gr| { // ends up printing "ésoJ"
             std.debug.print("{}", .{gr});
         }
@@ -87,7 +86,7 @@ Example:<br/>
 
     {
         // let's iterate from let's say the location of "s":
-        if (both_ways.indexOf("s", .{})) |idx| {
+        if (both_ways.indexOfAscii("s", .{})) |idx| {
             var it = both_ways.iteratorFrom(idx);
             while (it.next()) |gr| { // prints "sé"
                 std.debug.print("{}", .{gr});
@@ -99,9 +98,9 @@ Example:<br/>
     // Some Chinese:
     const str_ch = try String.From("好久不见，你好吗？");
     defer str_ch.deinit();
-    try expect(str_ch.charAt(0).?.eq("好"));
-    try expect(str_ch.charAt(3).?.eq("见"));
-    try expect(str_ch.charAt(8).?.eq("？"));
-    try expect(!str_ch.charAt(1).?.eq("A"));
+    try expect(str_ch.charAt(0).?.eqUtf8("好"));
+    try expect(str_ch.charAt(3).?.eqUtf8("见"));
+    try expect(str_ch.charAt(8).?.eqUtf8("？"));
+    try expect(!str_ch.charAt(1).?.eqAscii('A'));
 
 ```
