@@ -149,7 +149,7 @@ pub fn test_find_index(raw_str: []const u8, needles: ConstCpSlice, froms: []cons
     for (0..froms.len) |i| {
         const correct = if (answers) |ans| ans[i] else null;
         const from = froms[i];
-        const from_i = haystack.graphemeAddress(from);
+        const from_i = haystack.findIndex(from);
         _ = try FindManySimd(haystack, needles, from_i, depth, correct);
         _ = try FindManyLinear(haystack, needles, from_i, correct);
         // _ = try FindManyLinearZigstr(raw_str, needles_raw, from, correct);

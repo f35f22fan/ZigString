@@ -334,7 +334,6 @@ test "Translate En to Ru" {
         defer txt_name.deinit();
         var html_name = try txt_name.Clone();
         try html_name.changeExtension(".html");
-        // const html_fname = try txt_name.changeExtension(".html");
         try filenames.append(html_name);
         if (only_last) {
             if (last_txt_name) |ln| {
@@ -360,9 +359,9 @@ test "Translate En to Ru" {
 }
 
 fn parseSession(name: String) !String {
-    var idx = name.lastIndexOfUtf8("_") orelse return error.Index;
+    var idx = name.lastIndexOfAscii("_", .{}) orelse return error.Index;
     idx.addOne(); // skipping past "_"
-    const idx2 = name.lastIndexOfUtf8(".") orelse return error.Index;
+    const idx2 = name.lastIndexOfAscii(".", .{}) orelse return error.Index;
 
     const number = try name.betweenIndices(idx, idx2);
     var ret = try String.From("Сеанс ");

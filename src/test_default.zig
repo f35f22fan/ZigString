@@ -20,16 +20,18 @@ test "Append Test" {
     defer String.ctx.deinit();
 
     const additional = "[Ещё]";
+    const correct_cstr = JoseStr ++ additional;
+
     var main_str = try String.From(JoseStr);
     defer main_str.deinit();
-    const correct_cstr = JoseStr ++ additional;
     try main_str.addUtf8(additional);
-    var test_buf = try main_str.toUtf8();
-    defer test_buf.deinit();
-    try expectEqualStrings(test_buf.items, correct_cstr);
+    
+    var bytes_buf = try main_str.toUtf8();
+    defer bytes_buf.deinit();
+    try expectEqualStrings(bytes_buf.items, correct_cstr);
 }
 
-test "Get Grapheme Address" {
+test "Get Grapheme Index" {
     String.ctx = try Context.New(alloc);
     defer String.ctx.deinit();
 
@@ -38,25 +40,25 @@ test "Get Grapheme Address" {
     // std.debug.print("String cp count: {}, gr count={}\n", .{main_str.codepoints.items.len,
     //     main_str.grapheme_count});
     {
-        const index = main_str.graphemeAddress(4) orelse return String.Error.NotFound;
+        const index = main_str.findIndex(4) orelse return String.Error.NotFound;
         //std.debug.print("Grapheme at {} is at codepoint {}\n", .{index.gr, index.cp});
         try expect(index.cp == 5);
     }   
     {
-        const index = main_str.graphemeAddress(13) orelse return String.Error.NotFound;
+        const index = main_str.findIndex(13) orelse return String.Error.NotFound;
         //std.debug.print("Grapheme at {} is at codepoint {}\n", .{index.gr, index.cp});
         try expect(index.cp == 15);
     }
     {
-        const index = main_str.graphemeAddress(0) orelse return String.Error.NotFound;
+        const index = main_str.findIndex(0) orelse return String.Error.NotFound;
         //std.debug.print("Grapheme at {} is at codepoint {}\n", .{index.gr, index.cp});
         try expect(index.cp == 0);
     }
     {
-        const index = main_str.graphemeAddress(32) orelse return String.Error.NotFound;
+        const index = main_str.findIndex(32) orelse return String.Error.NotFound;
         //std.debug.print("Grapheme at {} is at codepoint {}\n", .{index.gr, index.cp});
         try expect(index.cp == 34);
-    }   
+    }
 }
 
 test "Trim Left" {
@@ -176,27 +178,39 @@ test "Equals" {
 test "FindInsertRemove" {
     String.ctx = try Context.New(alloc);
     defer String.ctx.deinit();
-
-    // const chinese = try String.From(alloc, "违法和不良信息举报电话");
-    // defer chinese.deinit();
-    // try chinese.printGraphemes(std.debug);
     
-    const str = "<human><name>Jos\u{65}\u{301}</name><age>27</age></human>\u{65}\u{301}";
-    const haystack = try String.From(str);
-    defer haystack.deinit();
-    const cs = String.CaseSensitive.No  ;
+    const html_ascii = "<human><name>Jos\u{65}\u{301}</name><age>27</age></human>\u{65}\u{301}";
+    const html_str = try String.From(html_ascii);
+    defer html_str.deinit();
+
     {
-        const index = haystack.indexOfAscii("<human>", .{.cs = cs}) orelse return String.Error.NotFound;
-        try expect(index.cp == 0 and index.gr == 0);
-        const index2 = haystack.indexOfAscii("</human>", .{.cs = cs}) orelse return String.Error.NotFound;
-        try expect(index2.cp == 38 and index2.gr == 37);
+        const idx = html_str.lastIndexOfAscii("Jos", .{.cs = .Yes}) orelse return error.NotFound;
+        try expect(idx.cp == 13 and idx.gr == 13);
+
+        const idx2 = html_str.lastIndexOfAscii("<hu", .{}) orelse return error.NotFound;
+        try expect(idx2.cp == 0 and idx2.gr == 0);
+    }
+
+    {
+        // try html_str.printGraphemes(@src());
+        const from = html_str.indexOfAscii("/human", .{}) orelse return error.NotFound;
+        const idx = html_str.lastIndexOfAscii("human", .{.from = from}) orelse return error.NotFound;
+        // mtl.debug(@src(), "from={}, found at={}", .{from, idx});
+        try expect(idx.cp == 1 and idx.gr == 1);
+    }
+
+    {
+        const idx = html_str.indexOfAscii("<human>", .{.cs = .No}) orelse return error.NotFound;
+        try expect(idx.cp == 0 and idx.gr == 0);
+        const idx2 = html_str.indexOfAscii("</human>", .{.cs = .No}) orelse return error.NotFound;
+        try expect(idx2.cp == 38 and idx2.gr == 37);
     }
 
     {
         const str_to_find = try String.toCodepoints(alloc, "</age>");
         defer str_to_find.deinit();
-        const index = haystack.indexOfCpSlice(str_to_find.items, .{.cs=cs})
-            orelse return String.Error.NotFound;
+        const index = html_str.indexOfCpSlice(str_to_find.items, .{.cs=.No})
+            orelse return error.NotFound;
         try expect(index.cp == 32 and index.gr == 31);
     }
     
@@ -212,7 +226,7 @@ test "FindInsertRemove" {
     {
         var s = try String.From(initial_str);
         defer s.deinit(); 
-        try s.insertUtf8(s.At(5), "举报");
+        try s.insertUtf8(s.findIndex(5), "举报");
         const buf = try s.toUtf8();
         defer buf.deinit();
         try expectEqualStrings("José 举报no se va", buf.items);
@@ -220,7 +234,7 @@ test "FindInsertRemove" {
     {
         var s = try String.From(initial_str);
         defer s.deinit();
-        const start_from = s.indexOfAscii("no", .{.cs = cs});
+        const start_from = s.indexOfAscii("no", .{.cs = .No});
         try s.replaceUtf8(start_from, 2, "si\u{301}");
         const buf = try s.toUtf8();
         defer buf.deinit();
@@ -242,6 +256,8 @@ test "FindInsertRemove" {
         try expect(s.endsWithUtf8(str_end, .{}));
         try expect(!s.endsWith(foo, .{}));
     }
+
+
 }
 
 test "Split" {
@@ -348,7 +364,7 @@ test "Char At" {
     const needles = try String.FromAscii("se");
     defer needles.deinit();
     if (str.indexOf(needles, .{})) |idx| {
-        try expect(idx.equals(.{.cp=6, .gr=5}));
+        try expect(idx.eq(.{.cp=6, .gr=5}));
     }
 
     // toCpAscii() is slightly faster than toCp()
@@ -376,29 +392,16 @@ test "Char At" {
         // const slice = g.getSlice() orelse return;
         // std.debug.print("{s}(): Grapheme len={}, slice=\"{any}\", index={}\n",
         //     .{@src().fn_name, g.len, slice, g.index()});
+        // mtl.debug(@src(), "grapheme len={}", .{g.len});
         try expect(g.eqUtf8("\u{65}\u{301}"));
         try expect(!g.eqAscii('G'));
     }
 
     const str_ru = try String.From("Жизнь");
     defer str_ru.deinit();
-    try expect(str_ru.charAt(0).?.eqCp(try String.toCp("Ж")));
-    // When the method argument is known to be 1 codepoint one can use
-    // the slightly faster method Grapheme.eqCp():
+    try expect(str_ru.startsWithUtf8("Ж", .{}));
     try expect(str_ru.charAt(4).?.eqUtf8("ь"));
-    // Btw an even faster method is Grapheme.eqAscii() when the
-    // method argument is known to be ASCII, like Grapheme.eqAscii('A').
-    // Therefore, for example, it's wrong to use Grapheme.eqCp() with the following
-    // method argument cause the grapheme has 2 codepoints \u65 and \u301:
-    // try expect(!str_ru.charAt(4).?.eqCp("\u{65}\u{301}"));
-    // The proper approach in this case is to use the slowest method - eqUtf8():
-    // try expect(!str_ru.charAt(4).?.eqUtf8("\u{65}\u{301}"));
 
-    
-    // String.charAtIndex() is faster (almost O(1)) then CharAt(), which is O(n)
-    // because each time CharAt() is called it iterates from the start
-    // of the string to get to the grapheme at the given index,
-    // while charAtIndex() goes straight to the given place inside the string.
     // So here's usage of charAtIndex() which is used to efficiently
     // iterate over a string to print it forth and then backwards:
     const both_ways = try String.From("Jos\u{65}\u{301}"); // "José"
@@ -446,7 +449,7 @@ test "Char At" {
                 const correct = [_] Index {.{.cp=2, .gr=2}, .{.cp=3, .gr=3}};
                 var i: usize = 0;
                 while (it.next()) |gr| {
-                    try expect(gr.idx.equals(correct[i]));
+                    try expect(gr.idx.eq(correct[i]));
                     i += 1;
                 }
             }
@@ -458,7 +461,7 @@ test "Char At" {
                 .{.cp=2, .gr=2}, .{.cp=3, .gr=3}};
             var i: usize = 0;
             while (it.next()) |gr| {
-                try expect(gr.idx.equals(correct[i]));
+                try expect(gr.idx.eq(correct[i]));
                 i += 1;
             }
         }
@@ -469,7 +472,7 @@ test "Char At" {
             const correct = [_] Index { .{.cp=2, .gr=2}, .{.cp=1, .gr=1}, .{.cp=0, .gr=0}};
             var i: usize = 0;
             while (it.prev()) |gr| {
-                try expect(gr.idx.equals(correct[i]));
+                try expect(gr.idx.eq(correct[i]));
                 i += 1;
             }
         }
@@ -481,7 +484,7 @@ test "Char At" {
                 .{.cp=1, .gr=1}, .{.cp=0, .gr=0}};
             var i: usize = 0;
             while (it.prev()) |gr| {
-                try expect(gr.idx.equals(correct[i]));
+                try expect(gr.idx.eq(correct[i]));
                 i += 1;
             }
         }

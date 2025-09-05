@@ -29,6 +29,10 @@ pub inline fn warn(src: std.builtin.SourceLocation, comptime fmt: []const u8, ar
     debugger(COLOR_RED, src, fmt, args);
 }
 
+pub inline fn trace(src: std.builtin.SourceLocation) void {
+    debug(src, "{{trace}}", .{});
+}
+
 pub inline fn tbd(src: std.builtin.SourceLocation) void {
     debugger(COLOR_MAGENTA, src, "{s}", .{"TBD"});
 }

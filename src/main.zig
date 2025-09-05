@@ -64,9 +64,19 @@ pub fn main() !u8 {
     String.ctx = try Context.New(alloc);
     defer String.ctx.deinit();
 
-    // var len, const str = getString();
-    // len += 1;
-    // mtl.debug(@src(), "len={}, str={s}", .{len, str});
+    const values = .{
+        @as(u32, 1234),
+        @as(f64, 12.34),
+        true,
+        "hi",
+    } ++ .{false} ** 2;
+
+    inline for (values, 0..) |v, i| {
+        mtl.debug(@src(), "{} => {any}", .{i, v});
+    }
+
+    const len, const str = getString();
+    mtl.debug(@src(), "len={}, str={s}", .{len, str});
 
     var all = ArrayList(Shape).init(alloc);
     defer all.deinit();
@@ -83,11 +93,6 @@ pub fn main() !u8 {
         // const T = @TypeOf(item.ptr);
         // mtl.debug(@src(), "{any}", .{T});
     }
-
-    // mtl.debug(@src(), "RGBA==BGRA: {}", .{RGBA == BGRA});
-    // const rgba = RGBA{100, 100, 255, 0};
-    // const bgra = rgbaToBgra(rgba);
-    // mtl.debug(@src(), "rgba:{any}, bgra: {any}", .{rgba, bgra});
 
     return 0;
 }
@@ -128,35 +133,3 @@ fn charToDigit(c: u8) u8 {
         else => std.math.maxInt(u8),
     };
 }
-
-const RGBA = [4]u8;
-const BGRA = [4]u8;
-fn rgbaToBgra(color: RGBA) BGRA {
-    const r, const g, const b, const a = color;
-    return .{b, g, r, a};
-//     main.rgbaToBgra:
-//  .Lfunc_begin1198:
-//  .loc 88 98 0 is_stmt 1
-//  .cfi_startproc
-//  push rbp
-//  .cfi_def_cfa_offset 16
-//  .cfi_offset rbp, -16
-//  mov rbp, rsp
-//  .cfi_def_cfa_register rbp
-//  sub rsp, 4
-//  mov rax, rdi
-
-
-    // return .{color[2], color[1], color[0], color[3]};
-    // main.rgbaToBgra:
-    // .Lfunc_begin1198:
-	// .loc 88 98 0 is_stmt 1
-	// .cfi_startproc 
-	// push rbp
-	// .cfi_def_cfa_offset 16
-	// .cfi_offset rbp, -16
-	// mov rbp, rsp
-	// .cfi_def_cfa_register rbp
-	// mov rax, rdi
-}
-
