@@ -185,6 +185,9 @@ test "FindInsertRemove" {
 
     {
         const idx = html_str.lastIndexOfAscii("Jos", .{.cs = .Yes}) orelse return error.NotFound;
+        // try html_str.printGraphemes(@src());
+        // try html_str.printCodepoints(@src());
+        // mtl.debug(@src(), "idx:{}", .{idx});
         try expect(idx.cp == 13 and idx.gr == 13);
 
         const idx2 = html_str.lastIndexOfAscii("<hu", .{}) orelse return error.NotFound;
@@ -192,7 +195,6 @@ test "FindInsertRemove" {
     }
 
     {
-        // try html_str.printGraphemes(@src());
         const from = html_str.indexOfAscii("/human", .{}) orelse return error.NotFound;
         const idx = html_str.lastIndexOfAscii("human", .{.from = from}) orelse return error.NotFound;
         // mtl.debug(@src(), "from={}, found at={}", .{from, idx});
@@ -200,10 +202,10 @@ test "FindInsertRemove" {
     }
 
     {
-        const idx = html_str.indexOfAscii("<human>", .{.cs = .No}) orelse return error.NotFound;
-        try expect(idx.cp == 0 and idx.gr == 0);
-        const idx2 = html_str.indexOfAscii("</human>", .{.cs = .No}) orelse return error.NotFound;
-        try expect(idx2.cp == 38 and idx2.gr == 37);
+        const from = html_str.lastIndexOfAscii("h", .{}) orelse return error.NotFound;
+        const idx = html_str.lastIndexOfAscii("a", .{.from=from}) orelse return error.NotFound;
+        // mtl.debug(@src(), "idx: {}, from: {}", .{idx, from});
+        try expect(idx.cp == 34 and idx.gr == 33);
     }
 
     {
@@ -304,7 +306,8 @@ test "Split" {
 
     const at = hello_world.indexOfAscii("lo", .{});
     if (at) |index| {
-        try expect(index.gr == 3); // .gr=grapheme, .cp=codepoint
+        // mtl.debug(@src(), "at={}", .{index});
+        try expect(index.gr == 3);
     } else {
         std.debug.print("IndexOf \"lo\" not found", .{});
     }

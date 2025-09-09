@@ -44,13 +44,11 @@ pub fn build(b: *std.Build) void {
     _ = b.addModule("zigstring", .{
         .root_source_file = b.path("src/String.zig"),
         .imports = &.{
-            .{ .name = "grapheme", .module = zg.module("grapheme") },
+            .{ .name = "grapheme", .module = zg.module("Graphemes") },
             .{ .name = "code_point", .module = zg.module("code_point") },
-            // .{ .name = "grapheme", .module = zg.module("grapheme") },
-            // .{ .name = "PropsData", .module = zg.module("PropsData") },
-            .{ .name = "CaseData", .module = zg.module("CaseData") },
             .{ .name = "Normalize", .module = zg.module("Normalize") },
-            .{ .name = "CaseFold", .module = zg.module("CaseFold") },
+            .{ .name = "CaseFolding", .module = zg.module("CaseFolding") },
+            .{ .name = "LetterCasing", .module = zg.module("LetterCasing") },
         },
     });
 
@@ -134,10 +132,10 @@ pub fn build(b: *std.Build) void {
 
 fn addZgImport(target: anytype, zg: *std.Build.Dependency) void {
     target.root_module.addImport("code_point", zg.module("code_point"));
-    target.root_module.addImport("grapheme", zg.module("grapheme")); // Graphemes
-    target.root_module.addImport("CaseData", zg.module("CaseData"));//CaseFolding
-    target.root_module.addImport("GenCatData", zg.module("GenCatData"));//GeneralCategories
+    target.root_module.addImport("grapheme", zg.module("Graphemes")); // 
+    target.root_module.addImport("LetterCasing", zg.module("LetterCasing"));//
+    target.root_module.addImport("GenCatData", zg.module("GeneralCategories"));//GenCatData
     // target.root_module.addImport("PropsData", zg.module("PropsData"));
     target.root_module.addImport("Normalize", zg.module("Normalize"));
-    target.root_module.addImport("CaseFold", zg.module("CaseFold"));
+    target.root_module.addImport("CaseFolding", zg.module("CaseFolding")); // CaseFold
 }
