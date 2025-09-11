@@ -16,7 +16,7 @@ const Error = error {
 
 const Meta = enum(u8) {
     Not,
-    // Or,
+    Or,
     NonCapture,
     NamedCapture,
     NegativeLookAhead,
@@ -412,6 +412,10 @@ pub const Group = struct {
         return g;
     }
 
+    inline fn printMeta(writer: anytype, m: Meta) !void {
+         try writer.print("{s}{}{s} ", .{String.COLOR_CYAN, m, String.COLOR_DEFAULT});
+    }
+
     pub fn format(self: Group, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         _ = options;
 
@@ -424,8 +428,11 @@ pub const Group = struct {
 
         try writer.print("{s}Group:{?} {} (parent:{?}) {s}", .{String.COLOR_ORANGE,
         self.id, self.match_type, self.parent_id, String.COLOR_DEFAULT});
-        for (self.token_arr.items) |arr| {
-            for (arr.items) |t| {
+        for (self.token_arr.items, 0..) |arr, array_index| {
+            for (arr.items, 0..) |t, item_index| {
+                if (array_index > 0 and item_index == 0) {
+                    try printMeta(writer, .Or);
+                }
                 switch (t) {
                     .group => |g| {
                         try writer.print("{s}Group={?}{s} ", .{String.COLOR_BLUE, g.id, String.COLOR_DEFAULT});
@@ -434,7 +441,7 @@ pub const Group = struct {
                         try writer.print("{s}{}{s} ", .{String.COLOR_GREEN, q, String.COLOR_DEFAULT});
                     },
                     .meta => |m| {
-                        try writer.print("{s}{}{s} ", .{String.COLOR_CYAN, m, String.COLOR_DEFAULT});
+                        try printMeta(writer, m);
                     },
                     .str => |s| {
                         try writer.print("{dt} ", .{s});
@@ -1209,13 +1216,13 @@ test "Test regex" {
 
 // ?: means make the capturing group a non capturing group, i.e. don't include its match as a back-reference.
 // ?! is the negative lookahead. The regex will only match if the capturing group does not match.
-    const pattern_str = try String.From("=(=-){2,5}(?<Client Name>\\w+)(?:БГД[^gbA-Z0-9c1-3]opq(?!345))xyz{2,3}$");
+    const pattern_str = try String.From("=(=-){2,5}(AB|CD{2})[EF|^GH](?<Client Name>\\w+)(?:БГД[^gbA-Z0-9c1-3]opq(?!345))xyz{2,3}$");
     const regex = try Regex.New(alloc, pattern_str);
     defer regex.deinit();
     mtl.debug(@src(), "Regex: {dt}", .{pattern_str});
     regex.printGroups();
 
-    const heap_str = try String.From("GGG==-=-MikeБГДaopqxyzz\nABC");
+    const heap_str = try String.From("GGG==-=-CDDKMikeБГДaopqxyzz\nABC");
     defer heap_str.deinit();
     try heap_str.printGraphemes(@src());
 

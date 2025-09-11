@@ -45,9 +45,9 @@ pub fn getHome(alloc: Allocator, subpath: ?Str) !Str {
     }
 }
 
-pub fn getHomeSlice(alloc: Allocator, subpath: ?[]const u8) !Str {
-    if (subpath) |utf8| {
-        const s = try Str.From(utf8);
+pub fn getHomeAscii(alloc: Allocator, subpath: ?[]const u8) !Str {
+    if (subpath) |ascii| {
+        const s = try Str.FromAscii(ascii);
         defer s.deinit();
         return try getHome(alloc, s);
     }
