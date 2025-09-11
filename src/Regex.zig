@@ -16,7 +16,7 @@ const Error = error {
 
 const Meta = enum(u8) {
     Not,
-    Or,
+    // Or,
     NonCapture,
     NamedCapture,
     NegativeLookAhead,
@@ -238,7 +238,7 @@ pub const GraphemeRange = struct {
         return .{.a = a, .b = b};
     }
 
-    pub fn matches(self: GraphemeRange, input: *const String, from: Index) bool {
+    pub fn within(self: GraphemeRange, input: *const String, from: Index) bool {
         const g = input.charAtIndex(from) orelse return false;
         const cp = g.getCodepoint() orelse return false;
         return cp >= self.a and cp <= self.b;
@@ -422,7 +422,8 @@ pub const Group = struct {
             }
         }
 
-        try writer.print("{s}Group:{?}(parent:{?}) {s}", .{String.COLOR_ORANGE, self.id, self.parent_id, String.COLOR_DEFAULT});
+        try writer.print("{s}Group:{?} {} (parent:{?}) {s}", .{String.COLOR_ORANGE,
+        self.id, self.match_type, self.parent_id, String.COLOR_DEFAULT});
         for (self.token_arr.items) |arr| {
             for (arr.items) |t| {
                 switch (t) {
@@ -593,11 +594,11 @@ pub const Group = struct {
         while (it.next()) |gr| {
             if (gr.eqAscii('[')) {
                 if (self.hasContent()) {
-                    var g = Group.New(self.regex, self);
-                    g.setSquare();
-                    const newg = it.next() orelse return String.Error.Other;
-                    it.continueFrom(try g.parseIntoTokens(newg.idx));
-                    try addGroup(current_arr, g);
+                    var new_group = Group.New(self.regex, self);
+                    new_group.setSquare();
+                    const newg = it.next() orelse return error.Other;
+                    it.continueFrom(try new_group.parseIntoTokens(newg.idx));
+                    try addGroup(current_arr, new_group);
                 } else {
                     self.setSquare();
                 }
@@ -606,11 +607,11 @@ pub const Group = struct {
                 break;
             } else if (gr.eqAscii('(')) {
                 if (self.hasContent()) {
-                    var g = Group.New(self.regex, self);
-                    g.setRound();
-                    const newg = it.next() orelse return String.Error.Other;
-                    it.continueFrom(try g.parseIntoTokens(newg.idx));
-                    try addGroup(current_arr, g);
+                    var new_group = Group.New(self.regex, self);
+                    new_group.setRound();
+                    const newg = it.next() orelse return error.Other;
+                    it.continueFrom(try new_group.parseIntoTokens(newg.idx));
+                    try addGroup(current_arr, new_group);
                 } else {
                     self.setRound();
                 }
@@ -717,7 +718,6 @@ pub const Group = struct {
             } else if (gr.eqAscii('.')) {
                 try addMeta(current_arr, Meta.SymbolAnyChar);
             } else if (gr.eqAscii('$')) {
-                // self.must_end_on_line = true;
                 try addMeta(current_arr, .SymbolEndOfLine);
             } else if (gr.eqAscii('|')) {
                 // try self.addMeta(Meta.Or);
@@ -745,12 +745,12 @@ pub const Group = struct {
             while (token_iter.nextPtr()) |t| {
                 switch (t.*) {
                     .str => |*s| {
-                        var result = ArrayList(Token).init(self.regex.alloc);
-                        defer result.deinit();
-                        try parseRange(s.*, &result);
-                        if (result.items.len > 0) {
+                        var new_tokens = ArrayList(Token).init(self.regex.alloc);
+                        defer new_tokens.deinit();
+                        try parseRange(s.*, &new_tokens);
+                        if (new_tokens.items.len > 0) {
                             arr.orderedRemove(token_iter.at).deinit();
-                            for (result.items) |item| {
+                            for (new_tokens.items) |item| {
                                 try arr.insert(token_iter.at, item);
                             }
                         }
@@ -866,20 +866,21 @@ pub const Group = struct {
 
     pub fn matches(self: *Group, input: *const String, from: Index) ?Index {
         for (self.token_arr.items) |*arr| {
-            if (self.matchesInArray(arr, input, from)) |idx| {
-                return idx;
+            if (self.matchesInArray(arr, input, from)) |past_idx| {
+                // mtl.debug(@src(), "Group={?} MATCHED till={}, remains={dt}", .{self.id, past_idx, input.midSlice(past_idx)});
+                return past_idx;
             }
         }
 
         return null;
     }
 
-    pub fn matchesInArray(self: *Group, arr: *ArrayList(Token), input: *const String,
+    pub fn matchesInArray(self: *Group, tokens: *ArrayList(Token), input: *const String,
     from: Index) ?Index {
         var at = from;
         const cs = String.CaseSensitive.Yes;
         _ = cs;
-        const starts_with_not = startsWithMeta(arr.items, .Not);
+        const starts_with_not = startsWithMeta(tokens.items, .Not);
         self.result.clearAndFree();
         // mtl.debug(@src(), "Group ID: {?}", .{self.id});
 
@@ -893,16 +894,16 @@ pub const Group = struct {
         // }
 
         // for (self.tokens.items) |*t| {
-        var tokens_iter = Iterator(Token).New(arr.items);
+        var tokens_iter = Iterator(Token).New(tokens.items);
         while (tokens_iter.nextPtr()) |t| {
             switch (t.*) {
                 .str => |*needles| {
                     if (self.match_type == Match.All) {
-                        if (match(arr, &tokens_iter, needles, input, at)) |past_idx| {
+                        if (match(tokens, &tokens_iter, needles, input, at)) |past_idx| {
                             self.result.addSlice(input.*, at, past_idx) catch return null;
                             at = past_idx;
                         } else {
-                            mtl.debug(@src(), "self.matchesInArray failed", .{});
+                            // mtl.debug(@src(), "self.matchesInArray failed", .{});
                             return null;
                         }
                     } else { // == Match.AnyOf
@@ -933,7 +934,7 @@ pub const Group = struct {
                         }
                     }
                 },
-                .group => |*g| {
+                .group => |*sub_group| {
                     var qtty: Qtty = Qtty.ExactNumber(1);
                     if (tokens_iter.peekNext()) |next_token| {
                         switch (next_token) {
@@ -948,7 +949,7 @@ pub const Group = struct {
                     var work = qtty.a > 0 or !qtty.lazy;
                     var count: usize = 0;
                     while (work) {
-                        if (g.matches(input, at)) |past_idx| {
+                        if (sub_group.matches(input, at)) |past_idx| {
                             at = past_idx;
                         } else {
                             break;
@@ -967,26 +968,32 @@ pub const Group = struct {
                     }
                 },
                 .range => |range| {
-                    mtl.debug(@src(), "Group:{?}, starts_with {dt}, at={}, not:{}",
-                        .{self.id, input.midSlice(from), from, starts_with_not});
+                    _ = &range;
+                    // mtl.debug(@src(), "Group:{?}, starts_with {dt}, at={}, not:{}",
+                    //     .{self.id, input.midSlice(from), from, starts_with_not});
                     const gr = input.charAtIndex(at);
-                    
-                    if (starts_with_not != range.matches(input, at)) {
-                        mtl.debug(@src(), "Range MATCH {}, at:{}, for: {?}, not:{}", .{range, at, gr, starts_with_not});
+                    _ = &gr;
+                    if (range.within(input, at)) {
+                        mtl.debug(@src(), "Group={?} Range MATCH {}, at:{}, for: {?}, not:{}",
+                        .{self.id, range, at, gr, starts_with_not});
                     } else {
-                        mtl.debug(@src(), "Range FAIL {}, for: {?}, at={}", .{range, gr, at});
-                        return null;
+                        // mtl.debug(@src(), "Group={?} Range FAIL {}, for: {?}, at={}",
+                        // .{self.id, range, gr, at});
+                        // return at;
                     }
                     
                 },
-                else => {}
+                else => |v| {
+                    _ = &v;
+                    // mtl.debug(@src(), "UNTREATED => {}", .{v});
+                }
             }
         }
 
         switch (self.match_type) {
             .AnyOf => {
-                if (!starts_with_not) {
-                    at.addOne();
+                at.addOne();
+                if (starts_with_not) {
                     // mtl.debug(@src(), "="**20, .{});
                 }
             },
@@ -995,8 +1002,6 @@ pub const Group = struct {
 
         if (self.starts_at == null)
             self.starts_at = from;
-
-        mtl.debug(@src(), "Group:{?}, starts_with {dt}, at={}", .{self.id, input.midSlice(from), from});
 
         // if (self.must_end_on_line and !at.isPast(input)) {
         //     const gr = input.charAtIndex(at) orelse return null;
@@ -1048,8 +1053,8 @@ pub const Group = struct {
             // mtl.debug(@src(), "Group Array={}", .{i});
             for (arr.items) |item| {
                 switch (item) {
-                    .group => |*v| {
-                        v.printTokens();
+                    .group => |*g| {
+                        g.printTokens();
                     },
                     else => {},
                 }
@@ -1138,28 +1143,24 @@ pub fn getResult(self: *const Regex, name: []const u8) ?*const String {
 pub fn find(self: *Regex, input: *const String, from: Index) ?String.Slice {
     self.start_pos = null;
     self.end_pos = null;
-    var str_iter = input.iteratorFrom(from);
-    var need_to_find_first_match = true;
-    while (str_iter.next()) |gr| {
+    var input_iter = input.iteratorFrom(from);
+    var first_match_found = false;
+    while (input_iter.next()) |gr| {
+        // mtl.debug(@src(), "Next Letter {}", .{gr});
         for (self.groups.items) |*group| {
-            mtl.debug(@src(), "Group={?}, idx={}, gr {dt}", .{group.id, gr.idx, gr});
             if (group.matches(input, gr.idx)) |end_pos| {
+                first_match_found = true;
                 if (self.start_pos == null) {
                     self.start_pos = gr.idx;
                 }
                 self.end_pos = end_pos;
-                need_to_find_first_match = false;
+                // input_iter.continueFrom(end_pos);
             } else {
-                if (!need_to_find_first_match) {
-                    mtl.debug(@src(), "Group not found: {}", .{group});
-                    return null;
-                } else {
-                    break;
-                }
+                break;
             }
         }
 
-        if (!need_to_find_first_match) {
+        if (first_match_found) {
             break;
         }
     }
