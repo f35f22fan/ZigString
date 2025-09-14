@@ -310,7 +310,7 @@ test "Translate En to Ru" {
     String.ctx = try Context.New(alloc);
     defer String.ctx.deinit();
 
-    const dirpath = try io.getHomeSlice(alloc, "/dev/tloo/raw/");
+    const dirpath = try io.getHomeAscii(alloc, "/dev/tloo/raw/");
     defer dirpath.deinit();
     
     var dir = try io.openDir(dirpath);

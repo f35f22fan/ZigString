@@ -54,6 +54,15 @@ pub fn getHomeAscii(alloc: Allocator, subpath: ?[]const u8) !Str {
     return try getHome(alloc, null);
 }
 
+pub fn getHomeUtf8(alloc: Allocator, subpath: ?[]const u8) !Str {
+    if (subpath) |utf8| {
+        const s = try Str.From(utf8);
+        defer s.deinit();
+        return try getHome(alloc, s);
+    }
+    return try getHome(alloc, null);
+}
+
 pub fn listFiles(alloc: Allocator, folder: ?Folder, subdir: ?Str) !std.ArrayList(FileEntry) {
     var dir : std.fs.Dir = undefined;
 

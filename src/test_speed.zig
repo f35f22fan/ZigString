@@ -160,7 +160,7 @@ test "From File" {
     String.ctx = try Context.New(alloc);
     defer String.ctx.deinit();
 
-    const path = try io.getHomeSlice(alloc, "/Documents/content.xml");
+    const path = try io.getHomeUtf8(alloc, "/Documents/content.xml");
     defer path.deinit();
     const file_contents = try io.readFile(alloc, path);
     defer alloc.free(file_contents);

@@ -33,6 +33,10 @@ pub inline fn trace(src: std.builtin.SourceLocation) void {
     debug(src, "{{trace}}", .{});
 }
 
+pub inline fn wtf(src: std.builtin.SourceLocation) void {
+    debugger(COLOR_RED, src, "{s}", .{"============WTF"});
+}
+
 pub inline fn tbd(src: std.builtin.SourceLocation) void {
     debugger(COLOR_MAGENTA, src, "{s}", .{"TBD"});
 }

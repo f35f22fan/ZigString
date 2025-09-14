@@ -546,7 +546,7 @@ pub fn addConsume(self: *String, other: String) !void {
     try self.add(other);
 }
 
-pub fn addSlice(self: *String, input: String, start: Index, end: Index) !void {
+pub fn addSlice(self: *String, input: *const String, start: Index, end: Index) !void {
     const from_ptr = input.d orelse return;
     if (end.cp > from_ptr.codepoints.items.len) {
         return Error.OutOfBounds;
@@ -554,7 +554,7 @@ pub fn addSlice(self: *String, input: String, start: Index, end: Index) !void {
     var data = self.dataMut();
     try data.codepoints.appendSlice(from_ptr.codepoints.items[start.cp..end.cp]);
     try data.graphemes.appendSlice(from_ptr.graphemes.items[start.cp..end.cp]);
-    data.grapheme_count = countGraphemes(data.graphemes.items);
+    data.grapheme_count += end.gr - start.gr;
 }
 
 pub fn between(self: String, start: usize, end: usize) !String {
@@ -562,7 +562,14 @@ pub fn between(self: String, start: usize, end: usize) !String {
 }
 
 pub fn betweenIndices(self: String, start: Index, end: Index) !String {
-    return self.substr(start, end.gr - start.gr);
+    var result = String{};
+    var to = result.dataMut();
+    const from = self.dataConst() orelse return result;
+    try to.codepoints.appendSlice(from.codepoints.items[start.cp..end.cp]);
+    try to.graphemes.appendSlice(from.graphemes.items[start.cp..end.cp]);
+    to.grapheme_count += end.gr - start.gr;
+
+    return result;
 }
 
 // Simple implementation, for now doesn't account for .tar.* types of extensions
@@ -1222,6 +1229,29 @@ pub fn findIndex(self: String, grapheme_index: usize) ?Index {
     return null;
 }
 
+pub fn findIndexFrom(self: String, from: Index, grapheme_count: usize) ?Index {
+    const sd = self.d orelse return null;
+    const grapheme_index: usize = from.gr + grapheme_count;
+    if (grapheme_index >= sd.grapheme_count) {
+        return if (grapheme_index == sd.grapheme_count) self.afterLast() else null;
+    }
+    
+    var cp_index: isize = -1;
+    const ifrom: isize = @intCast(from.gr);
+    var current_grapheme: isize = ifrom - 1;
+    for (sd.graphemes.items[from.cp..]) |k| {
+        cp_index += 1;
+        if (k == 1) {
+            current_grapheme += 1;
+        }
+
+        if (current_grapheme == grapheme_index)
+            return Index{ .cp = from.cp + @abs(cp_index), .gr = grapheme_index };
+    }
+
+    return null;
+}
+
 pub fn findIndexByCp(self: String, codepoint_index: usize) ?Index {
     const sd = self.d orelse return null;
     if (countGraphemes(sd.graphemes.items[0 .. codepoint_index + 1])) |g| {
@@ -1442,7 +1472,6 @@ fn lastIndexGeneric(self: *const String, comptime T: type, needles: []const T, a
             }
 
             if (found) {
-                // const gr = countGraphemes(d.graphemes.items[0..at]);
                 var skipped_gr: usize = 0;
                 for (d.graphemes.items[(from_u + 1)..]) |bit| {
                     if (bit == 1) {
@@ -1593,6 +1622,10 @@ pub fn midIndex(self: String, from_index: Index) !String {
 
 pub fn midSlice(self: *const String, from_index: Index) Slice {
     return Slice { .str = self, .start = from_index, .end = self.afterLast()};
+}
+
+pub fn asSlice(self: *const String) Slice {
+    return Slice {.str = self, .start = .{}, .end = self.afterLast()};
 }
 
 pub fn next(self: *const String, idx: Index) ?Grapheme {
@@ -2002,48 +2035,18 @@ pub fn strStart() Index {
     return Index{};
 }
 
-fn appendTo(read_from: String, append_to: *String, start: Index, how_many_gr: usize) !void {
-    if (how_many_gr == 0) {
-        return {};
-    }
-    const sd = read_from.d orelse return;
-    if (start.gr + how_many_gr > sd.grapheme_count) {
-        return Error.Index;
-    }
-
-    var gr_sofar: usize = 0;
-    var cp_to_copy: usize = 0;
-    for (sd.graphemes.items[start.cp..], 0..) |g, i| {
-        if (g == 1) {
-            gr_sofar += 1;
-            if (gr_sofar > how_many_gr) {
-                break;
-            }
-        }
-        cp_to_copy = i + 1;
-    }
-
-    try append_to.ensureTotalCapacity(cp_to_copy);
-    errdefer append_to.deinit();
-    var new_data = append_to.dataMut();
-    const end_cp: usize = start.cp + cp_to_copy;
-    try new_data.codepoints.appendSlice(sd.codepoints.items[start.cp..end_cp]);
-    try new_data.graphemes.appendSlice(sd.graphemes.items[start.cp..end_cp]);
-    new_data.grapheme_count = countGraphemes(new_data.graphemes.items);
-}
-
-pub fn substr(self: String, start: Index, how_many_gr: usize) !String {
+pub fn substr(self: *const String, start: Index, grapheme_count: usize) !String {
     var new_str = String.New();
-    try self.appendTo(&new_str, start, how_many_gr);
-
+    const end = self.findIndexFrom(start, grapheme_count) orelse return error.Other;
+    try new_str.addSlice(self, start, end);
     return new_str;
 }
 
 pub fn substring(self: String, start: usize, count: isize) !String {
-    const sd = self.d orelse return Error.Other;
+    const sd = self.d orelse return error.Other;
     const how_many_gr: usize = if (count == -1) sd.grapheme_count - start else @intCast(count);
-    const index = self.findIndex(start) orelse return Error.NotFound;
-    return self.substr(index, how_many_gr);
+    const start_index = self.findIndex(start) orelse return error.NotFound;
+    return self.substr(start_index, how_many_gr);
 }
 
 pub fn toCp(input: []const u8) !Codepoint {
