@@ -371,7 +371,7 @@ test "Char At" {
     }
 
     // toCpAscii() is slightly faster than toCp()
-    const letter_s: Codepoint = try String.toCpAscii('s');
+    const letter_s: Codepoint = 's';
     
     // String.charAt() returns a ?String.Grapheme object which
     // internally points to a section of the string object,

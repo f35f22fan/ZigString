@@ -83,12 +83,32 @@ pub const Grapheme = struct {
     idx: Index,
     s: *const String,
 
-    pub fn getSlice(self: Grapheme) ?CpSlice {
+    pub fn From(input: *const String, at: Index) ?Grapheme {
+        const strdata = input.d orelse return null;
+        if (at.cp >= strdata.codepoints.items.len)
+            return null;
+        
+        var g = Grapheme {
+            .s = input,
+            .idx = at,
+        };
+
+        for (strdata.graphemes.items[at.cp..], 0..) |bit, i| {
+            if (i == 0) {
+                g.len += 1;
+            } else {
+                if (bit == 1)
+                    break;
+                g.len += 1;
+            }
+        }
+
+        return g;
+    }
+
+    pub fn getSlice(self: *const Grapheme) ?CpSlice {
         const sd = self.s.d orelse return null;
-        const len: usize = self.len;
-        // std.debug.print("items.len={}, cp={}, len={}\n",
-        //     .{sd.codepoints.items.len, self.idx.cp, len});
-        return sd.codepoints.items[self.idx.cp..(self.idx.cp+len)];
+        return sd.codepoints.items[self.idx.cp..(self.idx.cp + self.len)];
     }
 
     pub fn getCodepoint(self: Grapheme) ?Codepoint {
@@ -110,9 +130,8 @@ pub const Grapheme = struct {
         }
     }
 
-    pub fn eqAscii(self: Grapheme, c: comptime_int) bool {
-        const cp = String.toCpAscii(c) catch return false;
-        return self.eqCp(cp);
+    pub inline fn eqAscii(self: Grapheme, c: comptime_int) bool {
+        return self.eqCp(c);
     }
 
     pub fn eqCp(self: Grapheme, cp: Codepoint) bool {
@@ -124,7 +143,8 @@ pub const Grapheme = struct {
         const str_slice = self.getSlice() orelse return (input.len == 0);
         if (input.len != str_slice.len)
             return false;
-        for (str_slice, input) |a, b| {
+        
+        for (input, str_slice) |a, b| {
             if (a != b)
                 return false;
         }
@@ -144,7 +164,12 @@ pub const Grapheme = struct {
 
     pub fn isWordChar(self: Grapheme) bool {
         const cp = self.getCodepoint() orelse return false;
-        return String.isWordChar(cp);
+        return String.isCodepointAWordChar(cp);
+    }
+
+    pub fn isNumber(self: Grapheme) bool {
+        const cp = self.getCodepoint() orelse return false;
+        return cp >= '0' and cp <= '9';
     }
 
     pub fn isWhitespace(self: Grapheme) bool {
@@ -370,7 +395,7 @@ pub const Slice = struct {
     }
 
     pub fn toString(self: Slice) !String {
-        return self.str.substr(self.start, self.size());
+        return self.str.betweenIndices(self.start, self.end);
     }
 };
 
@@ -592,23 +617,7 @@ pub fn charAt(self: *const String, at: usize) ?Grapheme {
 }
 
 pub fn charAtIndex(self: *const String, at: Index) ?Grapheme {
-    const sd = self.d orelse return null;
-    if (at.cp >= sd.codepoints.items.len)
-        return null;
-
-    const gr_slice = sd.graphemes.items[at.cp..];
-    var g = Grapheme{.s = self, .idx = at};
-    for (gr_slice[0..], 0..) |b, i| {
-        if (i == 0) {
-            g.len += 1;
-        } else {
-            if (b == 1)
-                break;
-            g.len += 1;
-        }
-    }
-
-    return g;
+    return Grapheme.From(self, at);
 }
 
 pub fn codepointsPtr(self: *const String) ?ConstCpSlice {
@@ -1423,9 +1432,39 @@ inline fn isGrapheme(self: String, i: usize) bool {
     return sd.graphemes.items[i] == 1;
 }
 
-pub fn isWordChar(cp: Codepoint) bool {
+pub fn isCodepointAWordChar(cp: Codepoint) bool {
     return (cp >= 'A' and cp <= 'Z') or (cp >= 'a' and cp <= 'z') or
         (cp >= '0' and cp <= '9') or (cp == '_');
+}
+
+pub fn isWhitespace(self: String, at: Index) bool {
+    const g = self.charAtIndex(at) orelse return false;
+    return g.isWhitespace();
+}
+
+pub fn isWordBoundary(self: String, at: Index) bool {
+    if (at.cp == 0) {
+        const gr = self.charAtIndex(at) orelse return false;
+        return gr.isWordChar();
+    }
+
+    const previous = self.prev(at) orelse return false;
+    const gr = self.charAtIndex(at);
+    if (gr) |g| {
+        return previous.isWordChar() != g.isWordChar();
+    }
+    
+    return previous.isWordChar();
+}
+
+pub fn isNumber(self: String, at: Index) bool {
+    const gr = self.charAtIndex(at) orelse return false;
+    return gr.isNumber();
+}
+
+pub fn isWordChar(self: String, at: Index) bool {
+    const gr = self.charAtIndex(at) orelse return false;
+    return gr.isWordChar();
 }
 
 pub fn iterator(self: *const String) Iterator {
@@ -1674,7 +1713,7 @@ pub fn printInfo(self: String, src: std.builtin.SourceLocation, msg: ?[] const u
     }
 }
 
-const print_format_str = "{s}{}{s}{s}[{s}]{s}{s}{s}{s} ";
+const print_format_str = "{s}{}{s}{s}|{s}|{s}{s}{s}{s} ";
 const nl_chars = UNDERLINE_START ++ "(LF)" ++ UNDERLINE_END;
 const cr_chars = UNDERLINE_START ++ "(CR)" ++ UNDERLINE_END;
 const crnl_chars = UNDERLINE_START ++ "(CR/LF)" ++ UNDERLINE_END;
@@ -1689,7 +1728,7 @@ fn printCpBuf(out: anytype, cp_buf: ArrayList(Codepoint), gr_index: isize, see_a
     var temp_str_buf: [32]u8 = undefined;
 
     for (cp_buf.items, 0..) |k, i| {
-        const num_as_str = try std.fmt.bufPrint(&temp_str_buf, "{d}", .{k});
+        const num_as_str = try std.fmt.bufPrint(&temp_str_buf, "0x{X}", .{k});
         try codepoints_str.addAsciiSlice(num_as_str);
         const s: Codepoint = if (i < cp_buf.items.len - 1) '+' else ' ';
         try codepoints_str.addChar(s);
@@ -2035,9 +2074,9 @@ pub fn strStart() Index {
     return Index{};
 }
 
-pub fn substr(self: *const String, start: Index, grapheme_count: usize) !String {
+pub fn substr(self: *const String, start: Index, how_many_gr: usize) !String {
     var new_str = String.New();
-    const end = self.findIndexFrom(start, grapheme_count) orelse return error.Other;
+    const end = self.findIndexFrom(start, how_many_gr) orelse return error.Other;
     try new_str.addSlice(self, start, end);
     return new_str;
 }
@@ -2062,13 +2101,6 @@ pub fn toCp(input: []const u8) !Codepoint {
         return obj.code;
     }
     return Error.BadArg;
-}
-
-pub fn toCpAscii(a: comptime_int) !Codepoint {
-    if (a > 127) {
-        return Error.BadArg;
-    }
-    return a;
 }
 
 pub fn toCodepointsFromAscii(a: Allocator, input: []const u8) !ArrayList(Codepoint) {

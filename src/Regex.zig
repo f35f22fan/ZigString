@@ -239,8 +239,8 @@ pub const GraphemeRange = struct {
         return .{.a = a, .b = b};
     }
 
-    pub fn within(self: GraphemeRange, input: *const String, from: Index) bool {
-        const g = input.charAtIndex(from) orelse return false;
+    pub fn within(self: GraphemeRange, input: *const String, at: Index) bool {
+        const g = input.charAtIndex(at) orelse return false;
         const cp = g.getCodepoint() orelse return false;
         return cp >= self.a and cp <= self.b;
     }
@@ -308,6 +308,10 @@ pub const Qtty = struct {
 
     pub fn ExactNumber(a: i64) Qtty {
         return Qtty {.a = a, .b = a};
+    }
+
+    pub fn One() Qtty {
+        return Qtty {.a = 1, .b = 1};
     }
 
     pub fn setExactNumber(self: *Qtty, a: i64) void {
@@ -887,8 +891,7 @@ pub const Group = struct {
 
     pub fn matches(self: *Group, input: *const String, from: Index) ?Index {
         for (self.token_arr.items) |*arr| {
-            if (self.matchesInArray(arr, input, from)) |past_idx| {
-                // mtl.debug(@src(), "Group={?} MATCHED till={}, remains={dt}", .{self.id, past_idx, input.midSlice(past_idx)});
+            if (self.matches2(arr, input, from)) |past_idx| {
                 return past_idx;
             }
         }
@@ -896,7 +899,7 @@ pub const Group = struct {
         return null;
     }
 
-    pub fn matchesInArray(self: *Group, tokens: *ArrayList(Token), input: *const String, from: Index) ?Index {
+    pub fn matches2(self: *Group, tokens: *ArrayList(Token), input: *const String, from: Index) ?Index {
         var at = from;
         const cs = String.CaseSensitive.Yes;
         _ = cs;
@@ -939,24 +942,58 @@ pub const Group = struct {
                 .meta => |m| {
                     switch (m) {
                         .SymbolWordChar => {
-                            var qtty: ?Qtty = null;
-                            if (tokens_iter.peekNext()) |next_token| {
-                                switch (next_token) {
-                                    .qtty => |q| {
-                                        qtty = q;
-                                        tokens_iter.add(1);
-                                    },
-                                    else => {}
-                                }
+                            if (!input.isWordChar(at)) {
+                                return null;
                             }
-                            // mtl.debug(@src(), "find a word char, qtty:{?}, from:{}, input:{}", .{qtty, from, input});
-                            if (findWordChar(input, from, qtty)) |past_idx| {
+
+                            if (self.findNextChars(input, from, m, &tokens_iter)) |past_idx| {
                                 at = past_idx;
-                                if (self.capture) |*str| {
-                                    str.addSlice(input, from, past_idx) catch return null;
-                                } else {
-                                    self.capture = input.betweenIndices(from, past_idx) catch return null;
-                                }
+                            }
+                        },
+                        .SymbolWordBoundary => {
+                            if (!input.isWordBoundary(at)) {
+                                return null;
+                            }
+                        },
+                        .SymbolNonWordBoundary => {
+                            if (input.isWordBoundary(at)) {
+                                return null;
+                            }
+                        },
+                        .SymbolNumber => {
+                            if (!input.isNumber(at)) {
+                                return null;
+                            }
+                            if (self.findNextChars(input, at, m, &tokens_iter)) |past_idx| {
+                                at = past_idx;
+
+                            }
+                        },
+                        .SymbolNonNumber => {
+                            if (input.isNumber(at)) {
+                                return null;
+                            }
+
+                            if (self.findNextChars(input, from, m, &tokens_iter)) |past_idx| {
+                                at = past_idx;
+                            }
+                        },
+                        .SymbolWhitespace => {
+                            if (!input.isWhitespace(at)) {
+                                return null;
+                            }
+
+                            if (self.findNextChars(input, at, m, &tokens_iter)) |past_idx| {
+                                at = past_idx;
+                            }
+                        },
+                        .SymbolNonWhitespace => {
+                            if (input.isWhitespace(at)) {
+                                return null;
+                            }
+
+                            if (self.findNextChars(input, from, m, &tokens_iter)) |past_idx| {
+                                at = past_idx;
                             }
                         },
                         else => {
@@ -1044,13 +1081,57 @@ pub const Group = struct {
     }
 
     // returns past last found grapheme, or null
-    pub fn findWordChar(input: *const String, from: Index, qtty: ?Qtty) ?Index {
-        var iter = input.iteratorFrom(from);
+    pub fn findNextChars(self: *Group, input: *const String, from: Index, meta: Meta, tokens_iter: *Iterator(Token)) ?Index {
+
+        var qtty: ?Qtty = Qtty.One();
+        if (tokens_iter.peekNext()) |next_token| {
+            switch (next_token) {
+               .qtty => |q| {
+                    qtty = q;
+                    tokens_iter.add(1);
+                },
+                else => {}
+            }
+        }
+
+        var string_iter = input.iteratorFrom(from);
         var count: usize = 0;
         var matched = false;
         var ret_idx: Index = from;
-        while (iter.next()) |gr| {
-            if (!gr.isWordChar()) {
+        while (string_iter.next()) |gr| {
+            var found_next_one = true;
+            switch (meta) {
+                .SymbolWordChar => {
+                    // mtl.debug(@src(), "SymbolWordChar", .{});
+                    if (!gr.isWordChar()) {
+                        found_next_one = false;
+                        break;
+                    }
+                },
+                .SymbolNumber => {
+                    if (!gr.isNumber()) {
+                        found_next_one = false;
+                        break;
+                    }
+                },
+                .SymbolWhitespace => {
+                    // mtl.debug(@src(), "SymbolWhitespace", .{});
+                    if (!gr.isWhitespace()) {
+                        found_next_one = false;
+                        break;
+                    }
+                },
+                .SymbolNonWhitespace => {
+                    // mtl.debug(@src(), "SymbolNonWhitespace", .{});
+                    if (gr.isWhitespace()) {
+                        found_next_one = false;
+                        break;
+                    }
+                },
+                else => {}
+            }
+
+            if (!found_next_one) {
                 break;
             }
 
@@ -1060,26 +1141,30 @@ pub const Group = struct {
             if (qtty) |q| {
                 if (q.lazy) {
                     if (q.a >= count) {
-                        mtl.debug(@src(), "", .{});
+                        // mtl.debug(@src(), "", .{});
                         return ret_idx;
                     }
                 } else {
                     if (count >= q.b) {
-                        mtl.debug(@src(), "q:{}, count:{}", .{q, count});
+                        // mtl.debug(@src(), "q:{}, count:{}", .{q, count});
                         return ret_idx;
                     }
                 }
             }
         }
 
-        // mtl.debug(@src(), "q:{?}, count:{}", .{qtty, count});
+        if (matched) {
+            if (self.capture) |*str| {
+                str.addSlice(input, from, ret_idx) catch return null;
+            } else {
+                self.capture = input.betweenIndices(from, ret_idx) catch return null;
+            }
+        }
+
         return if (matched) ret_idx else null;
     }
 
     fn prepareForNewSearch(self: *Group) void {
-        self.enclosed = Enclosed.None;
-        self.match_type = .All;
-        self.qtty = .New(1, Qtty.inf());
         self.starts_at = null;
         
         if (self.capture) |str| {
@@ -1087,7 +1172,17 @@ pub const Group = struct {
         }
         self.capture = null;
 
-        
+        for (self.token_arr.items) |*arr| {
+            for (arr.items) |*t| {
+                switch (t.*) {
+                    .group => |*g| {
+                        g.prepareForNewSearch();
+                    },
+                    else => {}
+                }
+            
+            }
+        }
     }
 
     pub fn printTokens(self: Group) void {
@@ -1183,7 +1278,6 @@ pub fn getCaptureByIndex(self: *const Regex, index: usize) ?Slice {
 }
 
 pub fn find(self: *Regex, input: *const String, from: Index) ?Slice {
-    // self.clearGroups();
     self.top_group.prepareForNewSearch();
     self.found_slice = null;
     self.start_pos = null;
@@ -1239,15 +1333,24 @@ test "Test regex" {
     String.ctx = try String.Context.New(alloc);
     defer String.ctx.deinit();
 
-// ?: means make the capturing group a non capturing group, i.e. don't include its match as a back-reference.
-// ?! is the negative lookahead. The regex will only match if the capturing group does not match.
-    const pattern_str = try String.From("=(=-){2,5}(AB|CD{2})[EF|^GH](?<Client Name>\\w+)(?:БГД[^gbA-Z0-9c1-3]opq(?!345))xyz{2,3}$");
+// ?: means make the capturing group a non capturing group, i.e. don't include
+// its match as a back-reference.
+// ?! is the negative lookahead. The regex will only match if the capturing
+// group does not match.
+    const pattern_native = //"\\s\\d{2}";// "se\\B";// "\u{65}\u{301}";
+\\=(=-){2,5}(AB|CD{2})[EF|^GH](?<Client Name>\w+)(?:БГД[^gbA-Z0-9c1-3]opq(?!345))xyz{2,3}$
+;
+    
+    const pattern_str = try String.From(pattern_native);
     const regex = try Regex.New(alloc, pattern_str);
     defer regex.deinit();
     mtl.debug(@src(), "Regex: {dt}", .{pattern_str});
     regex.printGroups();
 
-    const heap_str = try String.From("GGG==-=-CDDKMikeБГДaopqxyzz\nABC");
+const heap = "A==-=-CDDKMikeБГДaopqxyzz\nJos\u{65}\u{301} se fu\u{E9} seguía";
+// const heap = "abc 34def";
+
+    const heap_str = try String.From(heap);
     defer heap_str.deinit();
     try heap_str.printGraphemes(@src());
 
