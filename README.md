@@ -26,6 +26,12 @@ Tested with Zig 0.14.1
 
 
 ### Regex support is a work in progress
+Currently successfully passes this test:
+Regex: =(=-){2,5}(AB|CD{2})[EF|^GH](?<ClientName>\w+)(?:БГД[^gbA-Z0-9c1-3]opq(?!345))xyz{2,3}$
+Tries to find in the string "A==-=-CDDKMikeБГДaopqxyzz\nJos\u{65}\u{301} se fu\u{E9} seguía"
+Finds match "==-=-CDDKMikeБГДaopqxyzz" at index 1, as expected.
+
+
 ---
 
 Example:<br/>
