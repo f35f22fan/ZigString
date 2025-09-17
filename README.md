@@ -14,7 +14,7 @@ For example <code>my_str.indexOf("something", .{})</code> returns such an <code>
 <p/>
 General info: a visible letter/character is a grapheme (or "grapheme cluster") that might
  be composed of more than one codepoints (but often it's one codepoint).
- <p/>
+<p/>
 In this implementation under the hood each codepoint takes 21 bits (plus 1 separate bit to
  mark grapheme boundaries) because 21 bits are enough to store every UTF-8 codepoint.
 Internally it uses SIMD or linear operations depending on the string length.
@@ -27,9 +27,12 @@ Tested with Zig 0.14.1
 
 ### Regex support is a work in progress
 Currently successfully passes this test:
-Regex: =(=-){2,5}(AB|CD{2})[EF|^GH](?<ClientName>\w+)(?:БГД[^gbA-Z0-9c1-3]opq(?!345))xyz{2,3}$
-Tries to find in the string "A==-=-CDDKMikeБГДaopqxyzz\nJos\u{65}\u{301} se fu\u{E9} seguía"
-Finds match "==-=-CDDKMikeБГДaopqxyzz" at index 1, as expected.
+
+Regex: <code>=(=-){2,5}(AB|CD{2})[EF|^GH](?<ClientName>\w+)(?:БГД[^gbA-Z0-9c1-3]opq(?!345))xyz{2,3}$</code>
+
+Tries to find in the string <code>"A==-=-CDDKMikeБГДaopqxyzz\nJos\u{65}\u{301} se fu\u{E9} seguía"</code>
+
+Finds match <code>"==-=-CDDKMikeБГДaopqxyzz"</code> at index 1, as expected.
 
 
 ---
