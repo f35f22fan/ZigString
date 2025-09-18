@@ -119,6 +119,12 @@ pub const Grapheme = struct {
         return sd.codepoints.items[self.idx.cp];
     }
 
+    pub fn eq(self: Grapheme, rhs: Grapheme) bool {
+        const l = self.getSlice() orelse return false;
+        const r = rhs.getSlice() orelse return false;
+        return std.mem.eql(Codepoint, l, r);
+    }
+
     pub fn eqUtf8(self: Grapheme, input: []const u8) bool {
         if (input.len == 1) {
             const cp = toCp(input) catch return false;
@@ -187,6 +193,12 @@ pub const Grapheme = struct {
         }
 
         return a;
+    }
+
+    pub fn toString(self: Grapheme) !String {
+        var s = String{};
+        try s.addGrapheme(self);
+        return s;
     }
 };
 
