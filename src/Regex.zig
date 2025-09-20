@@ -101,21 +101,25 @@ fn Iterator(comptime T: type) type {
             return null;
         }
 
-        pub fn peekNext(self: Self) ?T {
-            const next_index: usize = self.at + 1;
-            if (next_index >= self.size()) {
-                return null;
-            }
-
-            return self.items[next_index];
+        pub fn peekFirst(self: *Self) ?*T {
+            return if (self.items.len == 0) null else &self.items[0];
         }
 
-        pub fn peekPrev(self: Self) ?T {
+        pub fn peekLast(self: *Self) ?*T {
+            return if (self.items.len == 0) null else &self.items[self.items.len - 1];
+        }
+
+        pub fn peekNext(self: Self) ?*T {
+            const at = self.at + 1;
+            return if (at >= self.items.len) null else &self.items[at];
+        }
+
+        pub fn peekPrev(self: Self) ?*T {
             if (self.at == 0 or (self.at - 1) >= self.size()) {
                 return null;
             }
 
-            return self.items[self.at - 1];
+            return &self.items[self.at - 1];
         }
 
         inline fn prevIdx(self: *Self) ?usize {
@@ -263,7 +267,7 @@ pub const Qtty = struct {
             defer s1.deinit();
             const n1: i32 = try s1.parseInt(i32, 10);
             if (comma_idx.eq(input.beforeLast())) {
-                return Qtty.ExactNumber(n1);
+                return Qtty {.a = n1, .b = inf()};
             } else {
                 const s2 = try input.betweenIndices(comma_idx.addRaw(1), input.beforeLast().addRaw(1));
                 defer s2.deinit();
@@ -566,7 +570,7 @@ pub const Group = struct {
     fn matchAll(arr: *ArrayList(Token), tokens_iter: *Iterator(Token), input: *const String, haystack: *const String, from: Index) ?Index {
         var qtty = Qtty.One();
         if (tokens_iter.peekNext()) |next_token| {
-            switch(next_token) {
+            switch(next_token.*) {
                 .qtty => |q| {
                     qtty = q;
                     _ = tokens_iter.next(); // if so then need to advance
@@ -580,9 +584,12 @@ pub const Group = struct {
         }
 
         var negative_lookahead = false;
+        var positive_lookahead = false;
         if (tokens_iter.peekPrev()) |prev_token| {
-            if (prev_token.isMeta(Meta.NegativeLookAhead)) {
+            if (prev_token.isMeta(.NegativeLookAhead)) {
                 negative_lookahead = true;
+            } else if (prev_token.isMeta(.PositiveLookAhead)) {
+                positive_lookahead = true;
             }
         }
 
@@ -593,6 +600,8 @@ pub const Group = struct {
             if (negative_lookahead) {
                 // mtl.debug(@src(), "Dealing with negative_lookahead for {dt}", .{input});
                 return if (past_match == null) from else null;
+            } else if (positive_lookahead) {
+                return from; // must not advance
             } else {
                 return past_match;
             }
@@ -608,7 +617,9 @@ pub const Group = struct {
                 at = pm;
             } else {
                 if (negative_lookahead) {
-                    return from; // this is success
+                    return from; // means match
+                } else if (positive_lookahead) {
+                    return null; // means no match
                 }
             }
         }
@@ -629,14 +640,18 @@ pub const Group = struct {
             }
         }
 
-        return if (count >= qtty.a) at else null;
+        if (count >= qtty.a) {
+            return if (positive_lookahead) from else at;
+        }
+
+        return null;
     }
 
     fn matchAny(tokens_arr: *ArrayList(Token), tokens_iter: *Iterator(Token), input: *const String, haystack: *const String, from: Index) ?Index {
         const starts_with_not = startsWithMeta(tokens_arr.items, .Not);
         var negative_lookahead = false;
         if (tokens_iter.peekPrev()) |prev_token| {
-            if (prev_token.isMeta(Meta.NegativeLookAhead)) {
+            if (prev_token.isMeta(.NegativeLookAhead)) {
                 negative_lookahead = true;
             }
         }
@@ -722,27 +737,27 @@ pub const Group = struct {
                 const s: *String = &self.regex.pattern;
                 if (s.matchesAscii("?:", gr.idx)) |idx| {
                     it.continueFrom(idx);
-                    try addMeta(current_arr, Meta.NonCapture);
+                    try addMeta(current_arr, .NonCapture);
                     // self.non_capture = true;
                 } else if (s.matchesAscii("?!", gr.idx)) |idx_past| {
                     it.continueFrom(idx_past);
-                    try addMeta(current_arr, Meta.NegativeLookAhead);
+                    try addMeta(current_arr, .NegativeLookAhead);
                 } else if (s.matchesAscii("?<!", gr.idx)) |idx| {
                     it.continueFrom(idx);
-                    try addMeta(current_arr, Meta.NegativeLookBehind);
+                    try addMeta(current_arr, .NegativeLookBehind);
                 } else if (s.matchesAscii("?=", gr.idx)) |idx| {
                     it.continueFrom(idx);
-                    try addMeta(current_arr, Meta.PositiveLookAhead);
+                    try addMeta(current_arr, .PositiveLookAhead);
                 } else if (s.matchesAscii("?<=", gr.idx)) |idx| {
                     it.continueFrom(idx);
-                    try addMeta(current_arr, Meta.PositiveLookBehind);
+                    try addMeta(current_arr, .PositiveLookBehind);
                 } else if (s.matchesAscii("?<", gr.idx)) |idx| { //(?<name>\\w+) = name = e.g."Jordan"
                     it.continueFrom(idx);
                     // named capture
                     if (s.indexOfAscii(">", .{.from = idx.addRaw("?<".len)})) |closing_idx| {
                         const name = try s.betweenIndices(idx, closing_idx);
                         // mtl.debug(@src(), "Name: \"{}\"", .{name});
-                        try addMeta(current_arr, Meta.NamedCapture);
+                        try addMeta(current_arr, .NamedCapture);
                         try addName(current_arr, name);
                         it.continueFrom(closing_idx.addRaw(1)); // go past ">"
                     }
@@ -1055,7 +1070,7 @@ pub const Group = struct {
                 .group => |*sub_group| {
                     var qtty: Qtty = Qtty.ExactNumber(1);
                     if (tokens_iter.peekNext()) |next_token| {
-                        switch (next_token) {
+                        switch (next_token.*) {
                             .qtty => |q| {
                                 qtty = q;
                                 tokens_iter.add(1);
@@ -1142,12 +1157,19 @@ pub const Group = struct {
 
         var qtty: Qtty = Qtty.One();
         if (tokens_iter.peekNext()) |next_token| {
-            switch (next_token) {
+            switch (next_token.*) {
                .qtty => |q| {
                     qtty = q;
                     tokens_iter.add(1);
                 },
                 else => {}
+            }
+        }
+
+        var positive_lookahead = false;
+        if (tokens_iter.peekFirst()) |token| {
+            if (token.isMeta(.PositiveLookAhead)) {
+                positive_lookahead = true;
             }
         }
 
@@ -1215,6 +1237,9 @@ pub const Group = struct {
         }
 
         if (found_enough) {
+            if (positive_lookahead) {
+                return from;
+            }
             if (self.capture) |*str| {
                 str.addSlice(input, from, ret_idx) catch return null;
             } else {
@@ -1449,12 +1474,8 @@ pub fn printGroups(self: Regex) void {
 }
 
 fn printGroupResult(self: Group) void {
-    // if (self.non_capture) {
-    //     mtl.debug(@src(), "{id} [non capture], starts at: {?}", .{self, self.starts_at});
-    // } else {
-    //     mtl.debug(@src(), "{id} captured string: {dt}, starts at: {?}", .{self,
-    //         self.result, self.starts_at});
-    // }
+    mtl.debug(@src(), "{id} captured: {?}, starts at: {?}", .{self,
+        self.capture, self.starts_at});
     for (self.token_arr.items) |arr| {
         for (arr.items) |item| {
             switch (item) {
@@ -1472,11 +1493,11 @@ test "Test regex" {
     String.ctx = try String.Context.New(alloc);
     defer String.ctx.deinit();
 
-    const heap = "A==-=-CDDKMikeБГДaopqxyzz\n";//Jos\u{65}\u{301} se fu\u{E9} seguía";
+    const heap = "A==-=-CDDKMikeБГДaopqxyzz567\n";//Jos\u{65}\u{301} se fu\u{E9} seguía";
     // const heap = "abc 34def";
 
     const pattern_native = //"\\s\\d{2}";// "se\\B";// "\u{65}\u{301}";
-\\=(=-){2,5}(AB|CD{2})[EF|^GH](?<ClientName>\w+)(?:БГД[^zyA-Z0-9c1-3]opq(?!345))xyz{2,3}$
+\\=(=-){2,5}(?=\w+)(AB|CD{2})[EF|^GH](?<ClientName>\w+)(?:БГД[^zyA-Z0-9c1-3]opq(?!345))xyz{2,3}(?=\d{2,})$
 ;
 
 //on website:
@@ -1522,40 +1543,6 @@ test "Test regex" {
             mtl.debug(@src(), "prev: {}", .{k});
         }
     }
-
-// QRegularExpression("(?<![a-zA-Z\\.])\\d+(\\.\\d+)?(?!\\.)");
-// Must not start with a letter or a dot => (?<![a-zA-Z\\.])
-// numbers must follow => \\d+
-// then possibly a dot followed by an array of numbers => (\\.\\d+)?
-// but not ending in a number => (?!\\.)
-
-// (?<name>...) – Named capture group called “name” matching any three characters:
-// /Testing (?<num>\d{3})/
-// const regex = /Testing (?<num>\d{3})/
-// let str = "Testing 123";
-// str = str.replace(regex, "Hello $<num>")
-// console.log(str); // "Hello 123"
-
-// Sometimes it can be useful to reference a named capture group inside of a query itself.
-// This is where “back references” can come into play.
-// \k<name>Reference named capture group “name” in a search query
-// Say you want to match:
-// Hello there James. James, how are you doing?
-// But not:
-// Hello there James. Frank, how are you doing?
-// While you could write a regex that repeats the word “James” like the following:
-// /.*James. James,.*/
-// A better alternative might look something like this:
-// /.*(?<name>James). \k<name>,.*/
-// Now, instead of having two names hardcoded, you only have one.
-
-// QRegularExpression re("(\\d\\d) (?<name>\\w+)");
-// QRegularExpressionMatch match = re.match("23 Jordan");
-// if (match.hasMatch()) {
-//     QString number = match.captured(1); // first == "23"
-//     QString name = match.captured("name"); // name == "Jordan"
-// }
-
 
     //() - catpure group, referred by index number preceded by $, like $1
     //(?:) - non capture group
