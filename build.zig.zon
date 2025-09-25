@@ -11,10 +11,6 @@
 
     // the actual packages you need as dependencies of your project
     .dependencies = .{
-        // .zigstr = .{
-        //     .url = "https://codeberg.org/dude_the_builder/zigstr/archive/v0.13.3.tar.gz",
-        //     .hash = "1220f9e0e432835046496fdaae7008f0c87e3319d4cc4f72db77494927eff9f89ce4",
-        // },
         .zg = .{
             .url = "https://codeberg.org/atman/zg/archive/v0.14.1.tar.gz",
             .hash = "zg-0.14.1-oGqU3IQ_tALZIiBN026_NTaPJqU-Upm8P_C7QED2Rzm8",

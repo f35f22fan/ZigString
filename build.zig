@@ -18,27 +18,16 @@ pub fn build(b: *std.Build) void {
 
     const exe = b.addExecutable(.{
         .name = "main",
-        // In this case the main source file is merely a path, however, in more
-        // complicated build scripts, this could be a generated file.
-        // .root_source_file = b.path("src/main.zig"),
-        // .target = target,
-        // .optimize = optimize,
-        .root_module = b.createModule(.{ // this line was added
+        .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
-        }), // this line was added
+        }),
     });
     addZgImport(exe, zg);
 
     const installAssembly = b.addInstallBinFile(exe.getEmittedAsm(), "assembly.s");
     b.getInstallStep().dependOn(&installAssembly.step);
-
-    // const zigstr = b.dependency("zigstr", .{
-    //     .target = target,
-    //     .optimize = optimize,
-    // });
-    // exe.root_module.addImport("zigstr", zigstr.module("zigstr"));
 
      // Module
     _ = b.addModule("zigstring", .{
