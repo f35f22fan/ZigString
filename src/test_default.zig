@@ -494,6 +494,19 @@ test "Char At" {
     }
 }
 
+test "Slice functions" {
+    String.ctx = try Context.New(alloc);
+    defer String.ctx.deinit();
+
+    const heap = try String.From(JoseStr);
+    defer heap.deinit();
+
+    const idx = heap.indexOfUtf8("\u{65}\u{301}", .{}) orelse return error.Other;
+    const slice = heap.midSlice(idx);
+
+    mtl.debug(@src(), "slice: {}", .{slice});
+}
+
 // test "Qt chars" {
 //     String.ctx = try Context.New(alloc);
 //     defer String.ctx.deinit();

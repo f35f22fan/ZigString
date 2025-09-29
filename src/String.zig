@@ -402,6 +402,10 @@ pub const Index = struct {
         self.gr += input.gr;
     }
 
+    pub fn addNew(self: Index, input: Index) Index {
+        return Index {.cp = self.cp + input.cp, .gr = self.gr + input.gr};
+    }
+
     pub fn addOne(self: *Index) void {
         self.cp += 1;
         self.gr += 1;
@@ -534,12 +538,24 @@ pub const Slice = struct {
         return Slice {.str = s, .start = start1, .end = end1};
     }
 
+    inline fn codepoint_count(self: Slice) usize {
+        return self.end.cp - self.start.cp;
+    }
+
     pub fn isEmpty(self: Slice) bool {
         return self.end.gr <= self.start.gr;
     }
 
     pub fn size(self: Slice) usize {
         return self.end.gr - self.start.gr;
+    }
+
+    pub fn new(self: Slice, start: Index, end: Index) Slice {
+        return Slice {
+            .str = self.str,
+            .start = self.start.addNew(start),
+            .end = self.start.addNew(end),
+        };
     }
 
     pub fn toUtf8(self: Slice) !ArrayList(u8) {
@@ -1011,7 +1027,7 @@ pub fn dupAsCstrAlloc(self: String, a: Allocator) ![]u8 {
 }
 
 const Comparison = struct {
-    cs: CaseSensitive = CaseSensitive.Yes,
+    cs: CaseSensitive = .Yes,
 };
 
 pub fn endsWithUtf8(self: String, phrase: []const u8, cmp: Comparison) bool {
@@ -1223,45 +1239,8 @@ pub fn findManySimd(self: String, needles: ConstCpSlice, from_index: ?Index, com
 }
 
 pub fn findOneSimd(self: String, needle: Codepoint, from: usize, comptime vec_len: u16) ?usize {
-    const sd = self.d orelse return null;
-    const haystack = sd.codepoints.items[from..];
-    const vector_needles: @Vector(vec_len, Codepoint) = @splat(needle);
-    // {0, 1, 2, 3, 4, 5, 6, 7, ..vec_len-1?}
-    const vec_indices = std.simd.iota(Codepoint, vec_len);
-    // Code points greater than 0x10FFFF are invalid (Unicode standard)
-    const nulls: @Vector(vec_len, Codepoint) = @splat(0x10FFFF + 1);
-    var pos: usize = 0;
-
-    while (pos < haystack.len) {
-        if ((haystack.len - pos) < vec_len) {
-            // fallback to a normal scan when our input (or what's left of
-            // it is smaller than our vec_len)
-            const ret = std.mem.indexOfScalarPos(Codepoint, haystack, pos, needle);
-            const index = if (ret) |k| (k + from) else null;
-            // out.print("{s} found={?}(from={}), fallback to normal scan\n",
-            // .{@src().fn_name, index, from}) catch {};
-
-            return index;
-        }
-
-        const h: @Vector(vec_len, Codepoint) = haystack[pos..][0..vec_len].*;
-        const does_match = h == vector_needles;
-
-        if (@reduce(.Or, does_match)) { // does it have any true value, if so,
-            // we have a match, we just need to find its index
-            const result = @select(Codepoint, does_match, vec_indices, nulls);
-
-            const index = pos + @reduce(.Min, result);
-            // out.print("{s} returning FoundAt={}, from={}\n",
-            // .{@src().fn_name, index + from, from}) catch {};
-            return index + from;
-        }
-
-        pos += vec_len;
-    }
-
-    //out.print("{s} nothing, end of func\n", .{@src().fn_name}) catch {};
-    return null;
+    const data = self.d orelse return null;
+    return findOneSimd_core(data.codepoints.items[0..], needle, from, vec_len);
 }
 
 pub fn findOneSimdFromEnd(self: String, needle: Codepoint, start: ?usize, comptime vector_len: ?u16) ?usize {
@@ -1391,22 +1370,24 @@ inline fn getConstPointer(self: *const String) ?*const Data {
     return null;
 }
 
-pub fn findIndex(self: String, grapheme_index: usize) ?Index {
+pub fn findIndex(self: String, grapheme_count: usize) ?Index {
     const sd = self.d orelse return null;
-    if (grapheme_index >= sd.grapheme_count) {
-        return if (grapheme_index == sd.grapheme_count) self.afterLast() else null;
+    if (grapheme_count >= sd.grapheme_count) {
+        return if (grapheme_count == sd.grapheme_count) self.afterLast() else null;
     }
     
-    var cp_index: isize = -1;
-    var current_grapheme: isize = -1;
-    for (sd.graphemes.items[0..]) |k| {
-        cp_index += 1;
+    var current_gr_count: isize = -1;
+    for (sd.graphemes.items[0..], 0..) |k, cp_index| {
         if (k == 1) {
-            current_grapheme += 1;
-        }
+            current_gr_count += 1;
 
-        if (current_grapheme == grapheme_index)
-            return Index{ .cp = @abs(cp_index), .gr = grapheme_index };
+            if (current_gr_count == grapheme_count)
+                return Index{ .cp = cp_index, .gr = grapheme_count };
+        }
+    }
+
+    if (grapheme_count == 0) {
+        return .{};
     }
 
     return null;
@@ -1518,8 +1499,8 @@ pub fn indexOfUtf8_2(self: String, input: []const u8, find: Args) ?Index {
 pub fn indexOfCpSlice(self: String, needles: CpSlice, find: Args) ?Index {
     if (needles.len == 0)
         return null;
-    const sd = self.d orelse return null;
-    if (find.cs == CaseSensitive.Yes and sd.codepoints.items.len >= SimdVecLen) {
+    const data = self.d orelse return null;
+    if (find.cs == CaseSensitive.Yes and data.codepoints.items.len >= SimdVecLen) {
         return self.findManySimd(needles, find.from, SimdVecLen);
     }
     return self.findManyLinear(needles, find.from, find.cs);
@@ -1631,9 +1612,9 @@ pub fn isWordBoundary(self: String, at: Index) bool {
     return previous.isWordChar();
 }
 
-pub fn isNumber(self: String, at: Index) bool {
-    const gr = self.charAtIndex(at) orelse return false;
-    return gr.isNumber();
+pub fn isDigit(self: String, at: Index) bool {
+    const cp = self.charAtIndexOneCp(at) orelse return false;
+    return cp >= '0' and cp <= '9';
 }
 
 pub fn isWordChar(self: String, at: Index) bool {
@@ -2247,7 +2228,6 @@ pub fn afterLast(self: String) Index { // returns index past last grapheme
     return Index {.cp = sd.codepoints.items.len, .gr = sd.grapheme_count};
 }
 
-/// returns `Index` of the first item
 pub fn strStart() Index {
     return Index{};
 }
@@ -2501,6 +2481,47 @@ pub fn toBlob(self: String, alloc: Allocator) ![]const u8 {
     //     .{Num.New(under_u8), Num.New(under_u16), Num.New(full_size)});
 
     return memory;
+}
+
+fn findOneSimd_core(codepoints: []Codepoint, needle: Codepoint, from: usize, comptime vec_len: u16) ?usize {
+    // const codepoints = sd.codepoints.items[from..];
+    const vector_needles: @Vector(vec_len, Codepoint) = @splat(needle);
+    // {0, 1, 2, 3, 4, 5, 6, 7, ..vec_len-1?}
+    const vec_indices = std.simd.iota(Codepoint, vec_len);
+    // Code points greater than 0x10FFFF are invalid (Unicode standard)
+    const nulls: @Vector(vec_len, Codepoint) = @splat(0x10FFFF + 1);
+    var pos: usize = 0;
+
+    while (pos < codepoints.len) {
+        if ((codepoints.len - pos) < vec_len) {
+            // fallback to a normal scan when our input (or what's left of
+            // it is smaller than our vec_len)
+            const ret = std.mem.indexOfScalarPos(Codepoint, codepoints, pos, needle);
+            const index = if (ret) |k| (k + from) else null;
+            // out.print("{s} found={?}(from={}), fallback to normal scan\n",
+            // .{@src().fn_name, index, from}) catch {};
+
+            return index;
+        }
+
+        const h: @Vector(vec_len, Codepoint) = codepoints[pos..][0..vec_len].*;
+        const does_match = h == vector_needles;
+
+        if (@reduce(.Or, does_match)) { // does it have any true value, if so,
+            // we have a match, we just need to find its index
+            const result = @select(Codepoint, does_match, vec_indices, nulls);
+
+            const index = pos + @reduce(.Min, result);
+            // out.print("{s} returning FoundAt={}, from={}\n",
+            // .{@src().fn_name, index + from, from}) catch {};
+            return index + from;
+        }
+
+        pos += vec_len;
+    }
+
+    //out.print("{s} nothing, end of func\n", .{@src().fn_name}) catch {};
+    return null;
 }
 
 const posix = (builtin.target.os.tag != .windows);
