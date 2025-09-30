@@ -1116,23 +1116,23 @@ pub const Group = struct {
                 break;
             } else if (gr.eqAscii('?')) {
                 const s: *String = &self.regex.pattern;
-                if (s.matchesAscii("?:", gr.idx)) |idx| {
+                if (s.matchesAscii("?:", .{.from=gr.idx})) |idx| {
                     str_iter.continueFrom(idx);
                     try addMeta(current_arr, .NonCapture);
                     // self.non_capture = true;
-                } else if (s.matchesAscii("?!", gr.idx)) |idx_past| {
+                } else if (s.matchesAscii("?!", .{.from=gr.idx})) |idx_past| {
                     str_iter.continueFrom(idx_past);
                     try addMeta(current_arr, .NegativeLookAhead);
-                } else if (s.matchesAscii("?<!", gr.idx)) |idx| {
+                } else if (s.matchesAscii("?<!", .{.from=gr.idx})) |idx| {
                     str_iter.continueFrom(idx);
                     try addMeta(current_arr, .NegativeLookBehind);
-                } else if (s.matchesAscii("?=", gr.idx)) |idx| {
+                } else if (s.matchesAscii("?=", .{.from=gr.idx})) |idx| {
                     str_iter.continueFrom(idx);
                     try addMeta(current_arr, .PositiveLookAhead);
-                } else if (s.matchesAscii("?<=", gr.idx)) |idx| {
+                } else if (s.matchesAscii("?<=", .{.from=gr.idx})) |idx| {
                     str_iter.continueFrom(idx);
                     try addMeta(current_arr, .PositiveLookBehind);
-                } else if (s.matchesAscii("?<", gr.idx)) |idx| { //(?<name>\\w+) = name = e.g."Jordan"
+                } else if (s.matchesAscii("?<", .{.from=gr.idx})) |idx| { //(?<name>\\w+) = name = e.g."Jordan"
                     str_iter.continueFrom(idx);
                     // named capture
                     if (s.indexOfAscii(">", .{.from = idx.addRaw("?<".len)})) |closing_idx| {

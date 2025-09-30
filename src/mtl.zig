@@ -30,7 +30,7 @@ pub inline fn warn(src: std.builtin.SourceLocation, comptime fmt: []const u8, ar
 }
 
 pub inline fn trace(src: std.builtin.SourceLocation) void {
-    debug(src, "{{trace}}", .{});
+    debug(src, "===================={{trace}}", .{});
 }
 
 pub inline fn wtf(src: std.builtin.SourceLocation) void {

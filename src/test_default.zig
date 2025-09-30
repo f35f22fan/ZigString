@@ -363,11 +363,19 @@ test "Char At" {
 
     const str = try String.From(JoseStr);
     defer str.deinit();
+    // try str.printCodepoints(@src());
 
     const needles = try String.FromAscii("se");
     defer needles.deinit();
     if (str.indexOf(needles, .{})) |idx| {
         try expect(idx.eq(.{.cp=6, .gr=5}));
+    }
+
+    const from = Index{.cp=2, .gr=2};
+    if (str.indexOf(needles, .{.from=from})) |idx| {
+        try expect(idx.eq(Index{.cp=6, .gr=5}));
+    } else {
+        return error.NotFound;
     }
 
     // toCpAscii() is slightly faster than toCp()
@@ -418,7 +426,7 @@ test "Char At" {
     }
     
     {
-        var it = both_ways.iteratorFrom(both_ways.beforeLast());
+        var it = both_ways.iteratorFromEnd();
         while (it.prev()) |gr| { // ends up printing "ésoJ"
             std.debug.print("{}", .{gr});
         }
@@ -481,12 +489,11 @@ test "Char At" {
         }
 
         { // backwards from string end
-            const idx = s.beforeLast();
-            var it = s.iteratorFrom(idx);
+            var iter = s.iteratorFromEnd();
             const correct = [_] Index { .{.cp=3, .gr=3}, .{.cp=2, .gr=2},
                 .{.cp=1, .gr=1}, .{.cp=0, .gr=0}};
             var i: usize = 0;
-            while (it.prev()) |gr| {
+            while (iter.prev()) |gr| {
                 try expect(gr.idx.eq(correct[i]));
                 i += 1;
             }
@@ -500,11 +507,51 @@ test "Slice functions" {
 
     const heap = try String.From(JoseStr);
     defer heap.deinit();
+    {
+        const needle_utf8 = "\u{65}\u{301}";
+        const idx = heap.indexOfUtf8(needle_utf8, .{}) orelse return error.NotFound;
+        const slice = heap.midSlice(idx);
+        const needle_str = try String.From(needle_utf8);
+        defer needle_str.deinit();
+        const needle_idx = slice.indexOf(needle_str, .{}) orelse return error.NotFound;
+        try expect(needle_idx.eq(.{.cp=0, .gr=0}));
+    }
 
-    const idx = heap.indexOfUtf8("\u{65}\u{301}", .{}) orelse return error.Other;
-    const slice = heap.midSlice(idx);
+    { // slice indexOf other slice
+        const slice_start = heap.indexOfAscii("se", .{}) orelse return error.NotFound;
+        const slice = heap.midSlice(slice_start);
 
-    mtl.debug(@src(), "slice: {}", .{slice});
+        const needle_start = heap.indexOfUtf8("\u{65}\u{301} ", .{.from=slice_start}) orelse return error.NotFound;
+        const needle_end = heap.indexOfAscii("a", .{.from = needle_start}) orelse return error.NotFound;
+        const needle_slice = heap.slice(needle_start, needle_end);
+        
+        if (slice.indexOfSlice(needle_slice, .{})) |idx| {
+            // mtl.debug(@src(), "slice:{dt}, needle_slice:{dt}, idx:{}", .{slice, needle_slice, idx});
+            try expect(idx.cp == 5 and idx.gr == 5);
+        } else {
+            return error.NotFound;
+        }
+    }
+
+    { // matches
+        const start = heap.indexOfAscii("se", .{}) orelse return error.NotFound;
+        const slice = heap.midSlice(start);
+        // mtl.debug(@src(), "{dt}, charAt(5):{?}", .{slice, slice.charAt(5)});
+        if (slice.charAt(5)) |g| {
+            try expect(g.eqUtf8("\u{65}\u{301}"));
+        } else {
+            return error.NotFound;
+        }
+
+        if (slice.charAt(7)) |g| {
+            try expect(g.eqUtf8("a"));
+        } else {
+            return error.NotFound;
+        }
+
+        const idx = slice.findIndex(7) orelse return error.NotFound;
+        try expect (slice.matchesAscii("a", .{.from=idx}) != null);
+    }
 }
 
 // test "Qt chars" {

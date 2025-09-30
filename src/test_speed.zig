@@ -64,6 +64,9 @@ fn FindManySimd(haystack: String, needles: ConstCpSlice, from: ?Index, comptime 
         const buf = try String.utf8_from_slice(alloc, needles);
         defer buf.deinit();
         mtl.debug(@src(), "Not found '{s}' from={?}, haystack.cp_count={}", .{buf.items, from, haystack.size_cp()});
+        if (haystack.size() < 50) {
+            mtl.debug(@src(), "Haystack: {dt}", .{haystack});
+        }
         return Error.NotFound;
     };
     const done_in = getTime() - start_time;

@@ -34,25 +34,8 @@ const KeepEmptyParts = String.KeepEmptyParts;
 const DesktopFile = @import("DesktopFile.zig").DesktopFile;
 const theme = String.Theme.Dark;
 
-test "Random Stuff" {
-    if (true)
-        return error.SkipZigTest;
-
-    String.ctx = try Context.New(alloc);
-    defer String.ctx.deinit();
-
-    const list = try io.listFilesUtf8(alloc, .Home, "Documents");
-    defer {
-        for (list.items) |item| {
-            mtl.debug(@src(), "{s}", .{item.name});
-            item.deinit(alloc);
-        }
-        list.deinit();
-    }
-}
-
 test "Desktop File" {
-    if (true)
+    if (false)
         return error.SkipZigTest;
 
     String.ctx = try Context.New(alloc);
@@ -280,27 +263,6 @@ fn addRus(to: *String, line: *const String, speaking: ?Speaking) !void {
     
     try ru.add(line.*);
     try to.addConsume(ru);
-}
-
-test "Matrix" {
-    if (true)
-        return error.SkipZigTest;
-
-    const mat = [_][5]f32{
-        [_]f32{ 1.0, 0.0, 0.0, 0.0, 0.0 },
-        [_]f32{ 0.0, 1.0, 0.0, 1.0, 0.0 },
-        [_]f32{ 0.0, 0.0, 1.0, 0.0, 0.0 },
-        [_]f32{ 0.0, 0.0, 0.0, 1.0, 9.9 },
-    };
-    //mtl.debug(@src(), "Matrix: {any}", .{mat});
-    const stdout = std.io.getStdOut().writer();
-    for (mat) |row| {
-        for (row) |col| {
-            try stdout.print("{d} \n", .{col});
-        }
-    }
-
-    try stdout.print("\n", .{});
 }
 
 test "Translate En to Ru" {
