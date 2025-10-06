@@ -387,25 +387,21 @@ test "Char At" {
     // But thanks to this it can hold an arbitrary long grapheme cluster
     // and doesn't need a deinit() call.
     try expect(str.charAt(2).?.eqCp(letter_s));
-    try expect(str.charAt(32).?.eqAscii('e'));
+    try expect(str.charAt(32).?.eqCp('e'));
 
     const at: usize = 1;
-    if (str.charAt(at)) |g| {
-        try expect(!g.eqAscii('a'));
-        try expect(g.eqAscii('o'));
-        try expect(!g.eqAscii('G'));
-        try expect(!g.eqUtf8("\u{65}\u{301}"));
-    } else {
-        std.debug.print("Nothing found at {}\n", .{at});
+    {
+        const gr = str.charAt(at) orelse return error.NotFound;
+        try expect(!gr.eqCp('a'));
+        try expect(gr.eqCp('o'));
+        try expect(!gr.eqCp('G'));
+        try expect(!gr.eqUtf8("\u{65}\u{301}"));
     }
 
-    if (str.charAt(3)) |g| {
-        // const slice = g.getSlice() orelse return;
-        // std.debug.print("{s}(): Grapheme len={}, slice=\"{any}\", index={}\n",
-        //     .{@src().fn_name, g.len, slice, g.index()});
-        // mtl.debug(@src(), "grapheme len={}", .{g.len});
-        try expect(g.eqUtf8("\u{65}\u{301}"));
-        try expect(!g.eqAscii('G'));
+    {
+        const gr = str.charAt(3) orelse return error.NotFound;
+        try expect(gr.eqUtf8("\u{65}\u{301}"));
+        try expect(!gr.eqCp('G'));
     }
 
     const str_ru = try String.From("Жизнь");
@@ -413,34 +409,48 @@ test "Char At" {
     try expect(str_ru.startsWithUtf8("Ж", .{}));
     try expect(str_ru.charAt(4).?.eqUtf8("ь"));
 
-    // So here's usage of charAtIndex() which is used to efficiently
-    // iterate over a string to print it forth and then backwards:
+    // So here's usage of charAtIndex() which is used to *efficiently*
+    // iterate over a string forth and then backwards.
+    // The usage of "\u{65}\u{301}" (2 codepoints)
+    // instead of "é" (1 codepoint) is intentional to test that it
+    // iterates over graphemes, not codepoints:
     const both_ways = try String.From("Jos\u{65}\u{301}"); // "José"
     defer both_ways.deinit();
     {
+        var result = String.New();
+        defer result.deinit();
         var it = both_ways.iterator();
-        while (it.next()) |gr| { // ends up printing "José"
-            std.debug.print("{}", .{gr}); // the grapheme's index is at gr.idx
+        while (it.next()) |gr| {
+            try result.addGrapheme(gr); // the grapheme's index is at gr.idx
         }
-        std.debug.print("\n", .{});
+        
+        try expect(both_ways.equals(result, .{}));
     }
     
     {
+        const correct = "\u{65}\u{301}soJ"; // "ésoJ"
+        var result = String.New();
+        defer result.deinit();
         var it = both_ways.iteratorFromEnd();
-        while (it.prev()) |gr| { // ends up printing "ésoJ"
-            std.debug.print("{}", .{gr});
+        while (it.prev()) |gr| {
+            try result.addGrapheme(gr);
         }
-        std.debug.print("\n", .{});
+        
+        try expect(result.equalsUtf8(correct, .{}));
     }
 
     {
         // let's iterate from let's say the location of "s":
+        const correct = "s\u{65}\u{301}"; // "sé"
+        var result = String.New();
+        defer result.deinit();
         if (both_ways.indexOfAscii("s", .{})) |idx| {
             var it = both_ways.iteratorFrom(idx);
-            while (it.next()) |gr| { // prints "sé"
-                std.debug.print("{}", .{gr});
+            while (it.next()) |gr| {
+                try result.addGrapheme(gr);
             }
-            std.debug.print("\n", .{});
+            
+            try expect(result.equalsUtf8(correct, .{}));
         }
     }
 
@@ -449,14 +459,14 @@ test "Char At" {
     try expect(str_ch.charAt(0).?.eqUtf8("好"));
     try expect(str_ch.charAt(3).?.eqUtf8("见"));
     try expect(str_ch.charAt(8).?.eqUtf8("？"));
-    try expect(!str_ch.charAt(1).?.eqAscii('A'));
+    try expect(!str_ch.charAt(1).?.eqCp('A'));
 
-    if (true) {
-        const s = try String.From("Jos\u{65}\u{301}");
-        defer s.deinit();
+    {
+        const jose = try String.From("Jos\u{65}\u{301}");
+        defer jose.deinit();
         {
-            if (s.indexOfAscii("s", .{})) |idx| { // iterate from letter "s"
-                var it = s.iteratorFrom(idx);
+            if (jose.indexOfAscii("s", .{})) |idx| { // iterate from letter "s"
+                var it = jose.iteratorFrom(idx);
                 const correct = [_] Index {.{.cp=2, .gr=2}, .{.cp=3, .gr=3}};
                 var i: usize = 0;
                 while (it.next()) |gr| {
@@ -467,7 +477,7 @@ test "Char At" {
         }
 
         { // from zero
-            var it = s.iterator();
+            var it = jose.iterator();
             const correct = [_] Index {.{.cp=0, .gr=0}, .{.cp=1, .gr=1},
                 .{.cp=2, .gr=2}, .{.cp=3, .gr=3}};
             var i: usize = 0;
@@ -478,18 +488,19 @@ test "Char At" {
         }
 
         { // backwards from a certain point
-            const idx = String.Index {.cp = 2, .gr = 2};
-            var it = s.iteratorFrom(idx);
-            const correct = [_] Index { .{.cp=2, .gr=2}, .{.cp=1, .gr=1}, .{.cp=0, .gr=0}};
+            const idx = String.Index {.cp = 3, .gr = 3};
+            var it = jose.iteratorFrom(idx);
+            const correct = [_] Index {.{.cp=3, .gr=3}, .{.cp=2, .gr=2}, .{.cp=1, .gr=1}, .{.cp=0, .gr=0}};
             var i: usize = 0;
             while (it.prev()) |gr| {
+                // mtl.debug(@src(), "{} vs {}", .{gr.idx, correct[i]});
                 try expect(gr.idx.eq(correct[i]));
                 i += 1;
             }
         }
 
         { // backwards from string end
-            var iter = s.iteratorFromEnd();
+            var iter = jose.iteratorFromEnd();
             const correct = [_] Index { .{.cp=3, .gr=3}, .{.cp=2, .gr=2},
                 .{.cp=1, .gr=1}, .{.cp=0, .gr=0}};
             var i: usize = 0;
@@ -514,43 +525,55 @@ test "Slice functions" {
         const needle_str = try String.From(needle_utf8);
         defer needle_str.deinit();
         const needle_idx = slice.indexOf(needle_str, .{}) orelse return error.NotFound;
-        try expect(needle_idx.eq(.{.cp=0, .gr=0}));
+        // try heap.printGraphemes(@src());
+        // try slice.printGraphemes(@src());
+        // mtl.debug(@src(), "result: {}", .{needle_idx});
+        try expect(needle_idx.eqCpGr(3, 3));
     }
 
     { // slice indexOf other slice
         const slice_start = heap.indexOfAscii("se", .{}) orelse return error.NotFound;
         const slice = heap.midSlice(slice_start);
 
-        const needle_start = heap.indexOfUtf8("\u{65}\u{301} ", .{.from=slice_start}) orelse return error.NotFound;
-        const needle_end = heap.indexOfAscii("a", .{.from = needle_start}) orelse return error.NotFound;
-        const needle_slice = heap.slice(needle_start, needle_end);
-        
-        if (slice.indexOfSlice(needle_slice, .{})) |idx| {
-            // mtl.debug(@src(), "slice:{dt}, needle_slice:{dt}, idx:{}", .{slice, needle_slice, idx});
-            try expect(idx.cp == 5 and idx.gr == 5);
-        } else {
-            return error.NotFound;
-        }
+        const needle_start = slice.indexOfUtf8("\u{65}\u{301} ", .{}) orelse return error.NotFound;
+        const needle_end = slice.indexOfAscii("a", .{}) orelse return error.NotFound;
+        const needle_slice = heap.slice(needle_start, needle_end); // needle_slice="é "
+        const idx = slice.indexOfSlice(needle_slice, .{}) orelse return error.NotFound;
+        // mtl.debug(@src(), "slice:{dt}, needle_slice:{dt}, indexOfSlice:{}, slice_start:{}", .{slice, needle_slice, idx, slice_start});
+        try expect(idx.eqCpGr(11, 10));
     }
 
     { // matches
         const start = heap.indexOfAscii("se", .{}) orelse return error.NotFound;
         const slice = heap.midSlice(start);
-        // mtl.debug(@src(), "{dt}, charAt(5):{?}", .{slice, slice.charAt(5)});
-        if (slice.charAt(5)) |g| {
-            try expect(g.eqUtf8("\u{65}\u{301}"));
-        } else {
-            return error.NotFound;
-        }
+        
+        const g5 = slice.charAt(5) orelse return error.NotFound;
+        try expect(g5.eqUtf8("\u{65}\u{301}"));
 
-        if (slice.charAt(7)) |g| {
-            try expect(g.eqUtf8("a"));
-        } else {
-            return error.NotFound;
-        }
+        const g7 = slice.charAt(7) orelse return error.NotFound;
+        try expect(g7.eqUtf8("a"));
 
+        try expect (slice.matchesAscii("a", .{.from=g7.idx}) != null);
+        const g = slice.next(g7.idx) orelse return error.NotFound;
+        try expect(g.eqCp(' '));
+    }
+
+    { // lastIndexOf
+        const start = heap.indexOfAscii("se", .{}) orelse return error.NotFound;
+        const slice = heap.midSlice(start);
+        const idx = slice.lastIndexOfUtf8("\u{65}\u{301}", .{}) orelse return error.NotFound;
+        try expect(idx.eqCpGr(11, 10));
+
+        const idx_a = slice.lastIndexOfAscii("a", .{}) orelse return error.NotFound;
+        try expect(idx_a.eqCpGr(31, 29));
+    }
+
+    { // find index
+        const start = heap.indexOfAscii("se", .{}) orelse return error.NotFound;
+        const slice = heap.midSlice(start);
         const idx = slice.findIndex(7) orelse return error.NotFound;
-        try expect (slice.matchesAscii("a", .{.from=idx}) != null);
+        const gr = slice.charAtIndex(idx) orelse return error.NotFound;
+        try expect(gr.idx.eqCpGr(14, 12) and gr.eqCp('a'));
     }
 }
 

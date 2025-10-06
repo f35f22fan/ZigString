@@ -853,7 +853,7 @@ pub const Group = struct {
         if (startsWithMeta(tokens.items, .SymbolStartOfLine)) {
             if (at.cp != 0) {
                 const gr = haystack.prev(at) orelse return null;
-                if (!gr.eqAscii('\n')) {
+                if (!gr.eqCp('\n')) {
                     return null;
                 }
             }
@@ -1051,7 +1051,7 @@ pub const Group = struct {
 
         if (!at.isPast(haystack) and startsWithMeta(tokens.items, .SymbolEndOfLine)) {
             const gr = haystack.charAtIndex(at) orelse return null;
-            if (!gr.eqAscii('\n')) {
+            if (!gr.eqCp('\n')) {
                 return null;
             }
         }
@@ -1086,7 +1086,7 @@ pub const Group = struct {
         var current_arr: *ArrayList(Token) = &self.token_arr.items[0];
 
         while (str_iter.next()) |gr| {
-            if (gr.eqAscii('[')) {
+            if (gr.eqCp('[')) {
                 if (self.hasContent()) {
                     var new_group = Group.New(self.regex, self);
                     new_group.match_type = .AnyOf;
@@ -1096,10 +1096,10 @@ pub const Group = struct {
                 } else {
                     self.match_type = .AnyOf;
                 }
-            } else if (gr.eqAscii(']')) {
+            } else if (gr.eqCp(']')) {
                 ret_idx = gr.idx.addRaw(1);
                 break;
-            } else if (gr.eqAscii('(')) {
+            } else if (gr.eqCp('(')) {
                 if (self.hasContent() or self.isTop()) {
                     mtl.trace(@src());
                     var new_group = Group.New(self.regex, self);
@@ -1111,10 +1111,10 @@ pub const Group = struct {
                     mtl.trace(@src());
                     self.match_type = .All;
                 }
-            } else if (gr.eqAscii(')')) {
+            } else if (gr.eqCp(')')) {
                 ret_idx = gr.idx.addRaw(1);
                 break;
-            } else if (gr.eqAscii('?')) {
+            } else if (gr.eqCp('?')) {
                 const s: *String = &self.regex.pattern;
                 if (s.matchesAscii("?:", .{.from=gr.idx})) |idx| {
                     str_iter.continueFrom(idx);
@@ -1145,7 +1145,7 @@ pub const Group = struct {
                 } else { // just "?"
                     try addQtty(current_arr, Qtty.ZeroOrOne());
                 }
-            } else if (gr.eqAscii('{')) {
+            } else if (gr.eqCp('{')) {
                 const s: *String = &self.regex.pattern;
                 if (s.indexOfAscii("}", .{.from = gr.idx.addRaw(1)})) |idx| {
                     const qtty_in_curly = try s.betweenIndices(gr.idx.addRaw("}".len), idx);
@@ -1157,30 +1157,30 @@ pub const Group = struct {
                 } else {
                     mtl.debug(@src(), "Not found closing '}}'", .{});
                 }
-            } else if (gr.eqAscii('\\')) {
+            } else if (gr.eqCp('\\')) {
                 const symbol = str_iter.next() orelse break;
-                if (symbol.eqAscii('d')) {
+                if (symbol.eqCp('d')) {
                     try addMeta(current_arr, Meta.SymbolNumber);
-                } else if (symbol.eqAscii('D')) {
+                } else if (symbol.eqCp('D')) {
                     try addMeta(current_arr, Meta.SymbolNonNumber);
-                } else if (symbol.eqAscii('w')) {
+                } else if (symbol.eqCp('w')) {
                     try addMeta(current_arr, Meta.SymbolWordChar);
-                } else if (symbol.eqAscii('W')) {
+                } else if (symbol.eqCp('W')) {
                     try addMeta(current_arr, Meta.SymbolNonWordChar);
-                } else if (symbol.eqAscii('s')) {
+                } else if (symbol.eqCp('s')) {
                     try addMeta(current_arr, Meta.SymbolWhitespace);
-                } else if (symbol.eqAscii('S')) {
+                } else if (symbol.eqCp('S')) {
                     try addMeta(current_arr, Meta.SymbolNonWhitespace);
-                } else if (symbol.eqAscii('.')) {
+                } else if (symbol.eqCp('.')) {
                     try addAscii(current_arr, "."); // literally the dot character
-                } else if (symbol.eqAscii('b')) {
+                } else if (symbol.eqCp('b')) {
                     try addMeta(current_arr, Meta.SymbolWordBoundary);
-                } else if (symbol.eqAscii('B')) {
+                } else if (symbol.eqCp('B')) {
                     try addMeta(current_arr, Meta.SymbolNonWordBoundary);
-                } else if (symbol.eqAscii('|')) {
+                } else if (symbol.eqCp('|')) {
                     try addAscii(current_arr, "|");
                 }
-            } else if (gr.eqAscii('^')) {
+            } else if (gr.eqCp('^')) {
                 if (gr.idx.gr == 0) {
                     // self.must_start_on_line = true;
                     try addMeta(current_arr, .SymbolStartOfLine);
@@ -1188,35 +1188,35 @@ pub const Group = struct {
                     // mtl.debug(@src(), "Adding .Not to {?}, current_arr.len={}", .{self.id, current_arr.items.len});
                     try addMeta(current_arr, Meta.Not);
                 }
-            } else if (gr.eqAscii('+')) {
+            } else if (gr.eqCp('+')) {
                 var q = Qtty.OneOrMore();
                 if (str_iter.next()) |ng| {
-                    if (ng.eqAscii('?')) {
+                    if (ng.eqCp('?')) {
                         q.lazy = true;
                     } else {
                         str_iter.continueFrom(gr.idx.addRaw(1));
                     }
                 }
                 try addQtty(current_arr, q);
-            } else if (gr.eqAscii('*')) {
+            } else if (gr.eqCp('*')) {
                 var q = Qtty.OneOrMore();
                 if (str_iter.next()) |ng| {
-                    if (ng.eqAscii('?')) {
+                    if (ng.eqCp('?')) {
                         q.lazy = true;
                     } else {
                         str_iter.continueFrom(gr.idx.addRaw(1));
                     }
                 }
                 try addQtty(current_arr, Qtty.ZeroOrMore());
-            } else if (gr.eqAscii('\n')) {
+            } else if (gr.eqCp('\n')) {
                 try addMeta(current_arr, Meta.SymbolNewLine);
-            } else if (gr.eqAscii('\t')) {
+            } else if (gr.eqCp('\t')) {
                 try addMeta(current_arr, Meta.SymbolTab);
-            } else if (gr.eqAscii('.')) {
+            } else if (gr.eqCp('.')) {
                 try addMeta(current_arr, Meta.SymbolAnyChar);
-            } else if (gr.eqAscii('$')) {
+            } else if (gr.eqCp('$')) {
                 try addMeta(current_arr, .SymbolEndOfLine);
-            } else if (gr.eqAscii('|')) {
+            } else if (gr.eqCp('|')) {
                 if (current_arr.items.len == 0) {
                     return error.Parsing;
                 }

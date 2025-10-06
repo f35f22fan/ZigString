@@ -15,6 +15,7 @@ const CaseFold = @import("CaseFold");
 const ScriptsData = @import("ScriptsData");
 
 const String = @import("String.zig").String;
+const mtl = String.mtl;
 const CaseSensitive = String.CaseSensitive;
 const Codepoint = String.Codepoint;
 const CodepointSlice = String.CpSlice;
@@ -164,7 +165,6 @@ pub fn init(self: *DesktopFile) !void {
             current_hash_opt = self.groups.getPtr(name_cstr) orelse break;
             continue;
         }
-        //try line.print(std.debug, "Line: ");
         var current_hash: *KVHash = current_hash_opt orelse break;
         var kv = try line.split("=", .{});
         defer {
@@ -178,8 +178,6 @@ pub fn init(self: *DesktopFile) !void {
         defer key.deinit();
         const value = if (kv.items.len == 2) try kv.items[1].Clone() else String.New();
         const final_key = try key.dupAsCstrAlloc(self.alloc);
-        // std.debug.print("\"{s}\"=>\"{s}{}{s}\"\n",
-        // .{final_key, String.COLOR_BLUE, value, String.COLOR_DEFAULT});
         try current_hash.put(final_key, value);
     }
 }
