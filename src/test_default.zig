@@ -575,6 +575,54 @@ test "Slice functions" {
         const gr = slice.charAtIndex(idx) orelse return error.NotFound;
         try expect(gr.idx.eqCpGr(14, 12) and gr.eqCp('a'));
     }
+
+    { // before last
+        // try heap.printGraphemes(@src());
+        const start = heap.indexOfAscii("se", .{}) orelse return error.NotFound;
+        const end = heap.indexOfAscii(" S", .{.from=start}) orelse return error.NotFound;
+        const slice = heap.slice(start, end);
+        const gr = slice.charAtIndex(slice.beforeLast()) orelse return error.NotFound;
+        // mtl.debug(@src(), "slice:{dt}, gr:{dt}, gr.idx:{}", .{slice, gr, gr.idx});
+        try expect(gr.eqCp('a') and gr.idx.eqCpGr(14, 12));
+    }
+
+    { // slice iterators
+        const start = heap.indexOfAscii("se", .{}) orelse return error.NotFound;
+        const end = heap.indexOfAscii(" S", .{.from=start}) orelse return error.NotFound;
+        const slice = heap.slice(start, end);
+        // mtl.debug(@src(), "slice:{dt}", .{slice});
+
+        {
+            var iter = slice.iterator();
+            var str_iter = heap.iteratorFrom(start);
+            while (iter.next()) |gr| {
+                const c = str_iter.next() orelse return error.NotFound;
+                // mtl.debug(@src(), "gr:{dt} vs {dt}", .{gr, c});
+                try expect(gr.eq(c, .Yes));
+            }
+        }
+
+        {
+            var iter = slice.iteratorFromEnd();
+            var str_iter = heap.iteratorFrom(slice.beforeLast());
+            while (iter.prev()) |gr| {
+                const c = str_iter.prev() orelse return error.NotFound;
+                try expect(gr.eq(c, .Yes));
+                // mtl.debug(@src(), "gr(back):{dt}", .{gr});
+            }
+        }
+
+        {
+            const from = slice.indexOfUtf8("u", .{}) orelse return error.NotFound;
+            var str_iter = heap.iteratorFrom(from);
+            var iter = slice.iteratorFrom(from);
+            while (iter.prev()) |gr| {
+                const c = str_iter.prev() orelse return error.NotFound;
+                try expect(gr.eq(c, .Yes));
+                // mtl.debug(@src(), "gr(from):{dt}", .{gr});
+            }
+        }
+    }
 }
 
 // test "Qt chars" {

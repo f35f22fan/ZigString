@@ -61,7 +61,8 @@ Example:<br/>
 
     const at = hello_world.indexOfAscii("lo", .{});
     if (at) |index| {
-        try expect(index.gr == 3); // .gr=grapheme, .cp=codepoint
+        // mtl.debug(@src(), "at={}", .{index});
+        try expect(index.gr == 3);
     } else {
         std.debug.print("IndexOf \"lo\" not found", .{});
     }
@@ -75,41 +76,51 @@ Example:<br/>
     try expect(sub2.equalsUtf8("lo, World!", .{}));
     
     // Efficient iteration over graphemes:
-     const both_ways = try String.From("Jos\u{65}\u{301}"); // "José"
+    const both_ways = try String.From("Jos\u{65}\u{301}"); // "José"
     defer both_ways.deinit();
     {
+        var result = String.New();
+        defer result.deinit();
         var it = both_ways.iterator();
-        while (it.next()) |gr| { // ends up printing "José"
-            std.debug.print("{}", .{gr}); // the grapheme's index is at gr.idx
+        while (it.next()) |gr| {
+            try result.addGrapheme(gr); // the grapheme's index is at gr.idx
         }
-        std.debug.print("\n", .{});
+        
+        try expect(both_ways.equals(result, .{}));
     }
     
     {
-        var it = both_ways.iteratorFrom(both_ways.beforeLast());
-        while (it.prev()) |gr| { // ends up printing "ésoJ"
-            std.debug.print("{}", .{gr});
+        const correct = "\u{65}\u{301}soJ"; // "ésoJ"
+        var result = String.New();
+        defer result.deinit();
+        var it = both_ways.iteratorFromEnd();
+        while (it.prev()) |gr| {
+            try result.addGrapheme(gr);
         }
-        std.debug.print("\n", .{});
+        
+        try expect(result.equalsUtf8(correct, .{}));
     }
 
     {
         // let's iterate from let's say the location of "s":
+        const correct = "s\u{65}\u{301}"; // "sé"
+        var result = String.New();
+        defer result.deinit();
         if (both_ways.indexOfAscii("s", .{})) |idx| {
             var it = both_ways.iteratorFrom(idx);
-            while (it.next()) |gr| { // prints "sé"
-                std.debug.print("{}", .{gr});
+            while (it.next()) |gr| {
+                try result.addGrapheme(gr);
             }
-            std.debug.print("\n", .{});
+            
+            try expect(result.equalsUtf8(correct, .{}));
         }
     }
 
-    // Some Chinese:
     const str_ch = try String.From("好久不见，你好吗？");
     defer str_ch.deinit();
     try expect(str_ch.charAt(0).?.eqUtf8("好"));
     try expect(str_ch.charAt(3).?.eqUtf8("见"));
     try expect(str_ch.charAt(8).?.eqUtf8("？"));
-    try expect(!str_ch.charAt(1).?.eqAscii('A'));
+    try expect(!str_ch.charAt(1).?.eqCp('A'));
 
 ```

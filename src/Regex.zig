@@ -1237,7 +1237,7 @@ pub const Group = struct {
             return idx;
         }
 
-        return str_iter.idx;
+        return str_iter.position;
     }
 
     fn parseRange(s: String, tokens: *ArrayList(Token)) !void {

@@ -337,27 +337,39 @@ pub fn Iterator(comptime T: type) type {
 
 pub const StringIterator = struct {
     first_time: bool = true,
-    idx: Index,
+    position: Index,
     str: *const String,
+    start_cp: ?usize = null,
+    end_cp: ?usize = null,
 
     pub fn New(str: *const String, from: ?Index) StringIterator {
         const idx = if (from) |i| i else Index.strStart();
-        return StringIterator {.str = str, .idx = idx};
+        return StringIterator {.str = str, .position = idx};
+    }
+
+    pub fn NewFromSlice(s: *const Slice, from: ?Index) StringIterator {
+        const idx = if (from) |i| i else s.start;
+        return StringIterator{.str = s.str, .position = idx, .start_cp = s.start.cp,
+        .end_cp = s.end.cp};
     }
 
     pub fn continueFrom(self: *StringIterator, idx: Index) void {
-        self.idx = idx;
+        self.position = idx;
         self.first_time = true;
     }
 
     pub fn nextIndex(self: *StringIterator) ?Index {
         if (self.first_time) {
             self.first_time = false;
-            return self.idx;
+            return self.position;
         }
         
         const data = self.str.d orelse return null;
-        return if (self.idx.next(data.codepoints_.items[0..], data.graphemes_.items[0..])) self.idx else null;
+        if (self.position.next(data.codepoints_.items[0..], data.graphemes_.items[0..], self.end_cp)) {
+            return self.position;
+        }
+
+        return null;
     }
 
     pub fn next(self: *StringIterator) ?Grapheme {
@@ -367,7 +379,7 @@ pub const StringIterator = struct {
 
     pub fn nextFrom(self: *StringIterator, idx: Index) ?Grapheme {
         self.first_time = false;
-        self.idx = idx;
+        self.position = idx;
         return self.next();
     }
 
@@ -379,17 +391,20 @@ pub const StringIterator = struct {
     pub fn prevIndex(self: *StringIterator) ?Index {
         if (self.first_time) {
             self.first_time = false;
-            return self.idx;
+            return self.position;
         }
 
         const data = self.str.d orelse return null;
-        return if (self.idx.prev(data.codepoints_.items.len, data.graphemes_.items[0..]))
-        self.idx else null;
+        if (self.position.prev(data.codepoints_.items.len, data.graphemes_.items[0..], self.start_cp)) {
+            return self.position;
+        }
+        
+        return null;
     }
 
     pub fn prevFrom(self: *StringIterator, idx: Index) ?Grapheme {
         self.first_time = false;
-        self.idx = idx;
+        self.position = idx;
         return self.prev();
     }
 };
@@ -445,29 +460,34 @@ pub const Index = struct {
         _ = try writer.print("Index{{cp={},gr={}}}", .{ self.cp, self.gr });
     }
 
-    pub fn hasNext(self: Index, s: *const String) bool {
-        const sd = s.d orelse return false;
-        return self.cp < sd.codepoints_.items.len;
-    }
-
     pub fn isPast(self: Index, s: *const String) bool {
         const d = s.d orelse return false;
         return self.gr >= d.grapheme_count;
     }
 
-    fn next(self: *Index, codepoints: ConstCpSlice, graphemes: GraphemeSlice) bool {
+    fn next(self: *Index, codepoints: ConstCpSlice, graphemes: GraphemeSlice, limit: ?usize) bool {
         if (self.cp >= codepoints.len) {
             return false;
         }
 
+        const saved_cp = self.cp;
         self.cp += 1;
         for (graphemes[(self.cp)..], 0..) |gr_bit, i| {
             if (gr_bit == 1) {
                 self.cp += i;
+                if (limit) |lim| {
+                    if (self.cp >= lim) {
+                        self.cp = saved_cp;
+                        return false;
+                    }
+                }
+                
                 self.gr += 1;
                 return true;
             }
         }
+
+        self.cp = saved_cp;
 
         return false;
     }
@@ -475,7 +495,7 @@ pub const Index = struct {
     pub fn nextIndex(self: *const Index, s: *const String) ?Index {
         var mut_idx: Index = self.*;
         const data = s.d orelse return null;
-        if (mut_idx.next(data.codepoints_.items[0..], data.graphemes_.items[0..])) {
+        if (mut_idx.next(data.codepoints_.items[0..], data.graphemes_.items[0..], null)) {
             return mut_idx;
         }
 
@@ -491,7 +511,7 @@ pub const Index = struct {
         return Index {.cp = self.cp + input.cp, .gr = self.gr + input.gr};
     }
 
-    fn prev(self: *Index, cp_count: usize, graphemes: GraphemeSlice) bool {
+    fn prev(self: *Index, cp_count: usize, graphemes: GraphemeSlice, limit: ?usize) bool {
         if (self.cp == 0 or self.cp > cp_count)
             return false;
 
@@ -500,6 +520,12 @@ pub const Index = struct {
         while (i >= 0) : (i -= 1) {
             const b = graphemes[@intCast(i)];
             if (b == 1) {
+                if (limit) |lim| {
+                    const ilim: isize = @intCast(lim);
+                    if (i < ilim) {
+                        return false;
+                    }
+                }
                 self.cp = @intCast(i);
                 self.gr -= 1;
                 return true;
@@ -512,7 +538,7 @@ pub const Index = struct {
     fn prevIndex(self: *Index, s: *const String) ?Index {
         const data = s.d orelse return null;
         var mut_idx: Index = self.*;
-        if (mut_idx.prev(data.codepoints_.items.len, data.graphemes_.items[0..])) {
+        if (mut_idx.prev(data.codepoints_.items.len, data.graphemes_.items[0..], null)) {
             return mut_idx;
         }
 
@@ -561,8 +587,12 @@ pub const Slice = struct {
     }
 
     pub fn beforeLast(self: *const Slice) Index { // returns index before last grapheme
-        const data = self.d orelse return .{};
+        const data = self.str.d orelse return .{};
         var i: usize = self.codepoint_count();
+        if (i == 0) {
+            return .{};
+        }
+
         const gr_slice = self.graphemes(data);
         while (i > 0) {
             i -= 1;
@@ -661,13 +691,13 @@ pub const Slice = struct {
     pub fn indexOf(self: *const Slice, input: String, args: Args) ?Index {
         const input_data = input.d orelse return null;
         const data = self.str.d orelse return null;
-        var from = args.from;
-        if (from.cp == 0 and self.start.cp != 0) {
-            from = self.start;
+        var a = args;
+        if (a.from.cp == 0 and self.start.cp != 0) {
+            a.from = self.start;
         }
 
         const idx = indexOfCpSlice_real(data.codepoints(), data.graphemes(),
-        input_data.codepoints_.items[0..], .{.cs=args.cs, .from=from}) orelse return null;
+        input_data.codepoints_.items[0..], a) orelse return null;
 
         return idx;
     }
@@ -675,41 +705,53 @@ pub const Slice = struct {
     pub fn indexOfAscii(self: Slice, input: []const u8, args: Args) ?Index {
         const needles = toCodepointsFromAscii(ctx.a, input) catch return null;
         defer needles.deinit();
-        var from = args.from;
-        if (from.cp == 0 and self.start.cp != 0) {
-            from = self.start;
+        var a = args;
+        if (a.from.cp == 0 and self.start.cp != 0) {
+            a.from = self.start;
         }
 
         const data = self.str.d orelse return null;
-        return indexOfCpSlice_real(data.codepoints(), data.graphemes(),
-            needles.items, .{.cs=args.cs, .from=from});
+        return indexOfCpSlice_real(data.codepoints(), data.graphemes(), needles.items, a);
     }
 
     pub fn indexOfSlice(self: *const Slice, input: Slice, args: Args) ?Index {
         const data = self.str.d orelse return null;
         const input_codepoints = input.getCpSlice() orelse return null;
-        var from = args.from;
-        if (from.cp == 0 and self.start.cp != 0) {
-            from = self.start;
+        var a = args;
+        if (a.from.cp == 0 and self.start.cp != 0) {
+            a.from = self.start;
         }
+
         const idx = indexOfCpSlice_real(data.codepoints(), data.graphemes(),
-            input_codepoints, .{.cs=args.cs, .from=from}) orelse return null;
+            input_codepoints, a) orelse return null;
         
         return idx;
     }
 
     pub fn indexOfUtf8(self: *const Slice, input: []const u8, args: Args) ?Index {
         const data = self.str.d orelse return null;
-        var from = args.from;
-        if (from.cp == 0 and self.start.cp != 0) {
-            from = self.start;
+       var a = args;
+        if (a.from.cp == 0 and self.start.cp != 0) {
+            a.from = self.start;
         }
-        return indexOfUtf8_real(data.codepoints(), data.graphemes(), input,
-            .{.cs=args.cs, .from=from});
+
+        return indexOfUtf8_real(data.codepoints(), data.graphemes(), input, a);
     }
 
     pub fn isEmpty(self: Slice) bool {
         return self.start.gr == self.end.gr;
+    }
+
+    pub fn iterator(self: *const Slice) StringIterator {
+        return StringIterator.NewFromSlice(self, null);
+    }
+
+    pub fn iteratorFrom(self: *const Slice, from: Index) StringIterator {
+        return StringIterator.NewFromSlice(self, from);
+    }
+
+    pub fn iteratorFromEnd(self: *const Slice) StringIterator {
+        return self.iteratorFrom(self.beforeLast());
     }
 
     fn lastIndexGeneric(self: *const Slice, comptime T: type, needles: []const T, args: Args) ?Index {
@@ -748,25 +790,24 @@ pub const Slice = struct {
         return self.lastIndexOf(s, args);
     }
 
-    pub fn matches(self: *const Slice, input: *const String, args: Args) ?Index {// `args.FROM` MUST BE ABSOLUTE!!, THUS DEFAULT CONSTRUCTOR IS MISLEADING.
+    pub fn matches(self: *const Slice, input: *const String, args: Args) ?Index {
         const data = self.str.d orelse return null;
-        var from = args.from;
-        if (from.cp == 0 and self.start.cp != 0) {
-            from = self.start;
+        var a = args;
+        if (a.from.cp == 0 and self.start.cp != 0) {
+            a.from = self.start;
         }
 
-        return matches_real(data.codepoints(), data.graphemes(), input,
-        .{.cs=args.cs, .from=from});
+        return matches_real(data.codepoints(), data.graphemes(), input, a);
     }
 
     pub fn matchesAscii(self: *const Slice, input: []const u8, args: Args) ?Index {
         const data = self.str.d orelse return null;
-        var from = args.from;
-        if (from.cp == 0 and self.start.cp != 0) {
-            from = self.start;
+        var a = args;
+        if (a.from.cp == 0 and self.start.cp != 0) {
+            a.from = self.start;
         }
-        return matchesAscii_real(data.codepoints(), data.graphemes(), input,
-        .{.cs=args.cs, .from=from});
+
+        return matchesAscii_real(data.codepoints(), data.graphemes(), input, a);
     }
 
     pub fn matchesUtf8(self: Slice, input: []const u8, args: Args) ?Index {
@@ -787,7 +828,7 @@ pub const Slice = struct {
     pub fn nextIndex(self: *const Slice, idx: Index) ?Index {
         const data = self.str.d orelse return null;
         var mut_idx: Index = idx;
-        if (!mut_idx.next(data.codepoints(), data.graphemes())) {
+        if (!mut_idx.next(data.codepoints(), data.graphemes(), null)) {
             return null;
         }
 
@@ -802,7 +843,7 @@ pub const Slice = struct {
     pub fn prevIndex(self: *const Slice, idx: Index) ?Index {
         const data = self.str.d orelse return null;
         var mut_idx: Index = idx;
-        if (!mut_idx.prev(data.codepoints(), data.graphemes())) {
+        if (!mut_idx.prev(data.codepoints(), data.graphemes(), null)) {
             return null;
         }
 
@@ -2121,6 +2162,10 @@ pub fn startsWithSlice(self: String, needles: CpSlice, cmp: Comparison) bool {
 pub fn beforeLast(self: String) Index { // returns index before last grapheme
     const sd = self.d orelse return strStart();
     var i: usize = sd.codepoints_.items.len;
+    if (i == 0) {
+        return .{};
+    }
+
     while (i > 0) {
         i -= 1;
         if (sd.graphemes_.items[i] == 1) {
