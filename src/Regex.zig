@@ -84,7 +84,8 @@ pub const Item = struct {
         }
 
         lb_group.look_around.looking_behind = true;
-        mtl.debug(@src(), "lb_group.id:{?}, from:{}", .{lb_group.id, from});
+        const negative = lb_group.look_around.negative_lookbehind;
+        mtl.debug(@src(), "lb_group.id:{?}, from:{}, negative:{}", .{lb_group.id, from, negative});
         const idx = lb_group.matches(haystack, from);
         mtl.debug(@src(), "<<<<<<<===== idx:{?}", .{idx});
         lb_group.look_around.looking_behind = false;
@@ -722,8 +723,8 @@ pub const Group = struct {
             }
         }
 
-        try writer.print("{s}Group:{?} {} (parent:{?}) {s}", .{String.COLOR_ORANGE,
-        self.id, self.match_type, self.parent_id, String.COLOR_DEFAULT});
+        try writer.print("{s}Group:{?} {} (parent:{?}) {s}", .{mtl.COLOR_ORANGE,
+        self.id, self.match_type, self.parent_id, mtl.COLOR_DEFAULT});
         for (self.token_arr.items, 0..) |arr, array_index| {
             for (arr.items, 0..) |t, item_index| {
                 if (array_index > 0 and item_index == 0) {
@@ -731,10 +732,10 @@ pub const Group = struct {
                 }
                 switch (t.data) {
                     .group => |g| {
-                        try writer.print("{s}Group={?}{s} ", .{String.COLOR_BLUE, g.id, String.COLOR_DEFAULT});
+                        try writer.print("{s}Group={?}{s} ", .{mtl.COLOR_BLUE, g.id, mtl.COLOR_DEFAULT});
                     },
                     .qtty => |q| {
-                        try writer.print("{s}{}{s} ", .{String.COLOR_GREEN, q, String.COLOR_DEFAULT});
+                        try writer.print("{s}{}{s} ", .{mtl.COLOR_GREEN, q, mtl.COLOR_DEFAULT});
                     },
                     .meta => |m| {
                         try printMeta(writer, m);
@@ -746,7 +747,7 @@ pub const Group = struct {
                         try writer.print("{dt} ", .{s});
                     },
                     .range => |r| {
-                        try writer.print("{s}{}{s} ", .{String.COLOR_MAGENTA, r, String.COLOR_DEFAULT});
+                        try writer.print("{s}{}{s} ", .{mtl.COLOR_MAGENTA, r, mtl.COLOR_DEFAULT});
                     }
                 }
             }
@@ -859,8 +860,8 @@ pub const Group = struct {
         // the last grapheme that qtty refers to.
         const last_gr_index = needles.beforeLast(); // when "abc?" or "abc+"
         const needles_minus_last = needles.leftSlice(last_gr_index);
-        mtl.debug(@src(), "needles_base:{dt}, needles:{dt}, haystack:{dt}",
-            .{needles_minus_last, needles, haystack});
+        // mtl.debug(@src(), "needles_base:{dt}, needles:{dt}, haystack:{dt}",
+            // .{needles_minus_last, needles, haystack});
         var at = haystack.start;
         {
             const args = self.createArgs();
@@ -901,17 +902,19 @@ pub const Group = struct {
     }
 
     fn matchAllBehind(self: *const Group, haystack: Slice, needles: Slice, qtty: Qtty, not: bool) ?Index {
-        _ = self;
         const last_gr = needles.lastChar() orelse return null;
-        // mtl.debug(@src(), "haystack: {dt}, needles: {dt}, last_char:{dt}, qtty: {}", .{haystack, needles, last_gr, qtty});
-
+        if (TraceLB) {
+            mtl.debug(@src(), "haystack: {dt}, needles: {dt}, last_char:{dt}, qtty: {}", .{haystack, needles, last_gr, qtty});
+        }
+        
+        const negative = self.look_around.negative_lookbehind or not;
         var count: usize = 0;
-        _ = &count;
         var haystack_iter = haystack.iteratorFromEnd();
         var at: ?Index = null;
         while (haystack_iter.prev()) |char| {
             // mtl.debug(@src(), "{dt} vs {dt}", .{char, last_gr});
-            if (char.eq(last_gr, .Yes)) {
+            const found = char.eq(last_gr, .Yes);
+            if (found) {
                 at = char.idx;
                 count += 1;
             } else {
@@ -924,8 +927,11 @@ pub const Group = struct {
         }
 
         if (count < qtty.a) {
-            mtl.debug(@src(), "not enough: {} for {dt}", .{count, last_gr});
-            return null;
+            const result = if (negative) haystack.end else null;
+            mtl.debug(@src(), "count({}) < qtty.a({}) for {dt}, not_value={}, result={?}",
+                .{count, qtty.a, last_gr, negative, result});
+            
+            return result;
         }
 
         const base = needles.slice(.{}, needles.beforeLast());
@@ -935,7 +941,7 @@ pub const Group = struct {
         if (h.endsWith(base)) |pos| {
             retval = if (not) null else pos;
         } else {
-            if (not) {
+            if (negative) {
                 retval = haystack.findIndexFromEnd(base.size());
             } else {
                 retval = null;
@@ -957,12 +963,11 @@ pub const Group = struct {
         const direction: Direction = if (any_lb) .Back else .Forward;
         var retval: ?Index = null;
         while (string_iter.go(direction)) |gr| {
-            const gr_match = gr.eq(hgr, args.cs);
+            var ok = gr.eq(hgr, args.cs);
             if (not) {
-                if (gr_match) {
-                    return null;
-                }
-            } else if (gr_match) {
+                ok = !ok;
+            }
+            if (ok) {
                 if (negative_lookahead) {
                     retval = args.from;
                     break;
@@ -1440,7 +1445,7 @@ pub const Group = struct {
     }
 
     fn printMeta(writer: anytype, m: Meta) !void {
-         try writer.print("{s}{}{s} ", .{String.COLOR_CYAN, m, String.COLOR_DEFAULT});
+         try writer.print("{s}{}{s} ", .{mtl.COLOR_CYAN, m, mtl.COLOR_DEFAULT});
     }
 
     pub fn printTokens(self: Group) void {
@@ -1631,9 +1636,10 @@ fn Search(alloc: Allocator, pattern: []const u8, input: []const u8) !void {
     try input_str.printGraphemes(@src());
 
     for (0..std.math.maxInt(usize)) |i| {
-        mtl.debug(@src(), "New Search #{} =======>", .{i});
+        mtl.debug(@src(), "{s}Search #{} =======>{s}", .{mtl.COLOR_ORANGE, i, mtl.COLOR_DEFAULT});
         if (regex.searchNext()) |currently_at| {
-            mtl.debug(@src(), "Success! Search ended at {}, found: {?dt}", .{currently_at, regex.found});
+            mtl.debug(@src(), "{s}Success!{s} Search ended at {}, found: {?dt}\n",
+            .{mtl.BGCOLOR_ORANGE, mtl.COLOR_DEFAULT, currently_at, regex.found});
         } else {
             break;
         }
@@ -1670,7 +1676,7 @@ test "Test regex" {
     String.ctx = try String.Context.New(alloc);
     defer String.ctx.deinit();
 
-    if (false) {
+    if (true) {
         const pattern = \\(?<=[abc]xyz+\s)(\s\d{2,}ab)
 ;
         const input = "bxyz  789ab cxyzz  012ab";
@@ -1678,8 +1684,15 @@ test "Test regex" {
     }
 
     if (true) {
+        const pattern = \\(?<!mnp\s)(\s\d{2,}ab)
+;
+        const input = "bxyz  789ab cxyzz  012ab";
+        try Search(alloc, pattern, input);
+    }
+
+    if (true) {
         const pattern =
-\\=(=-){2,5}(AB|CD{2})[EF|^GH](?<ClientName>\w+)(?:БГД[^zyA-Z0-9c1-3]opq(?!05))xyz{2,3}(?=\d{2,})$
+\\=(=-){2,5}(AB|CD{2})[EF|^GH](?=Mi\S{2})(?<ClientName>\w+)(?:БГД[^zyA-Z0-9c1-3]opq(?!05))xyz{2,3}(?=\d{2,})$
 ;
         const input = "A==-=-CDDKMikeБГДaopqxyzz567\n";
         try Search(alloc, pattern, input);
@@ -1694,6 +1707,5 @@ test "Test regex" {
 
 // (?<!) – negative lookbehind
 // (?<=) – positive lookbehind
-// \b\w+(?<!s)\b. This is definitely not the same as \b\w+[^s]\b
 
-// Excel formula example: =SUM(B1+0.3,20.9,-2.4+3*MAX(18,7),B2,C1:C2,MIN(A1,5))*(-3+2)
+// \b\w+(?<!s)\b. This is definitely not the same as \b\w+[^s]\b

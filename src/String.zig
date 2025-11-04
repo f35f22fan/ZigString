@@ -490,7 +490,7 @@ pub const Index = struct {
     pub fn format(self: Index, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         _ = fmt;
         _ = options;
-        _ = try writer.print("Index{{cp={},gr={}}}", .{ self.cp, self.gr });
+        _ = try writer.print("{{cp={},gr={}}}", .{ self.cp, self.gr });
     }
 
     pub fn isPast(self: Index, s: *const String) bool {
@@ -601,10 +601,10 @@ pub fn printBytes(buf: ArrayList(u8), comptime fmt: []const u8, writer: anytype)
     if (fmt.len == 2) {
         const fmtstr = "{s}{s}{s}{s}{s}";
         if (std.mem.eql(u8, fmt, "dt")) { // hilite for dt="Dark Theme"
-            try writer.print(fmtstr, .{COLOR_BLACK, BGCOLOR_YELLOW, buf.items, BGCOLOR_DEFAULT, COLOR_DEFAULT});
+            try writer.print(fmtstr, .{mtl.COLOR_BLACK, mtl.BGCOLOR_YELLOW, buf.items, mtl.BGCOLOR_DEFAULT, mtl.COLOR_DEFAULT});
             return;
         } else if (std.mem.eql(u8, fmt, "lt")) {// hilite for lt="Light Theme"
-            try writer.print(fmtstr, .{COLOR_BLACK, BGCOLOR_YELLOW, buf.items, BGCOLOR_DEFAULT, COLOR_DEFAULT});
+            try writer.print(fmtstr, .{mtl.COLOR_BLACK, mtl.BGCOLOR_YELLOW, buf.items, mtl.BGCOLOR_DEFAULT, mtl.COLOR_DEFAULT});
             return;
         }
     }
@@ -2005,7 +2005,7 @@ pub fn prevIndex(self: *const String, idx: Index) ?Index {
 }
 
 pub fn printInfo(self: String, src: std.builtin.SourceLocation, msg: ?[] const u8) void {
-    const color = if (string_theme == Theme.Light) COLOR_DEFAULT else COLOR_GREEN;
+    const color = if (string_theme == Theme.Light) mtl.COLOR_DEFAULT else mtl.COLOR_GREEN;
     const info = if (msg) |k| k else "String.printInfo(): ";
     if (self.size() <= 255) {
         mtl.debug(src, "{s}[gr={},cp={}]={s}\"{s}\"", .{ info, Num.New(self.size()), Num.New(self.size_cp()), color, self});
@@ -2015,9 +2015,9 @@ pub fn printInfo(self: String, src: std.builtin.SourceLocation, msg: ?[] const u
 }
 
 const print_format_str = "{s}{}{s}{s}|{s}|{s}{s}{s}{s} ";
-const nl_chars = UNDERLINE_START ++ "(LF)" ++ UNDERLINE_END;
-const cr_chars = UNDERLINE_START ++ "(CR)" ++ UNDERLINE_END;
-const crnl_chars = UNDERLINE_START ++ "(CR/LF)" ++ UNDERLINE_END;
+const nl_chars = mtl.UNDERLINE_START ++ "(LF)" ++ mtl.UNDERLINE_END;
+const cr_chars = mtl.UNDERLINE_START ++ "(CR)" ++ mtl.UNDERLINE_END;
+const crnl_chars = mtl.UNDERLINE_START ++ "(CR/LF)" ++ mtl.UNDERLINE_END;
 
 fn printCpBuf(out: anytype, cp_buf: ArrayList(Codepoint), gr_index: isize, see_as: SeeAs, attr: Attr) !void {
     const theme = string_theme;
@@ -2051,16 +2051,16 @@ fn printCpBuf(out: anytype, cp_buf: ArrayList(Codepoint), gr_index: isize, see_a
         }
     }
 
-    const cp_color: []const u8 = if (see_as == SeeAs.PartOfGrapheme) COLOR_GREEN else COLOR_MAGENTA;
-    var final_fg: []const u8 = if (theme == Theme.Light) COLOR_BLACK else cp_color;
+    const cp_color: []const u8 = if (see_as == SeeAs.PartOfGrapheme) mtl.COLOR_GREEN else mtl.COLOR_MAGENTA;
+    var final_fg: []const u8 = if (theme == Theme.Light) mtl.COLOR_BLACK else cp_color;
     if (attr == Attr.Codepoint) {
-        final_fg = COLOR_RED ++ BOLD_START;
+        final_fg = mtl.COLOR_RED ++ mtl.BOLD_START;
     }
 
-    const end_final_fg = if (attr == Attr.Codepoint) COLOR_DEFAULT ++ BOLD_END else COLOR_DEFAULT;
-    const num_color = if (theme == Theme.Light) "\x1B[38;5;196m" else COLOR_YELLOW;
-    out.print(print_format_str, .{ COLOR_BLUE, gr_index, COLOR_DEFAULT, final_fg,
-        cp_as_str, end_final_fg, num_color, codepoints_str, COLOR_DEFAULT });
+    const end_final_fg = if (attr == Attr.Codepoint) mtl.COLOR_DEFAULT ++ mtl.BOLD_END else mtl.COLOR_DEFAULT;
+    const num_color = if (theme == Theme.Light) mtl.COLOR_OTHER else mtl.COLOR_YELLOW;
+    out.print(print_format_str, .{ mtl.COLOR_BLUE, gr_index, mtl.COLOR_DEFAULT, final_fg,
+        cp_as_str, end_final_fg, num_color, codepoints_str, mtl.COLOR_DEFAULT });
 }
 
 pub fn printCodepoints(self: String, src: std.builtin.SourceLocation) !void {
@@ -3005,7 +3005,7 @@ pub fn print(self: String, src: std.builtin.SourceLocation, msg: []const u8) voi
 
 pub threadlocal var string_theme = Theme.Dark;
 pub fn print_out(src: std.builtin.SourceLocation, msg: ?String) void {
-    const color = if (string_theme == Theme.Light) COLOR_DEFAULT else COLOR_GREEN;
+    const color = if (string_theme == .Light) mtl.COLOR_DEFAULT else mtl.COLOR_GREEN;
     const info = if (msg) |s| s else String.New();
     mtl.debug(src, "{dt}{s}", .{info, color});
 }
@@ -3058,33 +3058,3 @@ pub fn printGraphemes_real(codepoints: ConstCpSlice, graphemes: GraphemeSlice, s
     try printCpBuf(out, cp_buf, gr_index, SeeAs.PartOfGrapheme, Attr.Ignore);
     out.print("\n", .{});
 }
-
-const posix = (builtin.target.os.tag != .windows);
-
-pub const COLOR_BLACK = if (posix) "\x1B[38;5;16m" else "";
-pub const COLOR_BLUE = if (posix) "\x1B[34m" else "";
-pub const COLOR_CYAN = if (posix) "\x1B[36m" else "";
-pub const COLOR_DEFAULT = if (posix) "\x1B[0m" else "";
-pub const COLOR_GREEN = if (posix) "\x1B[32m" else "";
-pub const COLOR_LIGHTGRAY = if (posix) "\x1B[37m" else "";
-pub const COLOR_MAGENTA = if (posix) "\x1B[35m" else "";
-pub const COLOR_ORANGE = if (posix) "\x1B[0;33m" else "";
-pub const COLOR_RED = if (posix) "\x1B[0;91m" else "";
-pub const COLOR_YELLOW = if (posix) "\x1B[93m" else "";
-
-pub const BGCOLOR_BLACK = if (posix) "\x1B[40m" else "";
-pub const BGCOLOR_BLUE = if (posix) "\x1B[44m" else "";
-pub const BGCOLOR_DEFAULT = if (posix) "\x1B[49m" else "";
-pub const BGCOLOR_GREEN = if (posix) "\x1B[42m" else "";
-pub const BGCOLOR_LIGHTGRAY = if (posix) "\x1B[47m" else "";
-pub const BGCOLOR_MAGENTA = if (posix) "\x1B[45m" else "";
-pub const BGCOLOR_ORANGE = if (posix) "\x1B[43m" else "";
-pub const BGCOLOR_RED = if (posix) "\x1B[41m" else "";
-pub const BGCOLOR_YELLOW = if (posix) "\x1B[103m" else "";
-
-pub const BLINK_START = if (posix) "\x1B[5m" else "";
-pub const BLINK_END = if (posix) "\x1B[25m" else "";
-pub const BOLD_START = if (posix) "\x1B[1m" else "";
-pub const BOLD_END = if (posix) "\x1B[0m" else "";
-pub const UNDERLINE_START = if (posix) "\x1B[4m" else "";
-pub const UNDERLINE_END = if (posix) "\x1B[0m" else "";
