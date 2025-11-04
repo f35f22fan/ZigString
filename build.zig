@@ -123,7 +123,7 @@ fn addZgImport(target: anytype, zg: *std.Build.Dependency) void {
     target.root_module.addImport("code_point", zg.module("code_point"));
     target.root_module.addImport("grapheme", zg.module("Graphemes")); // 
     target.root_module.addImport("LetterCasing", zg.module("LetterCasing"));//
-    target.root_module.addImport("GenCatData", zg.module("GeneralCategories"));//GenCatData
+    target.root_module.addImport("GeneralCategories", zg.module("GeneralCategories"));
     // target.root_module.addImport("PropsData", zg.module("PropsData"));
     target.root_module.addImport("Normalize", zg.module("Normalize"));
     target.root_module.addImport("CaseFolding", zg.module("CaseFolding")); // CaseFold

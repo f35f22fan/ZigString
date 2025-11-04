@@ -12,7 +12,7 @@ const Context = String.Context;
 const Index = String.Index;
 const KeepEmptyParts = String.KeepEmptyParts;
 // Don't change this string, many tests depend on it:
-const JoseStr = "Jos\u{65}\u{301} se fu\u{65}\u{301} a Sevilla sin pararse";
+const JoseUtf8 = "Jos\u{65}\u{301} se fu\u{65}\u{301} a Sevilla sin pararse";
 const theme = String.Theme.Dark;
 
 test "Append Test" {
@@ -20,22 +20,27 @@ test "Append Test" {
     defer String.ctx.deinit();
 
     const additional = "[Ещё]";
-    const correct_cstr = JoseStr ++ additional;
+    const correct_cstr = JoseUtf8 ++ additional;
 
-    var main_str = try String.From(JoseStr);
+    var main_str = try String.From(JoseUtf8);
     defer main_str.deinit();
     try main_str.addUtf8(additional);
     
     var bytes_buf = try main_str.toUtf8();
     defer bytes_buf.deinit();
     try expectEqualStrings(bytes_buf.items, correct_cstr);
+
+    const jose = try String.From(JoseUtf8);
+    defer jose.deinit();
+    try expect(jose.endsWithAscii("rarse", .{}));
+    try expect(!jose.endsWithAscii("abc", .{}));
 }
 
 test "Get Grapheme Index" {
     String.ctx = try Context.New(alloc);
     defer String.ctx.deinit();
 
-    const main_str = try String.From(JoseStr);
+    const main_str = try String.From(JoseUtf8);
     defer main_str.deinit();
     // std.debug.print("String cp count: {}, gr count={}\n", .{main_str.codepoints.items.len,
     //     main_str.grapheme_count});
@@ -266,7 +271,7 @@ test "Split" {
     String.ctx = try Context.New(alloc);
     defer String.ctx.deinit();
 
-    const main_str = try String.From(JoseStr);
+    const main_str = try String.From(JoseUtf8);
     defer main_str.deinit();
     // the next 2 functions help the developer to visually dissect a string:
     // try main_str.printGraphemes(@src());
@@ -361,7 +366,7 @@ test "Char At" {
     String.ctx = try Context.New(alloc);
     defer String.ctx.deinit();
 
-    const str = try String.From(JoseStr);
+    const str = try String.From(JoseUtf8);
     defer str.deinit();
     // try str.printCodepoints(@src());
 
@@ -516,7 +521,7 @@ test "Slice functions" {
     String.ctx = try Context.New(alloc);
     defer String.ctx.deinit();
 
-    const heap = try String.From(JoseStr);
+    const heap = try String.From(JoseUtf8);
     defer heap.deinit();
     {
         const needle_utf8 = "\u{65}\u{301}";

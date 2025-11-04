@@ -35,7 +35,7 @@ const DesktopFile = @import("DesktopFile.zig").DesktopFile;
 const theme = String.Theme.Dark;
 
 test "Desktop File" {
-    if (false)
+    if (true)
         return error.SkipZigTest;
 
     String.ctx = try Context.New(alloc);
@@ -295,7 +295,7 @@ test "Translate En to Ru" {
         const txt_name = try String.From(entry.name);
         defer txt_name.deinit();
         var html_name = try txt_name.Clone();
-        try html_name.changeExtension(".html");
+        try html_name.changeToAsciiExtension(".html");
         try filenames.append(html_name);
         if (only_last) {
             if (last_txt_name) |ln| {
@@ -400,7 +400,7 @@ fn CreateHtmlIndex(filenames: ArrayList(String)) !void {
 }
 
 fn Translate(dirpath: String, filename: String) !void {
-    const txt_fullpath = try String.From2(dirpath, filename);
+    const txt_fullpath = try dirpath.CloneWith(filename);
     defer txt_fullpath.deinit();
     mtl.debug(@src(), "{dt}", .{txt_fullpath});
     const contents_u8 = try io.readFile(alloc, txt_fullpath);
@@ -512,7 +512,7 @@ fn Translate(dirpath: String, filename: String) !void {
     try html.addAscii("</body></html>");
 
     var html_fn = try filename.Clone();
-    try html_fn.changeExtension(".html");
+    try html_fn.changeToAsciiExtension(".html");
     defer html_fn.deinit();
     const relative_path = try String.Concat(tloo_path, html_fn);
     defer relative_path.deinit();

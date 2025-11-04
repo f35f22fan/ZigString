@@ -2,8 +2,11 @@ const std = @import("std");
 const ArrayList = std.ArrayList;
 const String = @import("String.zig");
 const Grapheme = String.Grapheme;
+const Direction = String.Direction;
 const Index = String.Index;
 const Slice = String.Slice;
+const Charset = String.Charset;
+const CharsetArgs = String.CharsetArgs;
 const CaseSensitive = String.CaseSensitive;
 const Args = String.Args;
 const StringIterator = String.StringIterator;
@@ -14,9 +17,281 @@ const Regex = @This();
 const Allocator = std.mem.Allocator;
 const IdType = u16;
 
+const TraceLA: bool = false; // Debug Look Ahead
+const TraceLB: bool = false; // Debug Look Behind
+const TraceGroupResult: bool = true;
+
+pub const FindParams = struct {
+    qtty: Qtty = Qtty.One(),
+    cs: CaseSensitive = .Yes,
+    from: Index = Index.strStart(),
+};
+
 const Error = error {
     BadRange,
     Parsing,
+};
+
+pub const EvalAs = enum(u8) {
+    Or,
+    Not,
+};
+
+pub const GraphemeRange = struct {
+    a: Cp,
+    b: Cp,
+
+    pub fn New(a: Cp, b: Cp) GraphemeRange {
+        return .{.a = a, .b = b};
+    }
+
+    pub fn within(self: GraphemeRange, input: Slice, cs: CaseSensitive) bool {
+        var cp = input.charAtIndexOneCp(input.start) orelse return false;
+        if (cs == .Yes) {
+            // mtl.debug(@src(), "cp={}, self.a={}, self.b={}", .{cp, self.a, self.b});
+            return cp >= self.a and cp <= self.b;
+        }
+        
+        cp = String.toLowerCp(cp);
+        const a1 = String.toLowerCp(self.a);
+        const b1 = String.toLowerCp(self.b);
+        const flag = cp >= a1 and cp <= b1;
+        // mtl.debug(@src(), "cp={}, self.a={}, self.b={}", .{cp, a1, b1});
+
+        return flag;
+    }
+
+    pub fn format(self: GraphemeRange, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = fmt;
+        _ = options;
+        try writer.print("Range{{{}-{}}}", .{self.a, self.b});
+    }
+};
+
+pub const Item = struct {
+    data: ItemData = undefined,
+    lb: ?*Group = null,
+
+    pub fn deinit(self: Item) void {
+        self.data.deinit();
+    }
+
+    fn checkBehind(item: *Item, haystack: *const String, from: Index) bool {
+        const lb_group = item.lb orelse return true;
+        if (!lb_group.anyLookBehind()) {
+            mtl.trace(@src());
+            return false;
+        }
+
+        lb_group.look_around.looking_behind = true;
+        mtl.debug(@src(), "lb_group.id:{?}, from:{}", .{lb_group.id, from});
+        const idx = lb_group.matches(haystack, from);
+        mtl.debug(@src(), "<<<<<<<===== idx:{?}", .{idx});
+        lb_group.look_around.looking_behind = false;
+
+        return (idx != null);
+    }
+
+    inline fn isMeta(self: Item, param: Meta) bool {
+        return self.data.isMeta(param);
+    }
+
+    inline fn isRange(self: Item) bool {
+        return self.data.isRange();
+    }
+
+    pub fn isAnyChar(self: Item) bool {
+        return self.data.isAnyChar(Meta.SymbolAnyChar);
+    }
+
+    pub fn isNot(self: Item) bool {
+        return self.data.isMeta(Meta.Not);
+    }
+
+    pub fn isName(self: Item) bool {
+        return self.data.isName();
+    }
+
+    pub fn isOr(self: Item) bool {
+        return self.data.isMeta(Meta.Or);
+    }
+
+    pub fn isQtty(self: Item) bool {
+        return self.data.isQtty();
+    }
+
+    pub fn isString(self: Item) bool {
+        return self.data.isString();
+    }
+
+    pub fn newGroup(g: Group) Item {
+        return Item {
+            .data = ItemData {.group = g }
+        };
+    }
+
+    pub fn newMeta(m: Meta) Item {
+        return Item{
+            .data = ItemData {.meta = m},
+        };
+    }
+
+    pub fn newName(s: String) Item {
+        return Item {
+            .data = ItemData {.name = s},
+        };
+    }
+
+    pub fn newQtty(q: Qtty) Item {
+        return Item {
+            .data = ItemData {.qtty = q},
+        };
+    }
+
+    pub fn newRange(r: GraphemeRange) Item {
+        return Item {
+            .data = ItemData {.range = r},
+        };
+    }
+
+    pub fn newString(s: String) Item {
+        return Item {
+            .data = ItemData{.str = s},
+        };
+    }
+};
+
+const ItemData = union(enum) {
+    group: Group,
+    qtty: Qtty,
+    meta: Meta,
+    str: String,
+    name: String,
+    range: GraphemeRange,
+
+    inline fn isMeta(self: ItemData, param: Meta) bool {
+        switch(self) {
+            .meta => |m| return (m == param),
+            else => return false,
+        }
+    }
+
+    inline fn isRange(self: ItemData) bool {
+        switch(self) {
+            .range => return true,
+            else => return false,
+        }
+    }
+
+    pub fn isAnyChar(self: ItemData) bool {
+        return self.isMeta(Meta.SymbolAnyChar);
+    }
+
+    pub fn isNot(self: ItemData) bool {
+        return self.isMeta(Meta.Not);
+    }
+
+    pub fn isName(self: ItemData) bool {
+        switch (self) {
+            .name => return true,
+            else => return false,
+        }
+    }
+
+    pub fn isOr(self: ItemData) bool {
+        return self.isMeta(Meta.Or);
+    }
+
+    pub fn isQtty(self: ItemData) bool {
+        switch (self) {
+            .qtty => return true,
+            else => return false,
+        }
+    }
+
+    pub fn isString(self: ItemData) bool {
+        switch (self) {
+            .str => return true,
+            else => return false,
+        }
+    }
+
+    pub fn deinit(self: ItemData) void {
+        switch (self) {
+            .group => |g| {
+                // mtl.debug(@src(), "{}", .{g});
+                g.deinit();
+            },
+            .str => |s| {
+                // mtl.debug(@src(), "{}", .{s});
+                s.deinit();
+            },
+            .name => |s| {
+                s.deinit();
+            },
+            else => {},
+        }
+    }
+};
+
+const LookAround = struct {
+    negative_lookahead: bool = false,
+    positive_lookahead: bool = false,
+    negative_lookbehind: bool = false,
+    positive_lookbehind: bool = false,
+    looking_behind: bool = false,
+    non_capture: bool = false,
+
+    inline fn anyNegative(self: LookAround) bool {
+        return self.negative_lookahead or self.negative_lookbehind;
+    }
+
+    inline fn anyPositive(self: LookAround) bool {
+        return self.positive_lookahead or self.positive_lookbehind;
+    }
+
+    fn anyLookBehind(self: LookAround) bool {
+        return self.negative_lookbehind or self.positive_lookbehind;
+    }
+
+    pub fn From(tokens_iter: *Iterator(Item)) LookAround {
+        var la: LookAround = .{};
+        const token = tokens_iter.peekFirst() orelse return la;
+            
+        switch (token.data) {
+            .meta => |m| {
+                switch (m) {
+                    .NegativeLookAhead => la.negative_lookahead = true,
+                    .PositiveLookAhead => la.positive_lookahead = true,
+                    .NegativeLookBehind => la.negative_lookbehind = true,
+                    .PositiveLookBehind => la.positive_lookbehind = true,
+                    .NonCapture => la.non_capture = true,
+                    else => {},
+                }
+            },
+            else => {},
+        }
+
+        return la;
+    }
+
+    pub fn overrideWith(self: *LookAround, la: LookAround) void {
+        if (!self.negative_lookahead) {
+            self.negative_lookahead = la.negative_lookahead;
+        }
+
+        if (!self.positive_lookahead) {
+            self.positive_lookahead = la.positive_lookahead;
+        }
+
+        if (!self.negative_lookbehind) {
+            self.negative_lookbehind = la.negative_lookbehind;
+        }
+
+        if (!self.positive_lookbehind) {
+            self.positive_lookbehind = la.positive_lookbehind;
+        }
+    }
 };
 
 const Meta = enum(u8) {
@@ -44,114 +319,10 @@ const Meta = enum(u8) {
     SymbolEndOfLine,
 };
 
-const Token = union(enum) {
-    group: Group,
-    qtty: Qtty,
-    meta: Meta,
-    str: String,
-    name: String,
-    range: GraphemeRange,
-
-    inline fn isMeta(self: Token, param: Meta) bool {
-        switch(self) {
-            .meta => |m| return (m == param),
-            else => return false,
-        }
-    }
-
-    inline fn isRange(self: Token) bool {
-        switch(self) {
-            .range => return true,
-            else => return false,
-        }
-    }
-
-    pub fn isAnyChar(self: Token) bool {
-        return self.isMeta(Meta.SymbolAnyChar);
-    }
-
-    pub fn isNot(self: Token) bool {
-        return self.isMeta(Meta.Not);
-    }
-
-    pub fn isName(self: Token) bool {
-        switch (self) {
-            .name => return true,
-            else => return false,
-        }
-    }
-
-    pub fn isOr(self: Token) bool {
-        return self.isMeta(Meta.Or);
-    }
-
-    pub fn isQtty(self: Token) bool {
-        switch (self) {
-            .qtty => return true,
-            else => return false,
-        }
-    }
-
-    pub fn isString(self: Token) bool {
-        switch (self) {
-            .str => return true,
-            else => return false,
-        }
-    }
-
-    pub fn deinit(self: Token) void {
-        switch (self) {
-            .group => |g| {
-                // mtl.debug(@src(), "{}", .{g});
-                g.deinit();
-            },
-            .str => |s| {
-                // mtl.debug(@src(), "{}", .{s});
-                s.deinit();
-            },
-            .name => |s| {
-                s.deinit();
-            },
-            else => {},
-        }
-    }
-};
-
-pub const GraphemeRange = struct {
-    a: Cp,
-    b: Cp,
-
-    pub fn New(a: Cp, b: Cp) GraphemeRange {
-        return .{.a = a, .b = b};
-    }
-
-    pub fn within(self: GraphemeRange, input: *const String, args: Args) bool {
-        var cp = input.charAtIndexOneCp(args.from) orelse return false;
-        if (args.cs == .Yes) {
-            // mtl.debug(@src(), "cp={}, self.a={}, self.b={}", .{cp, self.a, self.b});
-            return cp >= self.a and cp <= self.b;
-        }
-        
-        cp = String.toLowerCp(cp);
-        const a1 = String.toLowerCp(self.a);
-        const b1 = String.toLowerCp(self.b);
-        const flag = cp >= a1 and cp <= b1;
-        // mtl.debug(@src(), "cp={}, self.a={}, self.b={}", .{cp, a1, b1});
-
-        return flag;
-    }
-
-    pub fn format(self: GraphemeRange, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        _ = fmt;
-        _ = options;
-        try writer.print("Range{{{}-{}}}", .{self.a, self.b});
-    }
-};
-
 pub const Qtty = struct {
     a: i64 = 1,
     b: i64 = 1,
-    lazy: bool = false,
+    greedy: bool = true,
 
     pub fn FromCurly(input: String) !Qtty {
         if (input.indexOfAscii(",", .{})) |comma_idx| {
@@ -176,6 +347,10 @@ pub const Qtty = struct {
         return Error.Parsing;
     }
 
+    pub fn asManyAsPossible(self: Qtty) bool {
+        return self.b == inf();
+    }
+
     pub fn done(self: Qtty, n: i64) bool {
         return n >= self.b;
     }
@@ -189,7 +364,7 @@ pub const Qtty = struct {
         _ = options;
         var buf: [8]u8 = undefined;
         var s: []const u8 = undefined;
-        const lazy = if (self.lazy) "(lazy)" else "";
+        const lazy = if (self.greedy) "" else "(lazy)";
         if (self.b == inf()) {
             try writer.print("Qtty[{}+{s}]", .{self.a, lazy});
         } else {
@@ -272,22 +447,21 @@ pub const Qtty = struct {
     pub fn nOrMore(self: Qtty) bool {
         return self.b == inf();
     }
-
-    pub fn asManyAsPossible(self: Qtty) bool {
-        return self.b == inf();
-    }
-
+    
     pub fn New(a: i64, b: ?i64) Qtty {
         return Qtty {
             .a = a,
             .b = if (b) |n| n else 1,
         };
     }
-};
 
-pub const EvalAs = enum(u8) {
-    Or,
-    Not,
+    inline fn shouldBreakAfter(self: Qtty, count: usize) bool {
+        if (self.greedy) {
+            return count >= self.b;
+        }
+
+        return count >= self.a;
+    }
 };
 
 pub const Match = enum(u8) {
@@ -295,84 +469,22 @@ pub const Match = enum(u8) {
     All,
 };
 
-const LookAround = struct {
-    negative_lookahead: bool = false,
-    positive_lookahead: bool = false,
-    negative_lookbehind: bool = false,
-    positive_lookbehind: bool = false,
-    non_capture: bool = false,
-
-    inline fn anyNegative(self: LookAround) bool {
-        return self.negative_lookahead or self.negative_lookbehind;
-    }
-
-    inline fn anyPositive(self: LookAround) bool {
-        return self.positive_lookahead or self.positive_lookbehind;
-    }
-
-    fn anyLookBehind(self: LookAround) bool {
-        return self.negative_lookbehind or self.positive_lookbehind;
-    }
-
-    fn dontCapture(self: LookAround) bool {
-        return self.non_capture or self.negative_lookahead or
-        self.positive_lookahead or self.negative_lookbehind or
-        self.positive_lookbehind;
-    }
-
-    pub fn From(tokens_iter: *Iterator(Token)) LookAround {
-        var la: LookAround = .{};
-        const token = tokens_iter.peekFirst() orelse return la;
-            
-        switch (token.*) {
-            .meta => |m| {
-                switch (m) {
-                    .NegativeLookAhead => la.negative_lookahead = true,
-                    .PositiveLookAhead => la.positive_lookahead = true,
-                    .NegativeLookBehind => la.negative_lookbehind = true,
-                    .PositiveLookBehind => la.positive_lookbehind = true,
-                    .NonCapture => la.non_capture = true,
-                    else => {},
-                }
-            },
-            else => {},
-        }
-
-        return la;
-    }
-};
-
-fn checkLookBehind(tokens_iter: *Iterator(Token), haystack: *const String, args: Args) bool {
-    if (tokens_iter.peekPrev()) |prev| {
-         switch (prev.*) {
-            .group => |*pg| {
-                if (pg.look_around.anyLookBehind()) {
-                    const idx = pg.matches(haystack, args.from);
-                    return if (idx == null) false else true;
-                }
-            },
-            else => {},
-        }
-    }
-
-    return true;
-}
-
 pub const Group = struct {
     match_type: Match = .All,
     regex: *Regex,
-    token_arr: ArrayList(ArrayList(Token)) = undefined,
+    token_arr: ArrayList(ArrayList(Item)) = undefined,
     id: ?IdType = null,
     parent_id: ?IdType = null,
     captures: ArrayList(Slice) = undefined,
     capture_index: usize = 0,
     look_around: LookAround = .{},
+    start: ?Index = null,
 
     pub fn New(regex: *Regex, parent: ?*Group) Group {
         const parent_id = if (parent) |p| p.id else null;
         var new_group = Group{.regex = regex, .id = regex.next_group_id, .parent_id = parent_id};
         regex.next_group_id += 1;
-        new_group.token_arr = ArrayList(ArrayList(Token)).init(regex.alloc);
+        new_group.token_arr = ArrayList(ArrayList(Item)).init(regex.alloc);
         new_group.captures = ArrayList(Slice).init(regex.alloc);
 
         return new_group;
@@ -391,6 +503,11 @@ pub const Group = struct {
     }
 
     fn addCapture(self: *Group, slice: Slice) !void {
+        if (self.lookingBehind()) {
+            return;
+        }
+        // mtl.debug(@src(), "======group.id={?}, slice:({}-{}){dt}", .{self.id, slice.start.gr, slice.end.gr, slice});
+
         if (slice.start.eq(slice.end)) {
             return; // negative/positive look ahead/behind
         }
@@ -407,12 +524,12 @@ pub const Group = struct {
         try self.captures.append(slice);
     }
 
-    pub fn addGrapheme(tokens: *ArrayList(Token), gr: Grapheme) !void {
-        // If the last token is a string add to it, otherwise append a new string Token and add to it:
+    pub fn addGrapheme(tokens: *ArrayList(Item), gr: Grapheme) !void {
+        // If the last token is a string add to it, otherwise append a new string Item and add to it:
         const len = tokens.items.len;
         if (len > 0 and tokens.items[len-1].isString()) {
             const t = &tokens.items[len-1];
-            switch (t.*) {
+            switch (t.data) {
                 .str => |*s| {
                     try s.addGrapheme(gr);
                 },
@@ -423,46 +540,55 @@ pub const Group = struct {
         } else {
             var s = String.New();
             try s.addGrapheme(gr);
-            try tokens.append(Token{ .str = s });
+            try tokens.append(Item.newString(s));
         }
     }
 
-    inline fn addGroup(arr: *ArrayList(Token), g: Group) !void {
-        try arr.append(Token {.group = g});
+    fn addName(arr: *ArrayList(Item), s: String) !void {
+        try arr.append(Item.newName(s));
     }
 
-    inline fn addMeta(arr: *ArrayList(Token), m: Meta) !void {
-        try arr.append(Token {.meta = m});
+    fn addQtty(arr: *ArrayList(Item), qtty: Qtty) !void {
+        try arr.append(Item.newQtty(qtty));
     }
 
-    fn addName(arr: *ArrayList(Token), s: String) !void {
-        try arr.append(Token {.name = s});
+    fn addStr(arr: *ArrayList(Item), s: String) !void {
+        try arr.append(Item.newString(s));
     }
 
-    fn addQtty(arr: *ArrayList(Token), qtty: Qtty) !void {
-        try arr.append(Token {.qtty = qtty});
+    fn addAscii(arr: *ArrayList(Item), s: []const u8) !void {
+        try arr.append(Item.newString(try String.FromAscii(s)));
     }
 
-    fn addStr(arr: *ArrayList(Token), s: String) !void {
-        try arr.append(Token {.str = s});
+    fn addUtf8(arr: *ArrayList(Item), s: []const u8) !void {
+        try arr.append(Item.newString(try String.From(s)));
     }
 
-    fn addAscii(arr: *ArrayList(Token), s: []const u8) !void {
-        try arr.append(Token {.str = try String.FromAscii(s)});
-    }
+    fn adjustLookBehinds(self: *Group, parent: ?LookAround) void {
+        if (parent) |p| {
+            self.look_around.overrideWith(p);
+        }
 
-    fn addUtf8(arr: *ArrayList(Token), s: []const u8) !void {
-        try arr.append(Token {.str = try String.From(s)});
+        for (self.token_arr.items) |arr| {
+            for (arr.items) |*item| {
+                // _ = item;
+                switch (item.data) {
+                    .group => |*subgroup| {
+                        subgroup.adjustLookBehinds(self.look_around);
+                    },
+                    else => {}
+                }
+            }
+        }
     }
 
     fn analyzeTokens(self: *Group) !void {
         for (self.token_arr.items) |*arr| {
-            var token_iter = Iterator(Token).New(arr.items);
-            // for (self.tokens.items, 0..) |*t, i| {
+            var token_iter = Iterator(Item).New(arr.items);
             while (token_iter.nextPtr()) |t| {
-                switch (t.*) {
+                switch (t.data) {
                     .str => |*s| {
-                        var new_tokens = ArrayList(Token).init(self.regex.alloc);
+                        var new_tokens = ArrayList(Item).init(self.regex.alloc);
                         defer new_tokens.deinit();
                         try parseRange(s.*, &new_tokens);
                         if (new_tokens.items.len > 0) {
@@ -478,6 +604,10 @@ pub const Group = struct {
         }
     }
 
+    inline fn anyLookBehind(self: *const Group) bool {
+        return self.look_around.anyLookBehind();
+    }
+
     pub fn canCapture(self: *const Group) bool {
         for (self.token_arr.items) |*arr| {
             if (startsWithMeta(arr.items, Meta.NonCapture))
@@ -487,7 +617,11 @@ pub const Group = struct {
         return true;
     }
 
-    fn endsWithMeta(slice: []const Token, meta: Meta) bool {
+    fn createArgs(self: Group) Args {
+        return Args{.cs=self.regex.params.cs, .look_ahead = !self.lookingBehind()};
+    }
+
+    fn endsWithMeta(slice: []const Item, meta: Meta) bool {
         if (slice.len == 0) {
             return false;
         }
@@ -496,99 +630,86 @@ pub const Group = struct {
     }
 
     // returns past last found grapheme, or null
-    pub fn findNextChars(self: *Group, input: *const String, from: Index, meta: Meta, tokens_iter: *Iterator(Token)) ?Index {
-
-        var qtty: Qtty = Qtty.One();
-        if (tokens_iter.peekNext()) |next_token| {
-            switch (next_token.*) {
-               .qtty => |q| {
-                    qtty = q;
-                    tokens_iter.add(1);
-                },
-                else => {}
-            }
-        }
-
-        var positive_lookahead = false;
-        if (tokens_iter.peekFirst()) |token| {
-            if (token.isMeta(.PositiveLookAhead)) {
-                positive_lookahead = true;
-            }
-        }
-
-        var string_iter = input.iteratorFrom(from);
+    pub fn findNextChars(self: *Group, item: *Item, haystack: Slice, from: Index, meta: Meta, qtty: Qtty) ?Index {
+        const positive_lookahead = self.look_around.positive_lookahead;
+        var ret_idx: ?Index = null;
+        var string_iter = haystack.iteratorFrom(from);
         var count: usize = 0;
         var found_enough = false;
-        var ret_idx: Index = from;
-        while (string_iter.next()) |gr| {
-            var found_next_one = true;
+        
+        const direction: Direction = if (self.lookingBehind()) .Back else .Forward;
+        if (direction == .Back) {
+            _ = string_iter.go(direction);
+        }
+
+        while (string_iter.go(direction)) |gr| {
+            if (self.anyLookBehind()) {
+                // mtl.debug(@src(), "Look behind: {dt}, at:{}", .{gr, gr.idx});
+            }
+
+            var found_next_one = false;
             switch (meta) {
                 .SymbolWordChar => {
-                    // mtl.debug(@src(), "SymbolWordChar:\"{dt}\"", .{gr});
-                    if (!gr.isWordChar()) {
-                        found_next_one = false;
-                        break;
-                    }
+                    found_next_one = gr.isWordChar(self.regex.csa);
+                    // mtl.debug(@src(), "SymbolWordChar:\"{dt}\", ({})", .{gr, found_next_one});
+                },
+                .SymbolNonWordChar => {
+                    found_next_one = !gr.isWordChar(self.regex.csa);
                 },
                 .SymbolNumber => {
-                    if (!gr.isNumber()) {
-                        found_next_one = false;
-                        break;
-                    }
+                    found_next_one = gr.isNumber();
+                    // mtl.debug(@src(), "SymbolNumber:\"{dt}\", ({}), LookingBehind:{}",
+                    //  .{gr, found_next_one, self.lookingBehind()});
+                },
+                .SymbolNonNumber => {
+                    found_next_one = !gr.isNumber();
                 },
                 .SymbolWhitespace => {
-                    // mtl.debug(@src(), "SymbolWhitespace", .{});
-                    if (!gr.isWhitespace()) {
-                        found_next_one = false;
-                        break;
-                    }
+                    found_next_one = gr.isWhitespace();
+                    // mtl.debug(@src(), "SymbolWhitespace, ({}), LookingBehind:{}",
+                    // .{found_next_one, self.lookingBehind()});
                 },
                 .SymbolNonWhitespace => {
-                    // mtl.debug(@src(), "SymbolNonWhitespace", .{});
-                    if (gr.isWhitespace()) {
-                        found_next_one = false;
-                        break;
-                    }
+                    found_next_one = !gr.isWhitespace();
+                    // mtl.debug(@src(), "SymbolNonWhitespace, ({})", .{found_next_one});
                 },
-                else => {}
+                else => {
+                    mtl.debug(@src(), "Symbol(Other):\"{dt}\", ({})", .{gr, found_next_one});
+                }
             }
 
             if (!found_next_one) {
                 break;
             }
 
-            ret_idx = gr.idx.addGrapheme(gr);
+            ret_idx = if (self.lookingBehind()) string_iter.position else gr.idx.plusGrapheme(gr);
             count += 1;
-            // mtl.debug(@src(), "count:{}, qtty={}", .{count, qtty});
-            if (qtty.lazy) {
-                if (qtty.a >= count) {
-                    found_enough = true;
-                    // mtl.debug(@src(), "count:{}", .{count});
-                    break;
-                }
-            } else {
-                if (count >= qtty.b) {
-                    found_enough = true;
-                    // mtl.debug(@src(), "q:{}, count:{}", .{qtty, count});
-                    break;
-                }
+            
+            if (qtty.shouldBreakAfter(count)) {
+                found_enough = true;
+                break;
             }
-        }
-
-        if (qtty.asManyAsPossible()) {
-            found_enough = true;
         }
 
         if (found_enough) {
             if (positive_lookahead) {
-                return from;
+                ret_idx = from;
             }
-            self.addCapture(input.slice(from, ret_idx)) catch return null;
+
+            
         }
 
-        // mtl.debug(@src(), "found_enough={}", .{found_enough});
+        if (ret_idx != null) {
+            if (!item.checkBehind(haystack.str, from)) {
+                ret_idx = null;
+            }
+        }
 
-        return if (found_enough) ret_idx else null;
+        // if (self.anyLookBehind()) {
+        //     mtl.debug(@src(), "Found Enough: count:{}, needed:{}, from:{}, ret_idx:{?}", .{count, qtty, from, ret_idx});
+        // }
+
+        return ret_idx;
     }
 
     pub fn format(self: Group, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
@@ -608,7 +729,7 @@ pub const Group = struct {
                 if (array_index > 0 and item_index == 0) {
                     try printMeta(writer, .Or);
                 }
-                switch (t) {
+                switch (t.data) {
                     .group => |g| {
                         try writer.print("{s}Group={?}{s} ", .{String.COLOR_BLUE, g.id, String.COLOR_DEFAULT});
                     },
@@ -635,7 +756,7 @@ pub const Group = struct {
     pub fn getCaptureByName(self: *const Group, name: String) ?*const ArrayList(Slice) {
         for (self.token_arr.items) |arr| {
             for (arr.items) |*t| {
-                switch (t.*) {
+                switch (t.data) {
                     .name => |group_name| {
                         if (group_name.eq(name)) {
                             return &self.captures;
@@ -675,6 +796,22 @@ pub const Group = struct {
         return null;
     }
 
+    fn getNextQtty(tokens_iter: *Iterator(Item), looking_behind: bool) Qtty {
+        if (tokens_iter.peekNext()) |next_token| {
+            switch(next_token.data) {
+                .qtty => |q| {
+                    if (!looking_behind) {
+                        _ = tokens_iter.next(); // if so then need to advance
+                    }
+                    return q;
+                },
+                else => {},
+            }
+        }
+
+        return Qtty.One();
+    }
+
     pub fn hasContent(self: Group) bool {
         for (self.token_arr.items) |arr| {
             if (arr.items.len > 0) {
@@ -685,81 +822,69 @@ pub const Group = struct {
         return false;
     }
 
-    pub fn isTop(self: Group) bool {
+    pub fn isRoot(self: Group) bool {
        return self.parent_id == null;
     }
 
-    fn matchWholeString(self: *const Group, arr: *ArrayList(Token), tokens_iter: *Iterator(Token), needles: *const String, haystack: *const String, from: Index) ?Index {
-        var qtty = Qtty.One();
-        if (tokens_iter.peekNext()) |next_token| {
-            switch(next_token.*) {
-                .qtty => |q| {
-                    qtty = q;
-                    _ = tokens_iter.next(); // if so then need to advance
-                },
-                else => {},
-            }
+    fn lookingBehind(self: Group) bool {
+        return self.look_around.looking_behind;
+    }
+
+    fn matchAll(self: *const Group, haystack: Slice, needles: Slice, qtty: Qtty, not: bool) ?Index {
+        if (qtty.a == 0 and !qtty.greedy) {
+            return haystack.start;
         }
 
-        if (qtty.a == 0 and qtty.lazy) {
-            return from;
+        if (self.lookingBehind()) {
+            const idx = self.matchAllBehind(haystack, needles, qtty, not);
+            // mtl.debug(@src(), "haystack: {dt}, needles:{}, result:{?}", .{haystack, needles, idx});
+            return idx;
         }
 
-        const starts_with_not = startsWithMeta(arr.items, .Not);
-        var at = from;
         if (qtty.exactNumber(1)) {
-            if (self.look_around.anyLookBehind()) {
-                if (from.gr < needles.size()) {
-                    return null; // ANY NEGATIVE/POSITIVE?
-                }
-
-                at = haystack.findIndex(from.gr - needles.size()) orelse return null;
+            if (self.lookingBehind()) {
+                mtl.trace(@src());
             }
-            const past_match = matchStr(starts_with_not, needles, haystack,
-            .{.from=at, .cs=self.regex.params.cs});
+            const args = Args {.cs=self.regex.params.cs};
+            const past_match = matchStr(not, needles, haystack, args);
             if (self.look_around.anyNegative()) {
-                return if (past_match == null) from else null; // must not advance
+                return if (past_match == null) haystack.start else null; // must not advance
             } else if (self.look_around.anyPositive()) {
-                return if (past_match == null) null else from; // must not advance
+                return if (past_match == null) null else haystack.start; // must not advance
             } else {
                 return past_match;
             }
         }
-
-        if (self.look_around.anyLookBehind()) {
-            unreachable;
-            // const args: Args = .{.from=from, .cs=self.regex.params.cs};
-            // const flag = self.matchesBehind(haystack, needles, args);
-            // return if (flag) from else null;
-        }
-
-        const last_gr_index = needles.beforeLast();
-        const base_str = needles.betweenIndices(.{}, last_gr_index) catch return null;
-        defer base_str.deinit();
+        // If got here it means that desired qtty > 1, thus one needs to isolate
+        // the last grapheme that qtty refers to.
+        const last_gr_index = needles.beforeLast(); // when "abc?" or "abc+"
+        const needles_minus_last = needles.leftSlice(last_gr_index);
+        mtl.debug(@src(), "needles_base:{dt}, needles:{dt}, haystack:{dt}",
+            .{needles_minus_last, needles, haystack});
+        var at = haystack.start;
         {
-            at = from;
-            const past_match = matchStr(starts_with_not, &base_str, haystack,
-            .{.from=at, .cs=self.regex.params.cs});
-            if (past_match) |pm| {
-                at = pm;
+            const args = self.createArgs();
+            const index_after = matchStr(not, needles_minus_last, haystack, args);
+            if (index_after) |after| {
+                at = after;
             } else {
                 if (self.look_around.anyNegative()) {
-                    return from; // means match
+                    return haystack.start; // means match
                 } else if (self.look_around.anyPositive()) {
                     return null; // means no match
                 }
             }
         }
-        const last_char_str = needles.midIndex(last_gr_index) catch return null;
-        defer last_char_str.deinit();
+
+        const last_char_slice = needles.midSlice(last_gr_index);
         // mtl.debug(@src(), "base_str:{dt}, last_char:{}", .{base_str, last_char_str});
         var count: usize = 0;
         
         while (true) {
-            if (matchStr(starts_with_not, &last_char_str, haystack,
-            .{.from=at, .cs=self.regex.params.cs})) |idx| {
+            const args = self.createArgs();
+            if (matchStr(not, last_char_slice, haystack.midSlice(at), args)) |idx_after| {
                 count += 1;
-                at = idx;
+                at = idx_after;
                 if (count == qtty.b) {
                     break;
                 }
@@ -769,115 +894,182 @@ pub const Group = struct {
         }
 
         if (count >= qtty.a) {
-            return if (self.look_around.positive_lookahead) from else at;
+            return if (self.look_around.positive_lookahead) haystack.start else at;
         }
 
         return null;
     }
 
-    fn matchAnyChar(tokens_arr: *ArrayList(Token), tokens_iter: *Iterator(Token), input: *const String, haystack: *const String, args: Args) ?Index {
-        const starts_with_not = startsWithMeta(tokens_arr.items, .Not);
-        var negative_lookahead = false;
-        if (tokens_iter.peekPrev()) |prev_token| {
-            if (prev_token.isMeta(.NegativeLookAhead)) {
-                negative_lookahead = true;
+    fn matchAllBehind(self: *const Group, haystack: Slice, needles: Slice, qtty: Qtty, not: bool) ?Index {
+        _ = self;
+        const last_gr = needles.lastChar() orelse return null;
+        // mtl.debug(@src(), "haystack: {dt}, needles: {dt}, last_char:{dt}, qtty: {}", .{haystack, needles, last_gr, qtty});
+
+        var count: usize = 0;
+        _ = &count;
+        var haystack_iter = haystack.iteratorFromEnd();
+        var at: ?Index = null;
+        while (haystack_iter.prev()) |char| {
+            // mtl.debug(@src(), "{dt} vs {dt}", .{char, last_gr});
+            if (char.eq(last_gr, .Yes)) {
+                at = char.idx;
+                count += 1;
+            } else {
+                break;
+            }
+
+            if (qtty.shouldBreakAfter(count)) {
+                break;
             }
         }
 
+        if (count < qtty.a) {
+            mtl.debug(@src(), "not enough: {} for {dt}", .{count, last_gr});
+            return null;
+        }
+
+        const base = needles.slice(.{}, needles.beforeLast());
+        const from = at orelse return null;
+        const h = haystack.leftSlice(from);
+        var retval: ?Index = null;
+        if (h.endsWith(base)) |pos| {
+            retval = if (not) null else pos;
+        } else {
+            if (not) {
+                retval = haystack.findIndexFromEnd(base.size());
+            } else {
+                retval = null;
+            }
+        }
+
+        if (TraceLB) {
+            mtl.debug(@src(), "count: {}, h:{dt}, retval:{?}", .{count, h, retval});
+        }
+
+        return retval;
+    }
+
+    fn matchAnyChar(self: *const Group, any_of: Slice, haystack: Slice, args: Args, not: bool) ?Index {
+        const negative_lookahead = self.look_around.negative_lookahead;
         const hgr = haystack.charAtIndex(args.from) orelse return null;
-        // var found = false;
-        var string_iter = input.iterator();
-        while (string_iter.next()) |gr| {
-            // mtl.debug(@src(), "input: {dt}, gr: {dt} vs haystack {dt}", .{input, gr, hgr});
+        const any_lb = self.anyLookBehind();
+        var string_iter = if (any_lb) any_of.iteratorFromEnd() else any_of.iterator();
+        const direction: Direction = if (any_lb) .Back else .Forward;
+        var retval: ?Index = null;
+        while (string_iter.go(direction)) |gr| {
             const gr_match = gr.eq(hgr, args.cs);
-            if (starts_with_not) {
+            if (not) {
                 if (gr_match) {
                     return null;
                 }
             } else if (gr_match) {
                 if (negative_lookahead) {
-                    return args.from;
+                    retval = args.from;
+                    break;
+                } else if (any_lb) {
+                    retval = args.from.minusGrapheme(gr);
+                    break;
                 } else {
-                    return args.from.addGrapheme(gr);
+                    retval = args.from.plusGrapheme(gr);
+                    break;
                 }
             }
         }
 
-        if (starts_with_not) {
-            return args.from.addGrapheme(hgr);
+        if (not) {
+            if (any_lb) {
+                retval = args.from.minusGrapheme(hgr);
+            } else {
+                retval = args.from.plusGrapheme(hgr);
+            }
         }
 
+        if (TraceLB and any_lb) {
+            mtl.debug(@src(), "retval:{?}, args.from:{}, hgr:{dt}, any_of:{dt}, haystack:{dt}, lb:{}, looking_behind:{}",
+                .{retval, args.from, hgr, any_of, haystack, any_lb, self.lookingBehind()});
+        }
+
+        return retval;
+    }
+
+    fn matchStr(starts_with_not: bool, needles: Slice, haystack: Slice, args: Args) ?Index {
+        if (haystack.matchesSlice(needles, args)) |past_idx| {
+            return if (starts_with_not) null else past_idx;
+        }
+        
         return null;
     }
 
-    fn matchStr(starts_with_not: bool, needles: *const String, haystack: *const String, args: Args) ?Index {
-        const past_idx = haystack.matches(needles, args);
-        if (starts_with_not) {
-            if (past_idx) |idx| {
-                _ = &idx;
-                return null;
-            }
-        }
-        
-        return past_idx;
-    }
-
-    pub fn matches(self: *Group, input: *const String, from: Index) ?Index {
-        // mtl.debug(@src(), "from:{}, group.id:{?}", .{from, self.id});
+    pub fn matches(self: *Group, haystack: *const String, from: Index) ?Index {
         const args = Args {.from = from, .cs = self.regex.params.cs };
+        var result: ?Index = null;
+        var arr_idx: usize = 0;
         for (self.token_arr.items, 0..) |*arr, i| {
-            _ = &i;
-            // mtl.debug(@src(), "items.len={}, group.id={?}", .{arr.items.len, self.id});
             if (arr.items.len == 0) {
                 continue;
             }
             
-            if (self.matchesArray(arr, input, args)) |past_idx| {
-                return past_idx;
+            arr_idx = i;
+            if (self.matchesArray(arr, haystack, args)) |idx_after| {
+                result = idx_after;
+                break;
             }
         }
 
-        return null;
+        if (TraceGroupResult) {
+            mtl.debug(@src(), "TraceResult from:{}, group_{?}, arr_idx:{} result:{?}", .{from.gr, self.id, arr_idx, result});
+        }
+
+        return result;
     }
 
-    fn matchesArray(self: *Group, tokens: *ArrayList(Token), haystack: *const String, args: Args) ?Index {
-        var tokens_iter = Iterator(Token).New(tokens.items);
-        self.look_around = LookAround.From(&tokens_iter);
-        if (self.look_around.anyLookBehind()) {
-            // must be performed after the token in front of it matches.
-            // mtl.debug(@src(), "skipping group {?}", .{self.id});
-            return args.from;
+    fn matchesArray(self: *Group, tokens: *ArrayList(Item), input: *const String, args: Args) ?Index {
+        var items_iter = Iterator(Item).New(tokens.items);
+        var direction: Direction = undefined;
+        if (self.lookingBehind()) {
+            direction = .Back;
+            items_iter.toEnd();
+        } else {
+            if (self.look_around.anyLookBehind()) {
+                // must be performed after the token in front of it matches.
+                return args.from;
+            }
+            direction = .Forward;
         }
 
         var at = args.from;
         if (startsWithMeta(tokens.items, .SymbolStartOfLine)) {
             if (at.cp != 0) {
-                const gr = haystack.prev(at) orelse return null;
-                if (!gr.eqCp('\n')) {
+                const prev_gr = input.prev(at) orelse return null;
+                if (!prev_gr.eqCp('\n')) {
                     return null;
                 }
             }
         }
 // if previous token is a look_behind, call it.
-        const starts_with_not = startsWithMeta(tokens.items, .Not);
-        while (tokens_iter.nextPtr()) |t| {
-            switch (t.*) {
-                .str => |*needles| {
+        const not = startsWithMeta(tokens.items, .Not);
+        while (items_iter.go(direction)) |item| {
+            // mtl.debug(@src(), "item:{}, items_iter.at:{}", .{item, items_iter.at});
+            const qtty = getNextQtty(&items_iter, self.lookingBehind());
+            const haystack = if (self.lookingBehind()) input.leftSlice(at) else input.midSlice(at);
+            switch (item.data) {
+                .str => |*needles_str| {
+                    const needles = needles_str.asSlice();
                     if (self.match_type == .All) {
-                        if (matchWholeString(self, tokens, &tokens_iter, needles, haystack, at)) |idx_past| {
-                            if (!checkLookBehind(&tokens_iter, haystack, args)) {
+                        if (self.matchAll(haystack, needles, qtty, not)) |after_last| {
+                            if (!item.checkBehind(input, at)) {
                                 return null;
                             }
-                            if (!self.look_around.dontCapture()) {
-                                self.addCapture(haystack.slice(at, idx_past)) catch return null;
-                            }
-                            at = idx_past;
+                            // mtl.debug(@src(), "after matchAll() at:{}, after_last:{}", .{at, after_last});
+                            at = after_last;
                         } else {
                             return null;
                         }
                     } else { // == .AnyOf
-                        if (matchAnyChar(tokens, &tokens_iter, needles, haystack, .{.from=at, .cs=args.cs})) |idx_after| {
-                            if (!checkLookBehind(&tokens_iter, haystack, args)) {
+                        if (self.matchAnyChar(needles, haystack, .{.from=at, .cs=args.cs}, not)) |idx_after| {
+                            // mtl.debug(@src(), "AnyOf: idx_after:{?}, at:{}, lb:{}",
+                                // .{idx_after, at, self.anyLookBehind()});
+                            if (!item.checkBehind(input, at)) {
                                 return null;
                             }
                             _ = &idx_after;
@@ -889,25 +1081,13 @@ pub const Group = struct {
                 .meta => |m| {
                     switch (m) {
                         .SymbolWordChar => {
-                            // mtl.debug(@src(), "Word char:\"{?}\"", .{input.charAtIndex(at)});
-                            if (!haystack.isWordChar(at)) {
-                                return null;
-                            }
-                            
-                            if (self.findNextChars(haystack, at, m, &tokens_iter)) |idx_after| {
-                                if (!checkLookBehind(&tokens_iter, haystack, args)) {
-                                    return null;
-                                }
-                                at = idx_after;
-                            } else {
-                                return null;
-                            }
+                            at = self.findNextChars(item, haystack, at, m, qtty) orelse return null;
                         },
                         .SymbolWordBoundary => {
                             if (!haystack.isWordBoundary(at)) {
                                 return null;
                             }
-                            if (!checkLookBehind(&tokens_iter, haystack, args)) {
+                            if (!item.checkBehind(input, at)) {
                                 return null;
                             }
                         },
@@ -915,64 +1095,26 @@ pub const Group = struct {
                             if (haystack.isWordBoundary(at)) {
                                 return null;
                             }
-                            if (!checkLookBehind(&tokens_iter, haystack, args)) {
+                            if (!item.checkBehind(input, at)) {
                                 return null;
                             }
                         },
                         .SymbolNumber => {
-                            if (!haystack.isDigit(at)) {
-                                return null;
-                            }
-                            if (self.findNextChars(haystack, at, m, &tokens_iter)) |past_idx| {
-                                if (!checkLookBehind(&tokens_iter, haystack, args)) {
-                                    return null;
-                                }
-                                at = past_idx;
-                            } else {
-                                return null;
-                            }
+                            const idx = self.findNextChars(item, haystack, at, m, qtty);
+                            // mtl.debug(@src(), "(SymbolNumber) group:{?}, at:{?}", .{self.id, idx});
+                            at = idx orelse return null;
+                            
                         },
                         .SymbolNonNumber => {
-                            if (haystack.isDigit(at)) {
-                                return null;
-                            }
-
-                            if (self.findNextChars(haystack, at, m, &tokens_iter)) |past_idx| {
-                                if (!checkLookBehind(&tokens_iter, haystack, args)) {
-                                    return null;
-                                }
-                                at = past_idx;
-                            } else {
-                                return null;
-                            }
+                            at = self.findNextChars(item, haystack, at, m, qtty) orelse return null;
                         },
                         .SymbolWhitespace => {
-                            if (!haystack.isWhitespace(at)) {
-                                return null;
-                            }
-
-                            if (self.findNextChars(haystack, at, m, &tokens_iter)) |past_idx| {
-                                if (!checkLookBehind(&tokens_iter, haystack, args)) {
-                                    return null;
-                                }
-                                at = past_idx;
-                            } else {
-                                return null;
-                            }
+                            const idx = self.findNextChars(item, haystack, at, m, qtty);
+                            // mtl.debug(@src(), "(SymbolWhitespace) group:{?}, at:{?}", .{self.id, idx});
+                            at = idx orelse return null;
                         },
                         .SymbolNonWhitespace => {
-                            if (haystack.isWhitespace(at)) {
-                                return null;
-                            }
-
-                            if (self.findNextChars(haystack, at, m, &tokens_iter)) |past_idx| {
-                                if (!checkLookBehind(&tokens_iter, haystack, args)) {
-                                    return null;
-                                }
-                                at = past_idx;
-                            } else {
-                                return null;
-                            }
+                            at = self.findNextChars(item, haystack, at, m, qtty) orelse return null;
                         },
                         else => |v| {
                             _ = v;
@@ -981,29 +1123,19 @@ pub const Group = struct {
                     }
                 },
                 .group => |*sub_group| {
-                    var qtty: Qtty = Qtty.ExactNumber(1);
-                    if (tokens_iter.peekNext()) |next_token| {
-                        switch (next_token.*) {
-                            .qtty => |q| {
-                                qtty = q;
-                                tokens_iter.add(1);
-                            },
-                            else => {}
-                        }
-                    }
-
+                    // mtl.debug(@src(), "SUB_GROUP: {?}, start: {}", .{sub_group.id, at});
                     var count: usize = 0;
-                    while (qtty.a > 0 or !qtty.lazy) {
-                        if (sub_group.matches(haystack, at)) |past_idx| {
-                            at = past_idx;
+                    const group_started_at = at;
+                    while (count < qtty.a or qtty.greedy) {
+                        if (sub_group.matches(input, at)) |after_last| {
+                            at = after_last;
                         } else {
                             break;
                         }
                         count += 1;
-                        if (qtty.lazy and count >= qtty.a) {
+
+                        if (qtty.shouldBreakAfter(count)) {
                             break;
-                        } else if (count >= qtty.b) {
-                            break; // break if maximum count reached
                         }
                         // otherwise keep finding as many as possible
                     }
@@ -1012,20 +1144,20 @@ pub const Group = struct {
                         return null;
                     }
 
-                    if (!checkLookBehind(&tokens_iter, haystack, args)) {
+                    if (!item.checkBehind(input, group_started_at)) {
                         return null;
                     }
                 },
                 .range => |range| {
-                    var flag = range.within(haystack, .{.from=at, .cs=self.regex.params.cs});
-                    if (starts_with_not) {
+                    var flag = range.within(haystack.midSlice(at), self.regex.params.cs);
+                    if (not) {
                         flag = !flag;
                     }
                     if (!flag) {
                         // mtl.debug(@src(), "{} failed.", .{range});
                         return null;
                     }
-                    if (!checkLookBehind(&tokens_iter, haystack, args)) {
+                    if (!item.checkBehind(input, at)) {
                         return null;
                     }
                 },
@@ -1038,52 +1170,43 @@ pub const Group = struct {
 
         switch (self.match_type) {
             .AnyOf => {
-                const gr = haystack.charAtIndex(at) orelse return null;
-                at = at.addGrapheme(gr);
-                if (starts_with_not) {
+                const gr = input.charAtIndex(at) orelse return null;
+                at = at.plusGrapheme(gr);
+                if (not) {
                     // mtl.debug(@src(), "="**20, .{});
                 }
-                if (!self.look_around.dontCapture())
-                    self.addCapture(gr.slice()) catch return null;
+                self.addCapture(gr.slice()) catch return null;
             },
             else => {},
         }
 
-        if (!at.isPast(haystack) and startsWithMeta(tokens.items, .SymbolEndOfLine)) {
-            const gr = haystack.charAtIndex(at) orelse return null;
+        if (!at.isPast(input) and startsWithMeta(tokens.items, .SymbolEndOfLine)) {
+            const gr = input.charAtIndex(at) orelse return null;
             if (!gr.eqCp('\n')) {
                 return null;
             }
         }
 
+        self.addCapture(input.slice(args.from, at)) catch return null;
+
+        // if (self.anyLookBehind()) {
+        //     mtl.debug(@src(), "group.id={?}, at:{?}", .{self.id, at});
+        // }
+
         return at;
-    }
-
-    fn matchesBehind(self: *const Group, tokens_iter: *Iterator(Token), haystack: *const String, args: Args) bool {
-        _ = &self;
-        _ = &args;
-        _ = &haystack;
-
-        var qtty = Qtty.One();
-        if (tokens_iter.peekNext()) |next_token| {
-            switch(next_token.*) {
-                .qtty => |q| {
-                    qtty = q;
-                },
-                else => {},
-            }
-        }
-
-        mtl.debug(@src(), "{?}", .{self.id});
-        return true;
     }
 
     fn parseIntoTokens(self: *Group, index: Index) !Index {
         var str_iter = StringIterator.New(&self.regex.pattern, index);
         var ret_idx: ?Index = null;
-        const new_array = ArrayList(Token).init(self.regex.alloc);
+        const new_array = ArrayList(Item).init(self.regex.alloc);
         try self.token_arr.append(new_array);
-        var current_arr: *ArrayList(Token) = &self.token_arr.items[0];
+        var current_arr: *ArrayList(Item) = &self.token_arr.items[0];
+
+        var plb: ?*Group = null;
+        var nlb: ?*Group = null;
+        _ = &plb;
+        _ = &nlb;
 
         while (str_iter.next()) |gr| {
             if (gr.eqCp('[')) {
@@ -1092,7 +1215,8 @@ pub const Group = struct {
                     new_group.match_type = .AnyOf;
                     const newg = str_iter.next() orelse return error.Other;
                     str_iter.continueFrom(try new_group.parseIntoTokens(newg.idx));
-                    try addGroup(current_arr, new_group);
+                    // try addGroup(current_arr, new_group);
+                    try current_arr.append(Item.newGroup(new_group));
                 } else {
                     self.match_type = .AnyOf;
                 }
@@ -1100,15 +1224,14 @@ pub const Group = struct {
                 ret_idx = gr.idx.addRaw(1);
                 break;
             } else if (gr.eqCp('(')) {
-                if (self.hasContent() or self.isTop()) {
-                    mtl.trace(@src());
+                if (self.hasContent() or self.isRoot()) {
                     var new_group = Group.New(self.regex, self);
                     new_group.match_type = .All;
                     const newg = str_iter.next() orelse return error.Other;
                     str_iter.continueFrom(try new_group.parseIntoTokens(newg.idx));
-                    try addGroup(current_arr, new_group);
+                    // try addGroup(current_arr, new_group);
+                    try current_arr.append(Item.newGroup(new_group));
                 } else {
-                    mtl.trace(@src());
                     self.match_type = .All;
                 }
             } else if (gr.eqCp(')')) {
@@ -1118,27 +1241,27 @@ pub const Group = struct {
                 const s: *String = &self.regex.pattern;
                 if (s.matchesAscii("?:", .{.from=gr.idx})) |idx| {
                     str_iter.continueFrom(idx);
-                    try addMeta(current_arr, .NonCapture);
+                    try current_arr.append(Item.newMeta(.NonCapture));
                     // self.non_capture = true;
                 } else if (s.matchesAscii("?!", .{.from=gr.idx})) |idx_past| {
                     str_iter.continueFrom(idx_past);
-                    try addMeta(current_arr, .NegativeLookAhead);
-                } else if (s.matchesAscii("?<!", .{.from=gr.idx})) |idx| {
-                    str_iter.continueFrom(idx);
-                    try addMeta(current_arr, .NegativeLookBehind);
+                    try current_arr.append(Item.newMeta(.NegativeLookAhead));
                 } else if (s.matchesAscii("?=", .{.from=gr.idx})) |idx| {
                     str_iter.continueFrom(idx);
-                    try addMeta(current_arr, .PositiveLookAhead);
+                    try current_arr.append(Item.newMeta(.PositiveLookAhead));
+                } else if (s.matchesAscii("?<!", .{.from=gr.idx})) |idx| {
+                    str_iter.continueFrom(idx);
+                    try current_arr.append(Item.newMeta(.NegativeLookBehind));
                 } else if (s.matchesAscii("?<=", .{.from=gr.idx})) |idx| {
                     str_iter.continueFrom(idx);
-                    try addMeta(current_arr, .PositiveLookBehind);
+                    try current_arr.append(Item.newMeta(.PositiveLookBehind));
                 } else if (s.matchesAscii("?<", .{.from=gr.idx})) |idx| { //(?<name>\\w+) = name = e.g."Jordan"
                     str_iter.continueFrom(idx);
                     // named capture
                     if (s.indexOfAscii(">", .{.from = idx.addRaw("?<".len)})) |closing_idx| {
                         const name = try s.betweenIndices(idx, closing_idx);
                         // mtl.debug(@src(), "Name: \"{}\"", .{name});
-                        try addMeta(current_arr, .NamedCapture);
+                        try current_arr.append(Item.newMeta(.NamedCapture));
                         try addName(current_arr, name);
                         str_iter.continueFrom(closing_idx.addRaw(1)); // go past ">"
                     }
@@ -1160,39 +1283,43 @@ pub const Group = struct {
             } else if (gr.eqCp('\\')) {
                 const symbol = str_iter.next() orelse break;
                 if (symbol.eqCp('d')) {
-                    try addMeta(current_arr, Meta.SymbolNumber);
+                    try current_arr.append(Item.newMeta(.SymbolNumber));
                 } else if (symbol.eqCp('D')) {
-                    try addMeta(current_arr, Meta.SymbolNonNumber);
+                    try current_arr.append(Item.newMeta(.SymbolNonNumber));
                 } else if (symbol.eqCp('w')) {
-                    try addMeta(current_arr, Meta.SymbolWordChar);
+                    // try addMeta(current_arr, Meta.SymbolWordChar);
+                    try current_arr.append(Item.newMeta(.SymbolWordChar));
                 } else if (symbol.eqCp('W')) {
-                    try addMeta(current_arr, Meta.SymbolNonWordChar);
+                    // try addMeta(current_arr, Meta.SymbolNonWordChar);
+                    try current_arr.append(Item.newMeta(.SymbolNonWordChar));
                 } else if (symbol.eqCp('s')) {
-                    try addMeta(current_arr, Meta.SymbolWhitespace);
+                    // try addMeta(current_arr, Meta.SymbolWhitespace);
+                    try current_arr.append(Item.newMeta(.SymbolWhitespace));
                 } else if (symbol.eqCp('S')) {
-                    try addMeta(current_arr, Meta.SymbolNonWhitespace);
+                    // try addMeta(current_arr, Meta.SymbolNonWhitespace);
+                    try current_arr.append(Item.newMeta(.SymbolNonWhitespace));
                 } else if (symbol.eqCp('.')) {
                     try addAscii(current_arr, "."); // literally the dot character
                 } else if (symbol.eqCp('b')) {
-                    try addMeta(current_arr, Meta.SymbolWordBoundary);
+                    try current_arr.append(Item.newMeta(.SymbolWordBoundary));
                 } else if (symbol.eqCp('B')) {
-                    try addMeta(current_arr, Meta.SymbolNonWordBoundary);
+                    try current_arr.append(Item.newMeta(.SymbolNonWordBoundary));
                 } else if (symbol.eqCp('|')) {
                     try addAscii(current_arr, "|");
                 }
             } else if (gr.eqCp('^')) {
                 if (gr.idx.gr == 0) {
                     // self.must_start_on_line = true;
-                    try addMeta(current_arr, .SymbolStartOfLine);
+                    try current_arr.append(Item.newMeta(.SymbolStartOfLine));
                 } else {
                     // mtl.debug(@src(), "Adding .Not to {?}, current_arr.len={}", .{self.id, current_arr.items.len});
-                    try addMeta(current_arr, Meta.Not);
+                    try current_arr.append(Item.newMeta(.Not));
                 }
             } else if (gr.eqCp('+')) {
                 var q = Qtty.OneOrMore();
                 if (str_iter.next()) |ng| {
                     if (ng.eqCp('?')) {
-                        q.lazy = true;
+                        q.greedy = false;
                     } else {
                         str_iter.continueFrom(gr.idx.addRaw(1));
                     }
@@ -1202,36 +1329,38 @@ pub const Group = struct {
                 var q = Qtty.OneOrMore();
                 if (str_iter.next()) |ng| {
                     if (ng.eqCp('?')) {
-                        q.lazy = true;
+                        q.greedy = false;
                     } else {
                         str_iter.continueFrom(gr.idx.addRaw(1));
                     }
                 }
                 try addQtty(current_arr, Qtty.ZeroOrMore());
             } else if (gr.eqCp('\n')) {
-                try addMeta(current_arr, Meta.SymbolNewLine);
+                try current_arr.append(Item.newMeta(.SymbolNewLine));
             } else if (gr.eqCp('\t')) {
-                try addMeta(current_arr, Meta.SymbolTab);
+                try current_arr.append(Item.newMeta(.SymbolTab));
             } else if (gr.eqCp('.')) {
-                try addMeta(current_arr, Meta.SymbolAnyChar);
+                try current_arr.append(Item.newMeta(.SymbolAnyChar));
             } else if (gr.eqCp('$')) {
-                try addMeta(current_arr, .SymbolEndOfLine);
+                try current_arr.append(Item.newMeta(.SymbolEndOfLine));
             } else if (gr.eqCp('|')) {
                 if (current_arr.items.len == 0) {
                     return error.Parsing;
                 }
-                // try self.addMeta(Meta.Or);
-                // mtl.debug(@src(), ">>>>>>>>>>>>>> FOUND AN OR", .{});
-                const new_arr = ArrayList(Token).init(self.regex.alloc);
+                const new_arr = ArrayList(Item).init(self.regex.alloc);
                 try self.token_arr.append(new_arr);
                 current_arr = &self.token_arr.items[self.token_arr.items.len - 1];
             } else {
-                // mtl.debug(@src(), "[GR] {dt}, group_id={?}, current_arr.len={}", .{gr, self.id, current_arr.items.len});
                 try addGrapheme(current_arr, gr);
             }
         }
 
         try self.analyzeTokens();
+
+        if (self.token_arr.items.len > 0) {
+            var items_iter = Iterator(Item).New(self.token_arr.items[0].items);
+            self.look_around = LookAround.From(&items_iter);
+        }
 
         if (ret_idx) |idx| {
             return idx;
@@ -1240,7 +1369,7 @@ pub const Group = struct {
         return str_iter.position;
     }
 
-    fn parseRange(s: String, tokens: *ArrayList(Token)) !void {
+    fn parseRange(s: String, tokens: *ArrayList(Item)) !void {
         const idx = s.indexOfAscii("-", .{}) orelse return;
         var iter = s.iteratorFrom(idx);
         const prev_idx = iter.prevFrom(idx) orelse return;
@@ -1255,7 +1384,7 @@ pub const Group = struct {
         // mtl.debug(@src(), "Range: {}", .{range});
         
         if (s.size() == 3) {
-            try tokens.append(Token{.range = range});
+            try tokens.append(Item.newRange(range));
             return;
         }
 
@@ -1279,15 +1408,15 @@ pub const Group = struct {
             if (items_added) {
                 right.deinit();
             } else {
-                try tokens.append(Token{.str = right});
+                try tokens.append(Item.newString(right));
             }
         } else {
             right.deinit();
         }
 
-        try tokens.append(Token{.range = range});
+        try tokens.append(Item.newRange(range));
         if (!left.isEmpty()) {
-            try tokens.append(Token{.str = left});
+            try tokens.append(Item.newString(left));
         } else {
             left.deinit();
         }
@@ -1299,7 +1428,7 @@ pub const Group = struct {
 
         for (self.token_arr.items) |*arr| {
             for (arr.items) |*t| {
-                switch (t.*) {
+                switch (t.data) {
                     .group => |*g| {
                         g.prepareForNewSearch();
                     },
@@ -1320,7 +1449,7 @@ pub const Group = struct {
             _ = i;
             // mtl.debug(@src(), "Group Array={}", .{i});
             for (arr.items) |item| {
-                switch (item) {
+                switch (item.data) {
                     .group => |*g| {
                         g.printTokens();
                     },
@@ -1328,6 +1457,38 @@ pub const Group = struct {
                 }
             }
         }
+    }
+
+    pub fn registerLookBehinds(self: *Group, lb: ?*Group) ?*Group {
+        // mtl.debug(@src(), "group.id={?}", .{self.id});
+        var my_lb: ?*Group = lb;
+        for (self.token_arr.items) |*arr| {
+            for (arr.items) |*item| {
+                switch (item.data) {
+                    .group => |*subgroup| {
+                        if (subgroup.anyLookBehind()) {
+                            my_lb = subgroup;
+                        } else if (my_lb) |lb_unwrapped| {
+                            item.lb = lb_unwrapped;
+                            // mtl.debug(@src(), "set lb on item:{}", .{item});
+                            my_lb = null;
+                        } else {
+                            my_lb = subgroup.registerLookBehinds(my_lb);
+                        }
+                        
+                    },
+                    else => {
+                        if (my_lb) |lb_unwrapped| {
+                            // mtl.debug(@src(), "set lb group.id:{?} on item:{?}", .{lb_unwrapped.id, item});
+                            item.lb = lb_unwrapped;
+                            my_lb = null;
+                        }
+                    },
+                }
+            }
+        }
+
+        return my_lb;
     }
 
     pub fn setCaptureIndex(self: *Group, index: usize) usize {
@@ -1339,7 +1500,7 @@ pub const Group = struct {
 
         for (self.token_arr.items) |*arr| {
             for (arr.items) |*t| {
-                switch (t.*) {
+                switch (t.data) {
                     .group => |*g| {
                         new_index = g.setCaptureIndex(new_index);
                     },
@@ -1351,7 +1512,15 @@ pub const Group = struct {
         return new_index;
     }
 
-    fn startsWithMeta(slice: []const Token, meta: Meta) bool {
+    pub fn shouldCapture(self: *const Group) bool {
+        const la = self.look_around;
+
+        return la.non_capture or la.negative_lookahead or
+            la.positive_lookahead or la.negative_lookbehind or
+            la.positive_lookbehind;
+    }
+
+    fn startsWithMeta(slice: []const Item, meta: Meta) bool {
         if (slice.len == 0) {
             return false;
         }
@@ -1360,22 +1529,16 @@ pub const Group = struct {
     }
 };
 
-pub const FindParams = struct {
-    qtty: Qtty = Qtty.One(),
-    cs: CaseSensitive = .Yes,
-    from: Index = Index.strStart(),
-};
-
-tokens: ArrayList(Token),
+tokens: ArrayList(Item),
 pattern: String,
 alloc: Allocator,
 top_group: Group = undefined,
 next_group_id: IdType = 0,
-found: ArrayList(Slice) = undefined,
+found: ?Slice = null,
 input: *const String = undefined,
 params: FindParams = .{},
 count: isize = 0,
-
+csa: CharsetArgs = .{},
 
 // Regex takes ownership over `pattern`
 pub fn New(alloc: Allocator, pattern: String) !*Regex {
@@ -1385,14 +1548,15 @@ pub fn New(alloc: Allocator, pattern: String) !*Regex {
     regex.* = Regex {
         .alloc = alloc,
         .pattern = pattern,
-        .tokens = ArrayList(Token).init(alloc),
-        .found = ArrayList(Slice).init(alloc),
+        .tokens = ArrayList(Item).init(alloc),
     };
     
     var top_group: Group = Group.New(regex, null);
     errdefer top_group.deinit();
     _ = try top_group.parseIntoTokens(String.strStart());
     regex.top_group = top_group;
+    _ = regex.top_group.registerLookBehinds(null);
+    regex.top_group.adjustLookBehinds(null);
 
     return regex;
 }
@@ -1404,7 +1568,6 @@ pub fn deinit(self: *Regex) void {
     }
     self.tokens.deinit();
     
-    self.found.deinit();
     self.top_group.deinit();
     self.pattern.deinit();
     self.alloc.destroy(self);
@@ -1431,15 +1594,17 @@ pub fn getCaptureByIndex(self: *const Regex, index: usize) ?Slice {
 }
 
 pub fn findNext(self: *Regex) ?Index {
-    self.found.clearAndFree();
+    self.found = null;
     self.top_group.prepareForNewSearch();
-    var input_iter = self.input.iteratorFrom(self.params.from);
+    var string_iter = self.input.iteratorFrom(self.params.from);
     
-    while (input_iter.next()) |gr| {
+    while (string_iter.next()) |gr| {
+        // const slice = self.input.midSlice(gr.idx);
+        // mtl.debug(@src(), "slice: {dt}", .{slice});
         if (self.top_group.matches(self.input, gr.idx)) |end_pos| {
-            input_iter.continueFrom(end_pos);
+            string_iter.continueFrom(end_pos);
             const next_slice = self.input.slice(gr.idx, end_pos);
-            self.found.append(next_slice) catch return null;
+            self.found = next_slice;
             return end_pos;
         }
     }
@@ -1449,7 +1614,34 @@ pub fn findNext(self: *Regex) ?Index {
     return null;
 }
 
-pub fn nextSearch(self: *Regex) ?Index {
+fn Search(alloc: Allocator, pattern: []const u8, input: []const u8) !void {
+    const regex_pattern = try String.From(pattern);
+
+    const regex = Regex.New(alloc, regex_pattern) catch |e| {
+        mtl.debug(@src(), "Can't create regex: {}", .{e});
+        return e;
+    };
+    defer regex.deinit();
+    mtl.debug(@src(), "Regex: {dt}", .{regex_pattern});
+    regex.printGroups();
+
+    const input_str = try String.From(input);
+    defer input_str.deinit();
+    regex.setParams(&input_str, .{.qtty = .All(), .cs = .Yes});
+    try input_str.printGraphemes(@src());
+
+    for (0..std.math.maxInt(usize)) |i| {
+        mtl.debug(@src(), "New Search #{} =======>", .{i});
+        if (regex.searchNext()) |currently_at| {
+            mtl.debug(@src(), "Success! Search ended at {}, found: {?dt}", .{currently_at, regex.found});
+        } else {
+            break;
+        }
+    }
+    
+}
+
+pub fn searchNext(self: *Regex) ?Index {
     if (self.params.qtty.done(self.count)) {
         return null;
     }
@@ -1467,26 +1659,6 @@ pub fn printGroups(self: Regex) void {
     self.top_group.printTokens();
 }
 
-fn printGroupResult(self: *const Group) void {
-    const len = self.captures.items.len;
-    const none = if (len == 0) " (none)" else "";
-    mtl.debug(@src(), "{id} captures:{s}", .{self, none});
-    for (self.captures.items) |*slice| {
-        mtl.debug(@src(), "capture: {dt}, ({}-{})", .{slice, slice.start.gr, slice.end.gr});
-    }
-
-    for (self.token_arr.items) |arr| {
-        for (arr.items) |item| {
-            switch (item) {
-                .group => |*g| {
-                    printGroupResult(g);
-                },
-                else => {},
-            }
-        }
-    }
-}
-
 pub fn setParams(self: *Regex, input: *const String, params: FindParams) void {
     self.input = input;
     self.params = params;
@@ -1497,45 +1669,20 @@ test "Test regex" {
     const alloc = std.testing.allocator;
     String.ctx = try String.Context.New(alloc);
     defer String.ctx.deinit();
-    
-    const haystack = "A==-=-CDDKMikeБГДaopqxyzz567\n"; //Jos\u{65}\u{301} se fu\u{E9} seguía";
-    const pattern =
-\\=(=-){2,5}(?=\w+)(AB|CD{2})[EF|^GH](?<ClientName>\w+)(?:БГД[^zyA-Z0-9c1-3]opq(?!05))xyz{2,3}(?=\d{2,})$
-;
-
-// "se\\B";// "\u{65}\u{301}";
-//on website:
-//=(=-){2,5}(AB|CD{2})[^GH](?<ClientName>\w+)(?:БГД[^gbA-Z0-9c1-3]opq(?!345))xyz{2,3}$
-
-    try performSearch(alloc, "(?<!\\w+)\\s\\d{2,}", "abc. 34 4444def 789");
 
     if (false) {
-        try performSearch(alloc, pattern, haystack);
+        const pattern = \\(?<=[abc]xyz+\s)(\s\d{2,}ab)
+;
+        const input = "bxyz  789ab cxyzz  012ab";
+        try Search(alloc, pattern, input);
     }
-}
 
-fn performSearch(alloc: Allocator, pattern: []const u8, heap: []const u8) !void {
-    const regex_pattern = try String.From(pattern);
-
-    const regex = Regex.New(alloc, regex_pattern) catch |e| {
-        mtl.debug(@src(), "Can't create regex: {}", .{e});
-        return e;
-    };
-    defer regex.deinit();
-    mtl.debug(@src(), "Regex: {dt}", .{regex_pattern});
-    regex.printGroups();
-
-    const heap_str = try String.From(heap);
-    defer heap_str.deinit();
-    try heap_str.printGraphemes(@src());
-
-    regex.setParams(&heap_str, .{.qtty = .All(), .cs = .Yes});
-
-    while (regex.nextSearch()) |currently_at| {
-        mtl.debug(@src(), "Search is at {}", .{currently_at});
-        for (regex.found.items, 0..) |slice, i| {
-            mtl.debug(@src(), "Slice({}-{}) #{}: {dt}", .{slice.start.gr, slice.end.gr, i, slice});
-        }
+    if (true) {
+        const pattern =
+\\=(=-){2,5}(AB|CD{2})[EF|^GH](?<ClientName>\w+)(?:БГД[^zyA-Z0-9c1-3]opq(?!05))xyz{2,3}(?=\d{2,})$
+;
+        const input = "A==-=-CDDKMikeБГДaopqxyzz567\n";
+        try Search(alloc, pattern, input);
     }
 }
 
@@ -1547,5 +1694,6 @@ fn performSearch(alloc: Allocator, pattern: []const u8, heap: []const u8) !void 
 
 // (?<!) – negative lookbehind
 // (?<=) – positive lookbehind
+// \b\w+(?<!s)\b. This is definitely not the same as \b\w+[^s]\b
 
 // Excel formula example: =SUM(B1+0.3,20.9,-2.4+3*MAX(18,7),B2,C1:C2,MIN(A1,5))*(-3+2)
