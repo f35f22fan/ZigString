@@ -231,6 +231,36 @@ pub const Grapheme = struct {
         try s.addGrapheme(self);
         return s;
     }
+
+    pub fn within(self: Grapheme, range: GraphemeRange, cs: CaseSensitive) bool {
+        var cp = self.getCodepoint() orelse return false;
+        if (cs == .Yes) {
+            const result = cp >= range.a and cp <= range.b;
+            return result;
+        }
+        
+        cp = String.toLowerCp(cp);
+        const a1 = String.toLowerCp(range.a);
+        const b1 = String.toLowerCp(range.b);
+        
+        return cp >= a1 and cp <= b1;
+    }
+};
+
+
+pub const GraphemeRange = struct {
+    a: Codepoint,
+    b: Codepoint,
+
+    pub fn New(a: Codepoint, b: Codepoint) GraphemeRange {
+        return .{.a = a, .b = b};
+    }
+
+    pub fn format(self: GraphemeRange, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = fmt;
+        _ = options;
+        try writer.print("Range{{{}-{}}}", .{self.a, self.b});
+    }
 };
 
 pub const Direction = enum(u8) {
@@ -490,7 +520,17 @@ pub const Index = struct {
     pub fn format(self: Index, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         _ = fmt;
         _ = options;
-        _ = try writer.print("{{cp={},gr={}}}", .{ self.cp, self.gr });
+        _ = try writer.print("{{cp:{},gr:{}}}", .{ self.cp, self.gr });
+    }
+
+    pub fn goLeftBy(self: *Index, gr: Grapheme) void {
+        self.cp -= gr.len;
+        self.gr -= 1;
+    }
+
+    pub fn goRightBy(self: *Index, gr: Grapheme) void {
+        self.cp += gr.len;
+        self.gr += 1;
     }
 
     pub fn isPast(self: Index, s: *const String) bool {
@@ -672,8 +712,12 @@ pub const Slice = struct {
         // Sometimes it only makes sense to operate with one codepoint graphemes,
         // like with interpreting ranges, like A-Z, or 0-9. This method makes sure
         // the grapheme at index `at` is one codepoint, and if so returns this codepoint.
+        var from = at;
+        if (at.cp == 0 and self.start.cp != 0) {
+            from = self.start;
+        }
         const data = self.str.d orelse return null;
-        return charAtIndexOneCp_real(self.codepoints(data), self.graphemes(data), at);
+        return charAtIndexOneCp_real(data.codepoints(), data.graphemes(), from);
     }
 
     inline fn codepoints(self: *const Slice, data: Data) ConstCpSlice {
@@ -2029,7 +2073,7 @@ fn printCpBuf(out: anytype, cp_buf: ArrayList(Codepoint), gr_index: isize, see_a
     var temp_str_buf: [32]u8 = undefined;
 
     for (cp_buf.items, 0..) |k, i| {
-        const num_as_str = try std.fmt.bufPrint(&temp_str_buf, "0x{X}", .{k});
+        const num_as_str = try std.fmt.bufPrint(&temp_str_buf, "{}", .{k});//"0x{X}"
         try codepoints_str.addAsciiSlice(num_as_str);
         const s: Codepoint = if (i < cp_buf.items.len - 1) '+' else ' ';
         try codepoints_str.addChar(s);

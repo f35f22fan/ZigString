@@ -2,6 +2,7 @@ const std = @import("std");
 const ArrayList = std.ArrayList;
 const String = @import("String.zig");
 const Grapheme = String.Grapheme;
+const GraphemeRange = String.GraphemeRange;
 const Direction = String.Direction;
 const Index = String.Index;
 const Slice = String.Slice;
@@ -37,37 +38,6 @@ pub const EvalAs = enum(u8) {
     Not,
 };
 
-pub const GraphemeRange = struct {
-    a: Cp,
-    b: Cp,
-
-    pub fn New(a: Cp, b: Cp) GraphemeRange {
-        return .{.a = a, .b = b};
-    }
-
-    pub fn within(self: GraphemeRange, input: Slice, cs: CaseSensitive) bool {
-        var cp = input.charAtIndexOneCp(input.start) orelse return false;
-        if (cs == .Yes) {
-            // mtl.debug(@src(), "cp={}, self.a={}, self.b={}", .{cp, self.a, self.b});
-            return cp >= self.a and cp <= self.b;
-        }
-        
-        cp = String.toLowerCp(cp);
-        const a1 = String.toLowerCp(self.a);
-        const b1 = String.toLowerCp(self.b);
-        const flag = cp >= a1 and cp <= b1;
-        // mtl.debug(@src(), "cp={}, self.a={}, self.b={}", .{cp, a1, b1});
-
-        return flag;
-    }
-
-    pub fn format(self: GraphemeRange, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        _ = fmt;
-        _ = options;
-        try writer.print("Range{{{}-{}}}", .{self.a, self.b});
-    }
-};
-
 pub const Item = struct {
     data: ItemData = undefined,
     lb: ?*Group = null,
@@ -85,9 +55,9 @@ pub const Item = struct {
 
         lb_group.look_around.looking_behind = true;
         const negative = lb_group.look_around.negative_lookbehind;
-        mtl.debug(@src(), "lb_group.id:{?}, from:{}, negative:{}", .{lb_group.id, from, negative});
+        mtl.debug(@src(), "=====>>>>>lb_group.id:{?}, from:{}, negative:{}", .{lb_group.id, from, negative});
         const idx = lb_group.matches(haystack, from);
-        mtl.debug(@src(), "<<<<<<<===== idx:{?}", .{idx});
+        mtl.debug(@src(), "<<<<<===== idx:{?}", .{idx});
         lb_group.look_around.looking_behind = false;
 
         return (idx != null);
@@ -480,6 +450,7 @@ pub const Group = struct {
     capture_index: usize = 0,
     look_around: LookAround = .{},
     start: ?Index = null,
+    any_of_matched: bool = false,
 
     pub fn New(regex: *Regex, parent: ?*Group) Group {
         const parent_id = if (parent) |p| p.id else null;
@@ -558,7 +529,9 @@ pub const Group = struct {
     }
 
     fn addAscii(arr: *ArrayList(Item), s: []const u8) !void {
-        try arr.append(Item.newString(try String.FromAscii(s)));
+        const item = Item.newString(try String.FromAscii(s));
+        // mtl.debug(@src(), "item:{}", .{item});
+        try arr.append(item);
     }
 
     fn addUtf8(arr: *ArrayList(Item), s: []const u8) !void {
@@ -587,6 +560,7 @@ pub const Group = struct {
         for (self.token_arr.items) |*arr| {
             var token_iter = Iterator(Item).New(arr.items);
             while (token_iter.nextPtr()) |t| {
+                // mtl.debug(@src(), "------------{}", .{t});
                 switch (t.data) {
                     .str => |*s| {
                         var new_tokens = ArrayList(Item).init(self.regex.alloc);
@@ -831,6 +805,10 @@ pub const Group = struct {
         return self.look_around.looking_behind;
     }
 
+    fn matchAnyOf(self: *const Group) bool {
+        return self.match_type == .AnyOf;
+    }
+
     fn matchAll(self: *const Group, haystack: Slice, needles: Slice, qtty: Qtty, not: bool) ?Index {
         if (qtty.a == 0 and !qtty.greedy) {
             return haystack.start;
@@ -1021,8 +999,15 @@ pub const Group = struct {
             }
         }
 
-        if (TraceGroupResult) {
-            mtl.debug(@src(), "TraceResult from:{}, group_{?}, arr_idx:{} result:{?}", .{from.gr, self.id, arr_idx, result});
+        if (!self.isRoot() and TraceGroupResult) {
+            if (arr_idx > 0) {
+                mtl.debug(@src(), "TraceResult group_{?} from:{} {s}arr_idx:{}{s} result:{?}",
+                .{self.id, from.gr, mtl.COLOR_ORANGE, arr_idx, mtl.COLOR_DEFAULT, result});
+            } else {
+                const ch = haystack.charAtIndex(from);
+                mtl.debug(@src(), "TraceResult group_{?} from:{} '{?}' result:{?}",
+                .{self.id, from.gr, ch, result});
+            }
         }
 
         return result;
@@ -1042,42 +1027,45 @@ pub const Group = struct {
             direction = .Forward;
         }
 
-        var at = args.from;
         if (startsWithMeta(tokens.items, .SymbolStartOfLine)) {
-            if (at.cp != 0) {
-                const prev_gr = input.prev(at) orelse return null;
+            if (args.from.cp != 0) {
+                const prev_gr = input.prev(args.from) orelse return null;
                 if (!prev_gr.eqCp('\n')) {
                     return null;
                 }
             }
         }
-// if previous token is a look_behind, call it.
+
+        if (self.matchAnyOf()) {
+            self.any_of_matched = false;
+        }
+        
+        var at: ?Index = args.from;
         const not = startsWithMeta(tokens.items, .Not);
-        while (items_iter.go(direction)) |item| {
-            // mtl.debug(@src(), "item:{}, items_iter.at:{}", .{item, items_iter.at});
+        next_item: while (items_iter.go(direction)) |item| {
+            // mtl.debug(@src(), "group.id={?} at:{} item:{} items_iter.at:{}", .{self.id, at, item, items_iter.at});
             const qtty = getNextQtty(&items_iter, self.lookingBehind());
-            const haystack = if (self.lookingBehind()) input.leftSlice(at) else input.midSlice(at);
+            const last_at = at orelse return null;
+            const haystack = if (self.lookingBehind()) input.leftSlice(last_at) else input.midSlice(last_at);
             switch (item.data) {
                 .str => |*needles_str| {
                     const needles = needles_str.asSlice();
                     if (self.match_type == .All) {
                         if (self.matchAll(haystack, needles, qtty, not)) |after_last| {
-                            if (!item.checkBehind(input, at)) {
+                            if (!item.checkBehind(input, last_at)) {
                                 return null;
                             }
-                            // mtl.debug(@src(), "after matchAll() at:{}, after_last:{}", .{at, after_last});
                             at = after_last;
                         } else {
                             return null;
                         }
                     } else { // == .AnyOf
-                        if (self.matchAnyChar(needles, haystack, .{.from=at, .cs=args.cs}, not)) |idx_after| {
-                            // mtl.debug(@src(), "AnyOf: idx_after:{?}, at:{}, lb:{}",
-                                // .{idx_after, at, self.anyLookBehind()});
-                            if (!item.checkBehind(input, at)) {
+                        if (self.matchAnyChar(needles, haystack, .{.from=last_at, .cs=args.cs}, not)) |idx_after| {
+                            if (!item.checkBehind(input, last_at)) {
                                 return null;
                             }
                             _ = &idx_after;
+                            self.any_of_matched = true;
                         } else {
                             return null;
                         }
@@ -1086,54 +1074,55 @@ pub const Group = struct {
                 .meta => |m| {
                     switch (m) {
                         .SymbolWordChar => {
-                            at = self.findNextChars(item, haystack, at, m, qtty) orelse return null;
+                            at = self.findNextChars(item, haystack, last_at, m, qtty) orelse return null;
                         },
                         .SymbolWordBoundary => {
-                            if (!haystack.isWordBoundary(at)) {
+                            if (!haystack.isWordBoundary(last_at)) {
                                 return null;
                             }
-                            if (!item.checkBehind(input, at)) {
+                            if (!item.checkBehind(input, last_at)) {
                                 return null;
                             }
                         },
                         .SymbolNonWordBoundary => {
-                            if (haystack.isWordBoundary(at)) {
+                            if (haystack.isWordBoundary(last_at)) {
                                 return null;
                             }
-                            if (!item.checkBehind(input, at)) {
+                            if (!item.checkBehind(input, last_at)) {
                                 return null;
                             }
                         },
                         .SymbolNumber => {
-                            const idx = self.findNextChars(item, haystack, at, m, qtty);
-                            // mtl.debug(@src(), "(SymbolNumber) group:{?}, at:{?}", .{self.id, idx});
+                            const idx = self.findNextChars(item, haystack, last_at, m, qtty);
                             at = idx orelse return null;
                             
                         },
                         .SymbolNonNumber => {
-                            at = self.findNextChars(item, haystack, at, m, qtty) orelse return null;
+                            at = self.findNextChars(item, haystack, last_at, m, qtty) orelse return null;
                         },
                         .SymbolWhitespace => {
-                            const idx = self.findNextChars(item, haystack, at, m, qtty);
-                            // mtl.debug(@src(), "(SymbolWhitespace) group:{?}, at:{?}", .{self.id, idx});
+                            const idx = self.findNextChars(item, haystack, last_at, m, qtty);
                             at = idx orelse return null;
                         },
                         .SymbolNonWhitespace => {
-                            at = self.findNextChars(item, haystack, at, m, qtty) orelse return null;
+                            at = self.findNextChars(item, haystack, last_at, m, qtty) orelse return null;
                         },
                         else => |v| {
                             _ = v;
-                            // mtl.debug(@src(), "UNTREATED META => {}", .{v});
                         }
+                    }
+
+                    if (at != null and self.matchAnyOf()) {
+                        self.any_of_matched = true;
                     }
                 },
                 .group => |*sub_group| {
                     // mtl.debug(@src(), "SUB_GROUP: {?}, start: {}", .{sub_group.id, at});
                     var count: usize = 0;
-                    const group_started_at = at;
+                    var now_at = at orelse return null;
                     while (count < qtty.a or qtty.greedy) {
-                        if (sub_group.matches(input, at)) |after_last| {
-                            at = after_last;
+                        if (sub_group.matches(input, now_at)) |after_last| {
+                            now_at = after_last;
                         } else {
                             break;
                         }
@@ -1149,21 +1138,66 @@ pub const Group = struct {
                         return null;
                     }
 
-                    if (!item.checkBehind(input, group_started_at)) {
+                    if (!item.checkBehind(input, last_at)) {
                         return null;
                     }
+
+                    at = now_at;
                 },
                 .range => |range| {
-                    var flag = range.within(haystack.midSlice(at), self.regex.params.cs);
-                    if (not) {
-                        flag = !flag;
+                    // mtl.debug(@src(), "(g:{?}) {}, from:{} at:{}", .{self.id, range, args.from.gr, at});
+                    var count: usize = 0;
+                    var now_at: Index = at orelse return null;
+                    const start = now_at;
+                    const alb = self.anyLookBehind();
+                    while (count < qtty.a or qtty.greedy) {
+                        const gr = input.charAtIndex(now_at) orelse return null;
+                        var flag = gr.within(range, self.regex.params.cs);
+                        // mtl.debug(@src(), "{dt} from {} within {}: {}", .{gr, now_at, range, flag});
+                        if (not) {
+                            flag = !flag;
+                        }
+
+                        if (!flag) {
+                            if (self.matchAnyOf()) {
+                                // mtl.debug(@src(), "CONTINUE_NEXT at:{?} now_at:{}, anyof_matched:{}",
+                                    // .{at, now_at, self.any_of_matched});
+                                continue :next_item;
+                            }
+                            break;
+                        }
+
+                        // at = now_at;
+                        if (alb) {
+                            now_at.goLeftBy(gr);
+                        } else {
+                            now_at.goRightBy(gr);
+                        }
+                       
+                        count += 1;
+                        if (qtty.shouldBreakAfter(count)) {
+                            break;
+                        }
                     }
-                    if (!flag) {
-                        // mtl.debug(@src(), "{} failed.", .{range});
+
+                    if (count < qtty.a) {
+                        
+                        if (self.matchAnyOf()) {
+                            at = now_at; // search optimization when having [] groups
+                        }
                         return null;
                     }
-                    if (!item.checkBehind(input, at)) {
+
+                    if (!item.checkBehind(input, start)) {
                         return null;
+                    }
+
+                    at = now_at;
+
+                    if (self.matchAnyOf()) {
+                        self.any_of_matched = true;
+                        // in case of success for .AnyOf no need to try to match all elements inside []
+                        return at;
                     }
                 },
                 else => |v| {
@@ -1173,30 +1207,30 @@ pub const Group = struct {
             }
         }
 
+        var last_at = at orelse return null;
         switch (self.match_type) {
             .AnyOf => {
-                const gr = input.charAtIndex(at) orelse return null;
-                at = at.plusGrapheme(gr);
-                if (not) {
-                    // mtl.debug(@src(), "="**20, .{});
+                if (!self.any_of_matched) {
+                    return null;
                 }
+                const gr = input.charAtIndex(last_at) orelse return null;
+                last_at.goRightBy(gr);
                 self.addCapture(gr.slice()) catch return null;
+                self.regex.params.from = last_at;
+                at = last_at;
             },
             else => {},
         }
 
-        if (!at.isPast(input) and startsWithMeta(tokens.items, .SymbolEndOfLine)) {
-            const gr = input.charAtIndex(at) orelse return null;
+        
+        if (!last_at.isPast(input) and startsWithMeta(tokens.items, .SymbolEndOfLine)) {
+            const gr = input.charAtIndex(last_at) orelse return null;
             if (!gr.eqCp('\n')) {
                 return null;
             }
         }
 
-        self.addCapture(input.slice(args.from, at)) catch return null;
-
-        // if (self.anyLookBehind()) {
-        //     mtl.debug(@src(), "group.id={?}, at:{?}", .{self.id, at});
-        // }
+        self.addCapture(input.slice(args.from, last_at)) catch return null;
 
         return at;
     }
@@ -1215,12 +1249,11 @@ pub const Group = struct {
 
         while (str_iter.next()) |gr| {
             if (gr.eqCp('[')) {
-                if (self.hasContent()) {
+                if (self.hasContent() or self.isRoot()) {
                     var new_group = Group.New(self.regex, self);
                     new_group.match_type = .AnyOf;
                     const newg = str_iter.next() orelse return error.Other;
                     str_iter.continueFrom(try new_group.parseIntoTokens(newg.idx));
-                    // try addGroup(current_arr, new_group);
                     try current_arr.append(Item.newGroup(new_group));
                 } else {
                     self.match_type = .AnyOf;
@@ -1234,7 +1267,6 @@ pub const Group = struct {
                     new_group.match_type = .All;
                     const newg = str_iter.next() orelse return error.Other;
                     str_iter.continueFrom(try new_group.parseIntoTokens(newg.idx));
-                    // try addGroup(current_arr, new_group);
                     try current_arr.append(Item.newGroup(new_group));
                 } else {
                     self.match_type = .All;
@@ -1281,7 +1313,6 @@ pub const Group = struct {
                     str_iter.continueFrom(idx.addRaw("}".len));
                     const qtty = try Qtty.FromCurly(qtty_in_curly);
                     try addQtty(current_arr, qtty);
-                    // mtl.debug(@src(), "qtty_in_curly: {}", .{qtty});
                 } else {
                     mtl.debug(@src(), "Not found closing '}}'", .{});
                 }
@@ -1292,16 +1323,12 @@ pub const Group = struct {
                 } else if (symbol.eqCp('D')) {
                     try current_arr.append(Item.newMeta(.SymbolNonNumber));
                 } else if (symbol.eqCp('w')) {
-                    // try addMeta(current_arr, Meta.SymbolWordChar);
                     try current_arr.append(Item.newMeta(.SymbolWordChar));
                 } else if (symbol.eqCp('W')) {
-                    // try addMeta(current_arr, Meta.SymbolNonWordChar);
                     try current_arr.append(Item.newMeta(.SymbolNonWordChar));
                 } else if (symbol.eqCp('s')) {
-                    // try addMeta(current_arr, Meta.SymbolWhitespace);
                     try current_arr.append(Item.newMeta(.SymbolWhitespace));
                 } else if (symbol.eqCp('S')) {
-                    // try addMeta(current_arr, Meta.SymbolNonWhitespace);
                     try current_arr.append(Item.newMeta(.SymbolNonWhitespace));
                 } else if (symbol.eqCp('.')) {
                     try addAscii(current_arr, "."); // literally the dot character
@@ -1314,38 +1341,49 @@ pub const Group = struct {
                 }
             } else if (gr.eqCp('^')) {
                 if (gr.idx.gr == 0) {
-                    // self.must_start_on_line = true;
                     try current_arr.append(Item.newMeta(.SymbolStartOfLine));
                 } else {
-                    // mtl.debug(@src(), "Adding .Not to {?}, current_arr.len={}", .{self.id, current_arr.items.len});
                     try current_arr.append(Item.newMeta(.Not));
                 }
             } else if (gr.eqCp('+')) {
-                var q = Qtty.OneOrMore();
-                if (str_iter.next()) |ng| {
-                    if (ng.eqCp('?')) {
-                        q.greedy = false;
-                    } else {
-                        str_iter.continueFrom(gr.idx.addRaw(1));
+                if (self.match_type == .AnyOf) {
+                    try addGrapheme(current_arr, gr);
+                } else {
+                    var qtty = Qtty.OneOrMore();
+                    if (str_iter.next()) |ng| {
+                        if (ng.eqCp('?')) {
+                            qtty.greedy = false;
+                        } else {
+                            str_iter.continueFrom(gr.idx.addRaw(1));
+                        }
                     }
+                    try addQtty(current_arr, qtty);
                 }
-                try addQtty(current_arr, q);
             } else if (gr.eqCp('*')) {
-                var q = Qtty.OneOrMore();
-                if (str_iter.next()) |ng| {
-                    if (ng.eqCp('?')) {
-                        q.greedy = false;
-                    } else {
-                        str_iter.continueFrom(gr.idx.addRaw(1));
+                if (self.match_type == .AnyOf) {
+                    try addGrapheme(current_arr, gr);
+                } else {
+                    var qtty = Qtty.ZeroOrMore();
+                    if (str_iter.next()) |ng| {
+                        if (ng.eqCp('?')) {
+                            qtty.greedy = false;
+                        } else {
+                            str_iter.continueFrom(gr.idx.addRaw(1));
+                        }
                     }
+                    try addQtty(current_arr, qtty);
                 }
-                try addQtty(current_arr, Qtty.ZeroOrMore());
             } else if (gr.eqCp('\n')) {
                 try current_arr.append(Item.newMeta(.SymbolNewLine));
             } else if (gr.eqCp('\t')) {
                 try current_arr.append(Item.newMeta(.SymbolTab));
             } else if (gr.eqCp('.')) {
-                try current_arr.append(Item.newMeta(.SymbolAnyChar));
+                // mtl.debug(@src(), "anyof: {}", .{self.match_type});
+                if (self.match_type == .AnyOf) {
+                    try addGrapheme(current_arr, gr);
+                } else {
+                    try current_arr.append(Item.newMeta(.SymbolAnyChar));
+                }
             } else if (gr.eqCp('$')) {
                 try current_arr.append(Item.newMeta(.SymbolEndOfLine));
             } else if (gr.eqCp('|')) {
@@ -1367,11 +1405,7 @@ pub const Group = struct {
             self.look_around = LookAround.From(&items_iter);
         }
 
-        if (ret_idx) |idx| {
-            return idx;
-        }
-
-        return str_iter.position;
+        return if (ret_idx) |idx| idx else str_iter.position;
     }
 
     fn parseRange(s: String, tokens: *ArrayList(Item)) !void {
@@ -1381,6 +1415,7 @@ pub const Group = struct {
         const next_idx = iter.nextFrom(idx) orelse return;
         const cp1 = prev_idx.getCodepoint() orelse return;
         const cp2 = next_idx.getCodepoint() orelse return;
+        // mtl.debug(@src(), "{dt} cp1:{}, cp2:{}", .{s, cp1, cp2});
         if (cp1 > cp2) {
             mtl.debug(@src(), "Error: {}({}) > {}({})", .{prev_idx, cp1, next_idx, cp2});
             return;
@@ -1395,15 +1430,14 @@ pub const Group = struct {
 
         var left: String = .{};
         var right: String = .{};
-        // mtl.debug(@src(), "string {dt}", .{s});
-        if (prev_idx.idx.gr != 0 and prev_idx.idx.gr != 0) {
+        if (prev_idx.idx.gr != 0 and next_idx.idx.gr != 0) {
             left = try s.betweenIndices(.{}, prev_idx.idx);
         }
 
         const str_end = s.beforeLast();
         if (next_idx.idx.gr < str_end.gr) {
-            const next_gr = iter.next() orelse return;
-            right = try s.midIndex(next_gr.idx);
+            const next_gr = iter.nextIndex() orelse return;
+            right = try s.midIndex(next_gr);
         }
         
         if (!right.isEmpty()) {
@@ -1602,11 +1636,20 @@ pub fn findNext(self: *Regex) ?Index {
     self.found = null;
     self.top_group.prepareForNewSearch();
     var string_iter = self.input.iteratorFrom(self.params.from);
-    
+
     while (string_iter.next()) |gr| {
         // const slice = self.input.midSlice(gr.idx);
         // mtl.debug(@src(), "slice: {dt}", .{slice});
-        if (self.top_group.matches(self.input, gr.idx)) |end_pos| {
+        var idx: Index = undefined;
+        if (self.params.from.gr > gr.idx.gr) {
+            idx = self.params.from;
+            string_iter.continueFrom(idx);
+            string_iter.first_time = false;
+        } else {
+            idx = gr.idx;
+        }
+        
+        if (self.top_group.matches(self.input, idx)) |end_pos| {
             string_iter.continueFrom(end_pos);
             const next_slice = self.input.slice(gr.idx, end_pos);
             self.found = next_slice;
@@ -1676,17 +1719,20 @@ test "Test regex" {
     String.ctx = try String.Context.New(alloc);
     defer String.ctx.deinit();
 
-    if (true) {
+    if (false) {
         const pattern = \\(?<=[abc]xyz+\s)(\s\d{2,}ab)
 ;
         const input = "bxyz  789ab cxyzz  012ab";
         try Search(alloc, pattern, input);
     }
 
-    if (true) {
-        const pattern = \\(?<!mnp\s)(\s\d{2,}ab)
+    if (false) {
+        //[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}
+        const pattern = \\[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+\.[a-zA-Z]{2,}
 ;
-        const input = "bxyz  789ab cxyzz  012ab";
+        const input = \\at support@example.com or sales@company.org
+;
+// Contact us 
         try Search(alloc, pattern, input);
     }
 
