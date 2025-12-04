@@ -2,6 +2,7 @@ const std = @import("std");
 const mtl = @import("mtl.zig");
 const io = @import("io.zig");
 const String = @import("String.zig").String;
+const Regex = @import("Regex.zig");
 
 const ArrayList = std.ArrayList;
 // var out = std.io.getStdOut().writer();
@@ -63,6 +64,18 @@ fn getString() struct {i64, []const u8} {
 pub fn main() !u8 {
     String.ctx = try Context.New(alloc);
     defer String.ctx.deinit();
+
+    const pattern = \\[a-z]
+        //[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+\.
+;
+    const input = "at support@example.com";
+
+//at support@example.com or sales@company.org
+    try Regex.Search(alloc, pattern, input);
+
+    if (true) {
+        return 0;
+    }
 
     const values = .{
         @as(u32, 1234),

@@ -178,6 +178,7 @@ test "Equals" {
     defer str2.deinit();
     try expect(!str1.equals(str2, .{}));
     try expect(str1.equals(str2, .{.cs = .No}));
+    try expect(str1.equalsAscii(".desktop", .{}));
 }
 
 test "FindInsertRemove" {

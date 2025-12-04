@@ -150,6 +150,14 @@ pub const Grapheme = struct {
         return true;
     }
 
+    pub fn eqAscii(self: Grapheme, input: []const u8) bool {
+        if (input.len != 1) {
+            return false;
+        }
+
+        return self.eqCp(input[0]);
+    }
+
     pub fn eqUtf8(self: Grapheme, input: []const u8) bool {
         if (input.len == 1) {
             const cp = toCp(input) catch return false;
@@ -247,7 +255,6 @@ pub const Grapheme = struct {
     }
 };
 
-
 pub const GraphemeRange = struct {
     a: Codepoint,
     b: Codepoint,
@@ -298,6 +305,10 @@ pub fn Iterator(comptime T: type) type {
 
         pub fn go(self: *Self, dir: Direction) ?*T {
             return if (dir == .Back) self.prevPtr() else self.nextPtr();
+        }
+
+        pub fn hasMore(self: *const Self, dir: Direction) bool {
+            return if (dir == .Forward) self.at + 1 < self.items.len else self.at > 0;
         }
 
         inline fn nextIdx(self: *Self) ?usize {
@@ -463,7 +474,7 @@ pub const StringIterator = struct {
         }
 
         const data = self.str.d orelse return null;
-        if (self.position.prev(data.codepoints_.items.len, data.graphemes_.items[0..], self.start_cp)) {
+        if (self.position.prev(data.codepoints_.items, data.graphemes_.items[0..], self.start_cp)) {
             return self.position;
         }
         
@@ -474,6 +485,10 @@ pub const StringIterator = struct {
         self.first_time = false;
         self.position = idx;
         return self.prev();
+    }
+
+    pub fn stepBack(self: *StringIterator) void {
+        _ = self.prevIndex();
     }
 };
 
@@ -508,8 +523,12 @@ pub const Index = struct {
         return Index {.cp = self.cp, .gr = self.gr};
     }
 
-    pub fn eq(self: Index, rhs: Index) bool {
-        return self.cp == rhs.cp and self.gr == rhs.gr;
+    pub fn eq(self: Index, rhs: ?Index) bool {
+        if (rhs) |b| {
+            return self.cp == b.cp and self.gr == b.gr;
+        }
+        
+        return false;
     }
 
     pub fn eqCpGr(self: Index, cp: usize, gr: usize) bool {
@@ -520,7 +539,7 @@ pub const Index = struct {
     pub fn format(self: Index, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         _ = fmt;
         _ = options;
-        _ = try writer.print("{{cp:{},gr:{}}}", .{ self.cp, self.gr });
+        _ = try writer.print("{{{}:{}}}", .{ self.cp, self.gr });
     }
 
     pub fn goLeftBy(self: *Index, gr: Grapheme) void {
@@ -598,8 +617,8 @@ pub const Index = struct {
         return Index {.cp=self.cp + n, .gr = self.gr + n};
     }
 
-    fn prev(self: *Index, cp_count: usize, graphemes: GraphemeSlice, limit: ?usize) bool {
-        if (self.cp == 0 or self.cp > cp_count)
+    fn prev(self: *Index, codepoints: ConstCpSlice, graphemes: GraphemeSlice, limit: ?usize) bool {
+        if (self.cp == 0 or self.cp > codepoints.len)
             return false;
 
         var i: isize = @intCast(self.cp);
@@ -625,7 +644,7 @@ pub const Index = struct {
     fn prevIndex(self: *Index, s: *const String) ?Index {
         const data = s.d orelse return null;
         var mut_idx: Index = self.*;
-        if (mut_idx.prev(data.codepoints_.items.len, data.graphemes_.items[0..], null)) {
+        if (mut_idx.prev(data.codepoints_.items, data.graphemes_.items[0..], null)) {
             return mut_idx;
         }
 
@@ -1578,10 +1597,15 @@ pub fn eq(self: String, other: String) bool {
     return self.equals(other, .{});
 }
 
-pub fn equalsUtf8(self: String, input: []const u8, cmp: Comparison) bool {
-    const list = toCodepoints(ctx.a, input) catch return false;
-    defer list.deinit();
-    return self.equalsCpSlice(list.items, cmp);
+pub fn equals(self: String, other: String, cmp: Comparison) bool {
+    const sdo = other.d orelse return false;
+    return self.equalsCpSlice(sdo.codepoints_.items, cmp);
+}
+
+pub fn equalsAscii(self: String, input: []const u8, cmp: Comparison) bool {
+    const data = self.d orelse return (input.len == 0);
+    return matchesAscii_real(data.codepoints_.items[0..], data.graphemes_.items[0..], input,
+     .{.cs = cmp.cs}) != null;
 }
 
 pub fn equalsCpSlice(self: String, cp_slice: CpSlice, cmp: Comparison) bool {
@@ -1589,9 +1613,10 @@ pub fn equalsCpSlice(self: String, cp_slice: CpSlice, cmp: Comparison) bool {
     return equalsCodepointSlice_real(data.codepoints_.items[0..], cp_slice, cmp);
 }
 
-pub fn equals(self: String, other: String, cmp: Comparison) bool {
-    const sdo = other.d orelse return false;
-    return self.equalsCpSlice(sdo.codepoints_.items, cmp);
+pub fn equalsUtf8(self: String, input: []const u8, cmp: Comparison) bool {
+    const list = toCodepoints(ctx.a, input) catch return false;
+    defer list.deinit();
+    return self.equalsCpSlice(list.items, cmp);
 }
 
 fn findCaseless(graphemes: GraphemeSlice, haystack: ConstCpSlice, needles: ConstCpSlice) ?usize {
@@ -3032,9 +3057,8 @@ fn matchesAscii_real(codepoints: ConstCpSlice, graphemes: GraphemeSlice, input: 
     const bit: Codepoint = ~@as(Codepoint, 32);
     for (graphemes[args.from.cp..end], codepoints[args.from.cp..end], input)
         |gr, cp, in| {
-        
         const l = if (sensitive) cp else (cp & bit);
-        const r = if (sensitive) in else (cp & bit);
+        const r = if (sensitive) in else (in & bit);
         if (gr != 1 or l != r) {
             return null;
         }
