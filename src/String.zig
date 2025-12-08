@@ -27,11 +27,6 @@ pub const GraphemeSlice = []const u1;
 pub const Error = error{ NotFound, BadArg, Index, Alloc, OutOfBounds, Other };
 const SimdVecLen: u16 = 32;
 
-const BinaryHintByte: u8 = 0b0100_0000;
-const BinaryHintU64: u8 =  0b1000_0000;
-const BinaryHintMask: u8 = 0b1100_0000;
-const BinaryMaxByte: u8 = 0b0011_1111;
-
 pub const Find = struct {
     from: usize = 0,
     cs: CaseSensitive = CaseSensitive.Yes,
@@ -89,9 +84,9 @@ pub const Charset = enum(u8) {
     Unicode,
 };
 
-pub const CharsetArgs = struct {
-    charset: Charset = .Ascii,
-};
+// pub const CharsetArgs = struct {
+//     charset: Charset = .Ascii,
+// };
 
 pub const Grapheme = struct {
     len: u32 = 0,
@@ -197,8 +192,8 @@ pub const Grapheme = struct {
         try printBytes(utf8, fmt, writer);
     }
 
-    pub fn isWordChar(self: Grapheme, csa: CharsetArgs) bool {
-        if (csa.charset == .Ascii) {
+    pub fn isWordChar(self: Grapheme, charset: Charset) bool {
+        if (charset == .Ascii) {
             const cp = self.getCodepoint() orelse return false;
             return String.isCodepointAWordChar(cp);
         }
@@ -888,12 +883,12 @@ pub const Slice = struct {
         return self.str.isWhitespace(at);
     }
 
-    pub fn isWordBoundary(self: Slice, at: Index) bool {
-        return self.str.isWordBoundary(at);
+    pub fn isWordBoundary(self: Slice, at: Index, charset: Charset) bool {
+        return self.str.isWordBoundary(at, charset);
     }
 
-    pub fn isWordChar(self: Slice, at: Index, csa: CharsetArgs) bool {
-        return self.str.isWordChar(at, csa);
+    pub fn isWordChar(self: Slice, at: Index, charset: Charset) bool {
+        return self.str.isWordChar(at, charset);
     }
 
     pub fn iterator(self: *const Slice) StringIterator {
@@ -1359,47 +1354,6 @@ pub fn CloneWith(self: String, rhs: String) !String {
     return s;
 }
 
-pub fn computeSizeInBytes(self: String) u64 {
-    const bits_total: u64 = self.computeSizeInBits();
-    var byte_count = bits_total / 8;
-    if ((bits_total % 8) != 0) {
-        byte_count += 1;
-    }
-    return byte_count;
-}
-
-pub fn computeSizeInBits(self: String) u64 {
-    const cp_count = self.size_cp();
-    if (cp_count == 0)
-        return @bitSizeOf(u8);
-    
-    var bit_count: u64 = @bitSizeOf(u8); // binary header
-    if (cp_count > BinaryMaxByte) { // then store cp_count as a u64
-        bit_count += @bitSizeOf(u64);
-    }
-
-    // if (cp_count <= maxInt(u8)) { // how much to store grapheme count
-    //     bit_count += @bitSizeOf(u8);
-    // } else {
-    //     bit_count += @bitSizeOf(u64);
-    // }
-
-    const sd = self.d orelse return 0;
-    for (sd.codepoints_.items) |cp| {
-        if (cp <= maxInt(u8)) {
-            bit_count += @bitSizeOf(u8);
-        } else if (cp <= maxInt(u16)) {
-            bit_count += @bitSizeOf(u16);
-        } else {
-            bit_count += @bitSizeOf(u24);
-        }
-    }
-
-    bit_count += cp_count * 3; // each codepoint has a corresponding u3 for size/gr info.
-
-    return bit_count;
-}
-
 pub fn Concat(part1: []const u8, part2: String) !String {
     var s = try String.From(part1);
     try s.add(part2);
@@ -1694,61 +1648,6 @@ pub fn getU3(data: []const u8, u3_index: usize) !u3 {
     }
 }
 
-pub fn fromBlob(reader: anytype) !String {
-    const cp_count: usize = try readCpCount(reader);
-    var ret_str = String{};
-    if (cp_count == 0)
-        return ret_str;
-
-    var data = try ret_str.dataMut();
-    try ret_str.ensureTotalCapacity(cp_count);
-    const cp_bit_count = cp_count * 3;
-    var info_byte_count = cp_bit_count / 8;
-    if ((cp_bit_count % 8) != 0) {
-        info_byte_count += 1;
-    }
-
-    const info_data = try ctx.a.alloc(u8, info_byte_count);
-    defer ctx.a.free(info_data);
-    const len = try reader.read(info_data);
-    if (len != info_data.len) {
-        @panic("len != info_data.len");
-    }
-    // var under_u8: usize = 0;
-    // var under_u16: usize = 0;
-    // var too_large: usize = 0;
-    for (0..cp_count) |i| {
-        const info: u3 = try getU3(info_data, i);
-        //mtl.debug(@src(), "i={}, u3=0b{b:0>3}", .{i, info});
-        const gr_bit: u1 = @intCast(info >> 2);
-        try data.graphemes.append(gr_bit);
-        if (gr_bit == 0b1) {
-            data.grapheme_count += 1;
-        }
-        const sz = info & 0b011;
-        var cp: u21 = 0;
-        if (sz == 0b01) { // u8
-            cp = try reader.readByte();
-        } else if (sz == 0b10) { // u16
-            cp = try reader.readInt(u16, .big);
-        } else {
-            const k = try reader.readInt(u24, .big);
-            cp = @intCast(k);
-        }
-
-        try data.codepoints.append(cp);
-        // if (cp <= maxInt(u8)) {
-        //     under_u8 += 1;
-        // } else if (cp <= maxInt(u16)) {
-        //     under_u16 += 1;
-        // } else {
-        //     too_large += 1;
-        // }
-    }
-
-    return ret_str;
-}
-
 inline fn getConstPointer(self: *const String) ?*const Data {
     if (self.d) |*k| {
         return k;
@@ -1939,24 +1838,24 @@ pub fn isWhitespace(self: String, at: Index) bool {
     return g.isWhitespace();
 }
 
-pub fn isWordBoundary(self: String, at: Index) bool {
+pub fn isWordBoundary(self: String, at: Index, charset: Charset) bool {
     if (at.cp == 0) {
         const gr = self.charAtIndex(at) orelse return false;
-        return gr.isWordChar(.{});
+        return gr.isWordChar(charset);
     }
 
     const previous = self.prev(at) orelse return false;
     const gr = self.charAtIndex(at);
     if (gr) |g| {
-        return previous.isWordChar(.{}) != g.isWordChar(.{});
+        return previous.isWordChar(charset) != g.isWordChar(charset);
     }
     
-    return previous.isWordChar(.{});
+    return previous.isWordChar(charset);
 }
 
-pub fn isWordChar(self: String, at: Index, csa: CharsetArgs) bool {
+pub fn isWordChar(self: String, at: Index, charset: Charset) bool {
     const gr = self.charAtIndex(at) orelse return false;
-    return gr.isWordChar(csa);
+    return gr.isWordChar(charset);
 }
 
 pub fn iterator(self: *const String) StringIterator {
@@ -2147,19 +2046,6 @@ pub fn printFind(self: String, needles: []const u8, from: usize, cs: CaseSensiti
     const needles_str = String.From(needles) catch return null;
     defer needles_str.deinit();
     return index;
-}
-
-fn readCpCount(reader: anytype) !usize {
-    const value: u8 = try reader.readByte();
-    if (value == 0)
-        return 0;
-
-    if ((value & BinaryHintMask) == BinaryHintByte) {
-        return value & ~BinaryHintMask;
-    }
-
-    const count = try reader.readInt(u64, .big);
-    return count;
 }
 
 pub fn remove(self: *String, needles: []const u8) !void {
@@ -2590,78 +2476,6 @@ pub fn utf8_from_slice(a: Allocator, cp_slice: ConstCpSlice) !ArrayList(u8) {
     }
 
     return buf;
-}
-
-fn writeCpCount(out: anytype, count: u64) !void {
-    if (count == 0) {
-        try out.writeByte(0);
-    } else if (count <= BinaryMaxByte) {
-        //mtl.debug(@src(), "writing as byte={}", .{count});
-        var z: u8 = @intCast(count);
-        z |= BinaryHintByte;
-        try out.writeByte(z);
-    } else {
-        //mtl.debug(@src(), "writing as u64={}", .{count});
-        try out.writeByte(BinaryHintU64);
-        try out.writeInt(u64, count, .big);
-    }
-}
-
-pub fn toBlob(self: String, alloc: Allocator) ![]const u8 {
-    const str_byte_count = self.computeSizeInBytes();
-    const memory = try alloc.alloc(u8, str_byte_count);
-    errdefer alloc.free(memory);
-    var stream = std.io.fixedBufferStream(memory);
-    const writer = stream.writer();
-    const cp_count = self.size_cp();
-    try writeCpCount(writer, cp_count);
-    if (cp_count == 0) {
-        return memory;
-    }
-    
-    const sd = self.d orelse return String.Error.Other;
-    var under_u8: usize = 0;
-    var under_u16: usize = 0;
-    var full_size: usize = 0;
-    var bit_data = BitData.New(alloc);
-    defer bit_data.deinit();
-
-    for (sd.codepoints_.items, sd.graphemes_.items) |cp, grapheme_bit| {
-        var n: u3 = 0;
-        if (cp <= maxInt(u8)) {
-            under_u8 += 1;
-            n = 0b01;
-        } else if (cp <= maxInt(u16)) {
-            under_u16 += 1;
-            n = 0b10;
-        } else {
-            full_size += 1;
-            n = 0b11;
-        }
-
-        n |= @as(u3, grapheme_bit) << 2;
-        try bit_data.addBits(n);
-    }
-
-    try bit_data.finish();
-    //bit_data.printBits();
-    try writer.writeAll(bit_data.bytes());
-
-    for (sd.codepoints_.items) |cp| {
-        if (cp <= maxInt(u8)) {
-            try writer.writeByte(@intCast(cp));
-        } else if (cp <= maxInt(u16)) {
-            try writer.writeInt(u16, @intCast(cp), .big);
-        } else {
-            try writer.writeInt(u24, @intCast(cp), .big);
-        }
-    }
-
-    //self.printInfo(@src(), null);
-    // mtl.debug(@src(), "u8={}, u16={}, u24={}",
-    //     .{Num.New(under_u8), Num.New(under_u16), Num.New(full_size)});
-
-    return memory;
 }
 
 fn charAtIndexOneCp_real(codepoints: ConstCpSlice, graphemes: GraphemeSlice, at: Index) ?Codepoint {

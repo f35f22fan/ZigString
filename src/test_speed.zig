@@ -34,9 +34,9 @@ inline fn getTime() i128 {
 
 fn getFgColor(result: usize, correct: ?usize) []const u8 {
     if (correct) |c| {
-        return if (result == c) String.COLOR_DEFAULT else String.COLOR_RED;
+        return if (result == c) mtl.COLOR_DEFAULT else mtl.COLOR_RED;
     }
-    return String.COLOR_BLUE;
+    return mtl.COLOR_BLUE;
 }
 
 fn FindOneSimd(haystack: String, needle: Codepoint, from: usize, correct: ?usize, comptime depth: u16) !usize {
@@ -86,25 +86,6 @@ fn FindManyLinear(haystack: String, needles: ConstCpSlice, from: ?Index, correct
     return result;
 }
 
-// fn FindManyLinearZigstr(haystack: []const u8, needles: []const u8, from: usize, correct: ?usize) !usize {
-    
-//     const cd = try zigstr.Data.init(alloc);
-//     defer cd.deinit();
-//     const start_t = getTime();
-//     var str = try zigstr.fromConstBytes(alloc, &cd, haystack[from..]);
-//     defer str.deinit();
-//     const zigstr_init_time = getTime() - start_t;
-//     const start_time = getTime();
-//     var result = str.indexOf(needles) orelse return Error.NotFound;
-//     result += from;
-//     const index_of_time = getTime() - start_time;
-//     const print_color = getFgColor(result, correct);
-//     mtl.debug(@src(), "{s}FoundAt={?}, From={}, Time={}{s}, StrInit={}{s}\n",
-//     .{ print_color, result, from, index_of_time, TimeExt, zigstr_init_time, TimeExt});
-
-//     return result;
-// }
-
 fn FindBackwards() !void {
     String.ctx = try Context.New(alloc);
     defer String.ctx.deinit();
@@ -130,7 +111,7 @@ pub fn test_find_index(raw_str: []const u8, needles: ConstCpSlice, froms: []cons
     const short_string_len: usize = 255;
     const needles_buf = try String.utf8_from_slice(alloc, needles);
     defer needles_buf.deinit();
-    mtl.debug(@src(), "needles_count=\"{s}{s}\"", .{String.COLOR_GREEN, needles_buf.items});
+    mtl.debug(@src(), "needles_count=\"{s}{s}\"", .{mtl.COLOR_GREEN, needles_buf.items});
     if (raw_str.len <= short_string_len) {
         mtl.debug(@src(), "raw_str.len={} bytes: '{s}'", .{ raw_str.len, raw_str });
     } else {
