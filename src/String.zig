@@ -192,14 +192,20 @@ pub const Grapheme = struct {
         try printBytes(utf8, fmt, writer);
     }
 
+    fn isAsciiAWordChar(cp: Codepoint) bool {
+        return (cp >= 'A' and cp <= 'Z') or (cp >= 'a' and cp <= 'z') or
+            (cp >= '0' and cp <= '9') or (cp == '_');
+    }
+
     pub fn isWordChar(self: Grapheme, charset: Charset) bool {
+        const cp = self.getCodepoint() orelse return false;
+        const ascii_match = isAsciiAWordChar(cp);
+
         if (charset == .Ascii) {
-            const cp = self.getCodepoint() orelse return false;
-            return String.isCodepointAWordChar(cp);
+            return ascii_match;
         }
 
-        const cp = self.getCodepoint() orelse return false;
-        return ctx.gencat.isLetter(cp);
+        return ascii_match or ctx.gencat.isLetter(cp);
     }
 
     pub fn isNumber(self: Grapheme) bool {
@@ -1821,11 +1827,6 @@ pub fn isEmpty(self: String) bool {
 inline fn isGrapheme(self: String, i: usize) bool {
     const sd = self.d orelse return false;
     return sd.graphemes_.items[i] == 1;
-}
-
-pub fn isCodepointAWordChar(cp: Codepoint) bool {
-    return (cp >= 'A' and cp <= 'Z') or (cp >= 'a' and cp <= 'z') or
-        (cp >= '0' and cp <= '9') or (cp == '_');
 }
 
 pub fn isDigit(self: String, at: Index) bool {

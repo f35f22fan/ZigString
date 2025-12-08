@@ -286,6 +286,8 @@ const Meta = enum(u8) {
     SymbolNonNumber,
     SymbolWordChar,
     SymbolNonWordChar,
+    SymbolUnicodeWordChar,
+    SymbolNonUnicodeWordChar,
     SymbolWhitespace,
     SymbolNonWhitespace,
     SymbolWordBoundary,
@@ -640,6 +642,13 @@ pub const Group = struct {
                 },
                 .SymbolNonWordChar => {
                     found_next_one = !gr.isWordChar(self.regex.charset);
+                },
+                .SymbolUnicodeWordChar => {
+                    found_next_one = gr.isWordChar(.Unicode);
+                    // mtl.debug(@src(), "SymbolWordChar:\"{dt}\", ({})", .{gr, found_next_one});
+                },
+                .SymbolNonUnicodeWordChar => {
+                    found_next_one = !gr.isWordChar(.Unicode);
                 },
                 .SymbolNumber => {
                     found_next_one = gr.isNumber();
@@ -1186,10 +1195,12 @@ pub const Group = struct {
                 },
                 .meta => |m| {
                     switch (m) {
-                        .SymbolWordChar => {
+                        .SymbolWordChar, .SymbolNonWordChar, .SymbolUnicodeWordChar, .SymbolNonUnicodeWordChar,
+                        .SymbolNumber, .SymbolNonNumber, .SymbolWhitespace, .SymbolNonWhitespace=> {
                             at = self.findNextChars(item, haystack, last_at, m, qtty) orelse return null;
                             // mtl.debug(@src(), "SymbolWordChar at:{?}", .{at});
                         },
+                        
                         .SymbolWordBoundary => {
                             if (!haystack.isWordBoundary(last_at, self.regex.charset)) {
                                 return null;
@@ -1205,19 +1216,6 @@ pub const Group = struct {
                             if (!item.checkBehind(input, last_at)) {
                                 return null;
                             }
-                        },
-                        .SymbolNumber => {
-                            at = self.findNextChars(item, haystack, last_at, m, qtty) orelse return null;
-                        },
-                        .SymbolNonNumber => {
-                            at = self.findNextChars(item, haystack, last_at, m, qtty) orelse return null;
-                        },
-                        .SymbolWhitespace => {
-                            const idx = self.findNextChars(item, haystack, last_at, m, qtty);
-                            at = idx orelse return null;
-                        },
-                        .SymbolNonWhitespace => {
-                            at = self.findNextChars(item, haystack, last_at, m, qtty) orelse return null;
                         },
                         .SymbolEndOfLine => {
                             if (haystack.charAtIndex(last_at)) |gr| {
@@ -1414,6 +1412,10 @@ pub const Group = struct {
                     try current_arr.append(Item.newMeta(.SymbolWordChar));
                 } else if (symbol.eqCp('W')) {
                     try current_arr.append(Item.newMeta(.SymbolNonWordChar));
+                } else if (symbol.eqCp('u')) {
+                    try current_arr.append(Item.newMeta(.SymbolUnicodeWordChar));
+                } else if (symbol.eqCp('U')) {
+                    try current_arr.append(Item.newMeta(.SymbolNonUnicodeWordChar));
                 } else if (symbol.eqCp('s')) {
                     try current_arr.append(Item.newMeta(.SymbolWhitespace));
                 } else if (symbol.eqCp('S')) {
@@ -1729,7 +1731,7 @@ pub fn format(self: *const Regex, comptime fmt: []const u8, options: std.fmt.For
     _ = options;
     _ = fmt;
     _ = &writer;
-    const charset = if (self.charset == .Ascii) "ASCII" else "Unicode";
+    const charset = if (self.charset == .Ascii) "Ascii" else "Unicode";
     try writer.print("Regex(\\w={s}): {dt}\n", .{charset, self.pattern});
     self.top_group.printTokens(writer);
 }
@@ -1771,9 +1773,6 @@ pub fn Search(alloc: Allocator, pattern: []const u8, input: []const u8) !void {
         return e;
     };
     defer regex.deinit();
-    // const charset = if (regex.charset == .Ascii) "ASCII" else "Unicode";
-    // mtl.debug(@src(), "Regex(\\w={s}): {dt}", .{charset, regex_pattern});
-    // regex.printGroups();
     mtl.debug(@src(), "{}", .{regex});
 
     const input_str = try String.From(input);
@@ -1782,14 +1781,12 @@ pub fn Search(alloc: Allocator, pattern: []const u8, input: []const u8) !void {
     try input_str.printGraphemes(@src());
 
     for (0..std.math.maxInt(usize)) |i| {
-        var first_time = true;
+        const searched_from = regex.params.from.gr;
         if (regex.searchNext()) |currently_at| {
-            if (first_time) {
-                first_time = false;
-                mtl.debug(@src(), "{s}Search #{} =======>{s}", .{mtl.COLOR_ORANGE, i, mtl.COLOR_DEFAULT});
+            mtl.debug(@src(), "{s}Search #{} (from:{}) =======>{s}", .{mtl.COLOR_ORANGE, i, searched_from, mtl.COLOR_DEFAULT});
+            if (regex.found) |slice| {
+                mtl.debug(@src(), "{s}Success!{s} Found between:{}-{}, slice:{dt}\n", .{mtl.BGCOLOR_ORANGE, mtl.BGCOLOR_DEFAULT, slice.start.gr, slice.end.gr, slice});
             }
-            mtl.debug(@src(), "{s}Success!{s} Search ended at {}, found: {?dt}\n",
-            .{mtl.BGCOLOR_ORANGE, mtl.BGCOLOR_DEFAULT, currently_at, regex.found});
             if (currently_at.gr >= input_str.size()) {
                 break;
             }
@@ -1831,17 +1828,15 @@ test "Test regex" {
         try Search(alloc, pattern, input);
     }
 
-    if (false) {
+    if (true) {
         //[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+(\.[a-zA-Z]{2,})+
-        const pattern = \\[\w._%+-]+@[\w-]+(\.[\w]{2,})+
+        const pattern = \\[\u._%+-]+@[\u-]+(\.\u{2,})+
 ;
-        const input = "at support@example.рф \u{AE} \u{1f4a9} or sales@company.co.uk";
-
-//at support@example.com or sales@company.org
+        const input = "at 用户_@例子.广告 or support@example.рф \u{AE} \u{1f4a9} or sales@company.co.uk";
         try Search(alloc, pattern, input);
     }
 
-    if (true) {
+    if (false) {
         const pattern =
 \\=(=-){2,5}(AB|CD{2})[EF|^GH](?=Mi\S{2})(?<ClientName>\w+)(?:БГД[^zyA-Z0-9c]opq(?!05))xyz{2,3}(?=\d{2,}$)
 ;

@@ -25,15 +25,20 @@ For code examples check out the tests.
 Tested with Zig 0.14.1
 
 
-### Regex support is a work in progress
-Currently successfully passes this test:
+### Regex support is mostly done, backtracking not planned
 
-Regex: <code>=(=-){2,5}(AB|CD{2})[EF|^GH](?<ClientName>\w+)(?:БГД[^gbA-Z0-9c1-3]opq(?!345))xyz{2,3}$</code>
+Example: finding an email address.
+Since emails can contain Unicode in domain names using \w is a bad approach.
+One can either set the regex.charset = .Unicode (default is .Ascii) which will
+interpret all \w as unicode or use a custom \u which is same as \w but also allows
+one-codepoint unicode letters, including Chinese. For example:
 
-Tries to find in the string <code>"A==-=-CDDKMikeБГДaopqxyzz\nJos\u{65}\u{301} se fu\u{E9} seguía"</code>
 
-Finds match <code>"==-=-CDDKMikeБГДaopqxyzz"</code> at index 1, as expected.
+This email regex pattern: <code>[\u._%+-]+@[\u-]+(\.\u{2,})+</code>
 
+Tries to find emails in <code>"at 用户_@例子.广告 or support@example.рф \u{AE} \u{1f4a9} or sales@company.co.uk"</code>
+And finds <code>用户_@例子.广告</code>, then <code>support@example.рф</code>, then
+<code>sales@company.co.uk</code>, as expected.
 
 ---
 
