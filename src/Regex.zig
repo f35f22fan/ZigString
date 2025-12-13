@@ -16,11 +16,41 @@ const Cp = String.Codepoint;
 const Regex = @This();
 const Allocator = std.mem.Allocator;
 const IdType = u16;
+const expect = std.testing.expect;
 
-const TraceLA: bool = false; // Debug Look Ahead
-const TraceLB: bool = false; // Debug Look Behind
+const TraceLookAhead: bool = false; // Debug Look Ahead
+const TraceLookBehind: bool = false; // Debug Look Behind
 const TraceAnyOf: bool = false;
-const TraceGroupResult: bool = true;
+const TraceGroupResult: bool = false;
+
+const Diagnose = enum(u1) {
+    Yes,
+    No,
+};
+
+const PrintResults = enum(u1) {
+    Yes,
+    No,
+};
+
+const PrintComparisons = enum(u1) {
+    Yes,
+    No,
+};
+
+pub const TerminalOutput = struct {
+    diagnose: Diagnose = .No,
+    print_results: PrintResults = .No,
+    print_comparisons: PrintComparisons = .No,
+
+    pub fn AllYes() TerminalOutput {
+        return .{.diagnose = .Yes, .print_results = .Yes};
+    }
+
+    pub fn OnlyComparisons() TerminalOutput {
+        return .{.print_comparisons = .Yes};
+    }
+};
 
 const State = struct {
     looking_behind: bool = false,
@@ -46,7 +76,7 @@ pub const Item = struct {
     data: ItemData = undefined,
     lb: ?*Group = null,
 
-    pub fn deinit(self: Item) void {
+    pub fn deinit(self: *Item) void {
         self.data.deinit();
     }
 
@@ -59,10 +89,14 @@ pub const Item = struct {
         var regex = lb_group.regex;
 
         regex.setLookingBehind(true);
-        mtl.debug(@src(), "group_{?} from:{} negative_lb:{}",
-            .{lb_group.id, from, lb_group.look_around.negative_lookbehind});
+        if (TraceLookBehind) {
+            mtl.debug(@src(), "group_{?} from:{} negative_lb:{}",
+                .{lb_group.id, from, lb_group.look_around.negative_lookbehind});
+        }
         const idx = lb_group.matches(haystack, from);
-        mtl.debug(@src(), "group_{?} result:{?}", .{lb_group.id, idx});
+        if (TraceLookBehind) {
+            mtl.debug(@src(), "group_{?} result:{?}", .{lb_group.id, idx});
+        }
         regex.setLookingBehind(false);
 
         return (idx != null);
@@ -192,9 +226,9 @@ const ItemData = union(enum) {
         }
     }
 
-    pub fn deinit(self: ItemData) void {
-        switch (self) {
-            .group => |g| {
+    pub fn deinit(self: *ItemData) void {
+        switch (self.*) {
+            .group => |*g| {
                 // mtl.debug(@src(), "{}", .{g});
                 g.deinit();
             },
@@ -217,16 +251,25 @@ const LookAround = struct {
     positive_lookbehind: bool = false,
     non_capture: bool = false,
 
+    inline fn anyLookAhead(self: LookAround) bool {
+        return self.negative_lookahead or self.positive_lookahead;
+    }
+
+    inline fn anyLookAround(self: LookAround) bool {
+        return self.negative_lookahead or self.positive_lookahead or
+        self.negative_lookbehind or self.positive_lookbehind;
+    }
+
+    inline fn anyLookBehind(self: LookAround) bool {
+        return self.negative_lookbehind or self.positive_lookbehind;
+    }
+
     inline fn anyNegative(self: LookAround) bool {
         return self.negative_lookahead or self.negative_lookbehind;
     }
 
     inline fn anyPositive(self: LookAround) bool {
         return self.positive_lookahead or self.positive_lookbehind;
-    }
-
-    fn anyLookBehind(self: LookAround) bool {
-        return self.negative_lookbehind or self.positive_lookbehind;
     }
 
     pub fn From(tokens_iter: *Iterator(Item)) LookAround {
@@ -328,8 +371,8 @@ pub const Qtty = struct {
         return self.b == inf();
     }
 
-    pub fn done(self: Qtty, n: i64) bool {
-        return n >= self.b;
+    pub fn done(self: Qtty, count: i64) bool {
+        return count >= self.b;
     }
 
     pub inline fn inf() i64 {
@@ -460,53 +503,56 @@ pub const Group = struct {
     token_arr: ArrayList(ArrayList(Item)) = undefined,
     id: ?IdType = null,
     parent_id: ?IdType = null,
-    captures: ArrayList(Slice) = undefined,
     capture_index: usize = 0,
     look_around: LookAround = .{},
-    start: ?Index = null,
+    capture_start: ?Index = null,
+    capture_end: ?Index = null,
 
     pub fn New(regex: *Regex, parent: ?*Group) Group {
         const parent_id = if (parent) |p| p.id else null;
         var new_group = Group{.regex = regex, .id = regex.next_group_id, .parent_id = parent_id};
         regex.next_group_id += 1;
         new_group.token_arr = ArrayList(ArrayList(Item)).init(regex.alloc);
-        new_group.captures = ArrayList(Slice).init(regex.alloc);
 
         return new_group;
     }
 
-    pub fn deinit(self: Group) void {
+    pub fn deinit(self: *Group) void {
         for (self.token_arr.items) |arr| {
-            for (arr.items) |t| {
+            for (arr.items) |*t| {
                 t.deinit();
             }
             arr.deinit();
         }
-        self.token_arr.deinit();
 
-        self.captures.deinit();
+        self.token_arr.deinit();
     }
 
-    fn addCapture(self: *Group, slice: Slice) !void {
-        if (self.regex.lookingBehind()) {
+    fn clearCapture(self: *Group) void {
+        self.capture_index = 0;
+        self.capture_start = null;
+        self.capture_end = null;
+    }
+
+    fn addCapture(self: *Group, till: Index) void {
+        if (self.anyLookAround() or self.regex.lookingBehind()) {
+            // mtl.debug(@src(), "group_{?}=skip", .{self.id});
             return;
         }
-        // mtl.debug(@src(), "======group.id={?}, slice:({}-{}){dt}", .{self.id, slice.start.gr, slice.end.gr, slice});
 
-        if (slice.start.eq(slice.end)) {
-            return; // negative/positive look ahead/behind
-        }
+        // mtl.debug(@src(), "group_{?}, till:{}, start:{?}", .{self.id, till, self.capture_start});
 
-        const len = self.captures.items.len;
-        if (len > 0) {
-            var capture: *Slice = &self.captures.items[len - 1];
-            if (capture.end.eq(slice.start)) {
-                capture.end = slice.end;
-                return;
+        if (self.capture_start == null) {
+            self.capture_start = till;
+        } else {
+            if (self.capture_end) |my| {
+                if (till.gr > my.gr) {
+                    self.capture_end = till;
+                }
+            } else {
+                self.capture_end = till;
             }
         }
-
-        try self.captures.append(slice);
     }
 
     pub fn addGrapheme(tokens: *ArrayList(Item), gr: Grapheme) !void {
@@ -573,14 +619,14 @@ pub const Group = struct {
         for (self.token_arr.items) |*arr| {
             var token_iter = Iterator(Item).New(arr.items);
             while (token_iter.nextPtr()) |t| {
-                // mtl.debug(@src(), "------------{}", .{t});
                 switch (t.data) {
                     .str => |*s| {
                         var new_tokens = ArrayList(Item).init(self.regex.alloc);
                         defer new_tokens.deinit();
                         try parseRange(s.*, &new_tokens);
                         if (new_tokens.items.len > 0) {
-                            arr.orderedRemove(token_iter.at).deinit();
+                            var x = arr.orderedRemove(token_iter.at);
+                            x.deinit();
                             for (new_tokens.items) |item| {
                                 try arr.insert(token_iter.at, item);
                             }
@@ -592,7 +638,15 @@ pub const Group = struct {
         }
     }
 
-    inline fn anyLookBehind(self: *const Group) bool {
+    inline fn anyLookAhead(self: Group) bool {
+        return self.look_around.anyLookAhead();
+    }
+
+    inline fn anyLookAround(self: Group) bool {
+        return self.look_around.anyLookAround();
+    }
+
+    inline fn anyLookBehind(self: Group) bool {
         return self.look_around.anyLookBehind();
     }
 
@@ -618,12 +672,9 @@ pub const Group = struct {
     }
 
     pub fn findNextChars(self: *Group, item: *Item, haystack: Slice, from: Index, meta: Meta, qtty: Qtty) ?Index {
-        const positive_lookahead = self.look_around.positive_lookahead;
         var ret_idx: ?Index = null;
         var string_iter = haystack.iteratorFrom(from);
         var count: usize = 0;
-        var found_enough = false;
-        
         const direction: Direction = if (self.regex.lookingBehind()) .Back else .Forward;
         if (direction == .Back) {
             _ = string_iter.go(direction);
@@ -645,15 +696,14 @@ pub const Group = struct {
                 },
                 .SymbolUnicodeWordChar => {
                     found_next_one = gr.isWordChar(.Unicode);
-                    // mtl.debug(@src(), "SymbolWordChar:\"{dt}\", ({})", .{gr, found_next_one});
+                    // mtl.debug(@src(), "SymbolUnicodeWordChar:{dt}, ({}), qtty:{}, count:{}", .{gr, found_next_one, qtty, count});
                 },
                 .SymbolNonUnicodeWordChar => {
                     found_next_one = !gr.isWordChar(.Unicode);
                 },
                 .SymbolNumber => {
                     found_next_one = gr.isNumber();
-                    // mtl.debug(@src(), "SymbolNumber:\"{dt}\", ({}), LookingBehind:{}",
-                    //  .{gr, found_next_one, self.lookingBehind()});
+                    // mtl.debug(@src(), "SymbolNumber:\"{dt}\", ({}), look_ahead:{}", .{gr, found_next_one, self.anyLookAhead()});
                 },
                 .SymbolNonNumber => {
                     found_next_one = !gr.isNumber();
@@ -680,28 +730,31 @@ pub const Group = struct {
             count += 1;
             
             if (qtty.shouldBreakAfter(count)) {
-                found_enough = true;
+                // found_enough = true;
                 break;
             }
         }
 
-        if (found_enough) {
-            if (positive_lookahead) {
-                ret_idx = from;
-            }
+        const found_enough = count >= qtty.a;
+        if (!found_enough) {
+            // mtl.trace(@src());
+            return null; // failed to find
         }
 
         if (ret_idx != null) {
             if (!item.checkBehind(haystack.str, from)) {
+                // mtl.trace(@src());
                 ret_idx = null;
             }
         }
-
-        if (ret_idx == null) {
-            return null;
-        }
         
-        return if (self.matchAnyOf()) from else ret_idx;
+        if (self.matchAnyOf()) {
+            // mtl.debug(@src(), "from:{}", .{from});
+            return from;
+        } else {
+            // mtl.debug(@src(), "ret_idx:{?}", .{ret_idx});
+            return ret_idx;
+        }
     }
 
     pub fn format(self: Group, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
@@ -828,8 +881,7 @@ pub const Group = struct {
         Pos: Index,
     };
 
-    fn matchRange(self: *const Group, range: GraphemeRange, input: *const String,
-    at: Index, qtty: Qtty, starts_with_not: bool, has_more: bool) RangeMatch {
+    fn matchRange(self: *const Group, range: GraphemeRange, input: *const String, at: Index, qtty: Qtty, starts_with_not: bool, has_more: bool) RangeMatch {
         var count: usize = 0;
         var result: ?Index = null;
         var pos = at;
@@ -973,7 +1025,7 @@ pub const Group = struct {
 
     fn matchAllBehind(self: *const Group, haystack: Slice, needles: Slice, qtty: Qtty, not: bool) ?Index {
         const last_gr = needles.lastChar() orelse return null;
-        if (TraceLB) {
+        if (TraceLookBehind) {
             mtl.debug(@src(), "group_{?} haystack: {dt}, needles: {dt}, last_char:{dt}, qtty: {}",
             .{self.id, haystack, needles, last_gr, qtty});
         }
@@ -1019,15 +1071,14 @@ pub const Group = struct {
             }
         }
 
-        if (TraceLB) {
+        if (TraceLookBehind) {
             mtl.debug(@src(), "group_{?} count: {}, h:{dt}, retval:{?}", .{self.id, count, h, retval});
         }
 
         return retval;
     }
 
-    fn matchAnyChar(self: *const Group, any_of: Slice, compare_to: Grapheme,
-    args: Args, starts_with_not: bool) bool {
+    fn matchAnyChar(self: *const Group, any_of: Slice, compare_to: Grapheme, args: Args, starts_with_not: bool) bool {
         const any_lb = self.anyLookBehind();
         var anyof_iter = if (any_lb) any_of.iteratorFromEnd() else any_of.iterator();
         const direction: Direction = if (any_lb) .Back else .Forward;
@@ -1050,7 +1101,7 @@ pub const Group = struct {
             }
         }
 
-        if (TraceAnyOf or (TraceLB and any_lb)) {
+        if (TraceAnyOf or (TraceLookBehind and any_lb)) {
             mtl.debug(@src(),
             "group_{?} retval:{?}, args.from:{}, compare anyof {dt}, to:{dt}, lb:{}, looking_behind:{}, not:{}",
                 .{self.id, retval, args.from, any_of, compare_to, any_lb, self.regex.lookingBehind(),
@@ -1120,7 +1171,8 @@ pub const Group = struct {
         } else {
             if (self.anyLookBehind()) {
                 mtl.debug(@src(), "{?}", .{self.id});
-                // must be performed after the token in front of it matches.
+                // will be called later, after the token in front of it matches,
+                // so for now just return the same result:
                 return args.from;
             }
             direction = .Forward;
@@ -1138,6 +1190,8 @@ pub const Group = struct {
         var at: ?Index = args.from;
         var at_copy: ?Index = at;
         const starts_with_not = startsWithMeta(tokens.items, .Not);
+        self.clearCapture();
+
         next_item: while (items_iter.go(direction)) |item| {
             if (at == null) {
                 at = at_copy;
@@ -1222,6 +1276,7 @@ pub const Group = struct {
                                 if (gr.eqCp('\n')) {
                                     at = last_at;
                                 }
+                                
                             }
                         },
                         else => |v| {
@@ -1237,13 +1292,13 @@ pub const Group = struct {
                         }
                     }
                 },
-                .group => |*sub_group| {
+                .group => |*subgroup| {
                     // mtl.debug(@src(), "SUB_GROUP: {?}, start: {}", .{sub_group.id, at});
                     
                     var count: usize = 0;
                     var now_at = last_at;
                     while (qtty.loop(count)) {
-                        if (sub_group.matches(input, now_at)) |after_last| {
+                        if (subgroup.matches(input, now_at)) |after_last| {
                             now_at = after_last;
                         } else {
                             break;
@@ -1256,14 +1311,14 @@ pub const Group = struct {
                         // otherwise keep finding as many as possible
                     }
 
-                    if (count < qtty.a) {
+                    if ((count < qtty.a) or !item.checkBehind(input, last_at)) {
                         return null;
                     }
-
-                    if (!item.checkBehind(input, last_at)) {
-                        return null;
+                    if (subgroup.anyLookAround()) {
+                        at = last_at; // don't advance on look ahead or behind
+                    } else {
+                        at = now_at;
                     }
-                    at = now_at;
                 },
                 .range => |range| {
                     // mtl.debug(@src(), "group_{?} {} at:{?}", .{self.id, range, at});
@@ -1308,15 +1363,8 @@ pub const Group = struct {
             }
         }
 
-        
-        if (!last_at.isPast(input) and startsWithMeta(tokens.items, .SymbolEndOfLine)) {
-            const gr = input.charAtIndex(last_at) orelse return null;
-            if (!gr.eqCp('\n')) {
-                return null;
-            }
-        }
-
-        self.addCapture(input.slice(args.from, last_at)) catch return null;
+        self.addCapture(args.from);
+        self.addCapture(last_at);
 
         return at;
     }
@@ -1552,8 +1600,7 @@ pub const Group = struct {
     }
 
     fn prepareForNewSearch(self: *Group) void {
-        self.capture_index = 0;
-        self.captures.clearAndFree();
+        self.clearCapture();
 
         for (self.token_arr.items) |*arr| {
             for (arr.items) |*t| {
@@ -1564,6 +1611,38 @@ pub const Group = struct {
                     else => {}
                 }
             
+            }
+        }
+    }
+
+    fn setupRegexFoundSlice(self: *Group) void {
+        if (self.capture_start) |group_start| {
+            if (self.capture_end) |group_end| {
+                if (self.regex.start) |rs| {
+                    if (rs.gr > group_start.gr)
+                        self.regex.start = group_start;
+                } else {
+                    self.regex.start = group_start;
+                }
+
+                if (self.regex.end) |re| {
+                    if (re.gr < group_end.gr) {
+                        self.regex.end = group_end;
+                    }
+                } else {
+                    self.regex.end = group_end;
+                }
+            }
+        }
+
+        for (self.token_arr.items) |*arr| {
+            for (arr.items) |*t| {
+                switch (t.data) {
+                    .group => |*g| {
+                        g.setupRegexFoundSlice();
+                    },
+                    else => {}
+                }
             }
         }
     }
@@ -1663,12 +1742,13 @@ pattern: String,
 alloc: Allocator,
 top_group: Group = undefined,
 next_group_id: IdType = 0,
-found: ?Slice = null,
 input: *const String = undefined,
 params: FindParams = .{},
 count: isize = 0,
 charset: Charset = .Ascii,
 state: State = .{},
+start: ?Index = null,
+end: ?Index = null,
 
 // Regex takes ownership over `pattern`
 pub fn New(alloc: Allocator, pattern: String) !*Regex {
@@ -1693,7 +1773,7 @@ pub fn New(alloc: Allocator, pattern: String) !*Regex {
 
 pub fn deinit(self: *Regex) void {
     
-    for (self.tokens.items) |g| {
+    for (self.tokens.items) |*g| {
         g.deinit();
     }
     self.tokens.deinit();
@@ -1703,8 +1783,13 @@ pub fn deinit(self: *Regex) void {
     self.alloc.destroy(self);
 }
 
+fn setupFoundSlice(self: *Regex) void {
+    self.top_group.setupRegexFoundSlice();
+}
+
 pub fn findNext(self: *Regex) ?Index {
-    self.found = null;
+    self.start = null;
+    self.end = null;
     self.top_group.prepareForNewSearch();
     var string_iter = self.input.iteratorFrom(self.params.from);
 
@@ -1716,8 +1801,7 @@ pub fn findNext(self: *Regex) ?Index {
         }
         
         if (self.top_group.matches(self.input, gr.idx)) |end_pos| {
-            const next_slice = self.input.slice(gr.idx, end_pos);
-            self.found = next_slice;
+            self.setupFoundSlice();
             return end_pos;
         }
     }
@@ -1727,7 +1811,7 @@ pub fn findNext(self: *Regex) ?Index {
     return null;
 }
 
-pub fn format(self: *const Regex, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+pub fn format(self: Regex, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
     _ = options;
     _ = fmt;
     _ = &writer;
@@ -1736,8 +1820,13 @@ pub fn format(self: *const Regex, comptime fmt: []const u8, options: std.fmt.For
     self.top_group.printTokens(writer);
 }
 
+pub fn foundSlice(self: *const Regex) ?Slice {
+    const start = self.start orelse return null;
+    const end = self.end orelse return null;
+    return self.input.slice(start, end);
+}
 
-pub fn getCapture(self: *const Regex, name: []const u8) ?Slice {
+pub fn getCapture(self: Regex, name: []const u8) ?Slice {
     const name_str = String.From(name) catch return null;
     defer name_str.deinit();
     if (self.top_group.getCaptureByName(name_str)) |result| {
@@ -1747,7 +1836,7 @@ pub fn getCapture(self: *const Regex, name: []const u8) ?Slice {
     return null;
 }
 
-pub fn getCaptureByIndex(self: *const Regex, index: usize) ?Slice {
+pub fn getCaptureByIndex(self: Regex, index: usize) ?Slice {
     if (index == 0) {
         if (self.found_slice) |slice| {
             return slice;
@@ -1757,7 +1846,7 @@ pub fn getCaptureByIndex(self: *const Regex, index: usize) ?Slice {
     return self.top_group.getCaptureByIndex(index);
 }
 
-fn lookingBehind(self: *const Regex) bool {
+fn lookingBehind(self: Regex) bool {
     return self.state.looking_behind;
 }
 
@@ -1765,7 +1854,7 @@ fn setLookingBehind(self: *Regex, flag: bool) void {
     self.state.looking_behind = flag;
 }
 
-pub fn Search(alloc: Allocator, pattern: []const u8, input: []const u8) !void {
+pub fn Search(alloc: Allocator, pattern: []const u8, input: []const u8, correct:[]const []const u8, options: TerminalOutput) !void {
     const regex_pattern = try String.From(pattern);
 
     const regex = Regex.New(alloc, regex_pattern) catch |e| {
@@ -1773,26 +1862,47 @@ pub fn Search(alloc: Allocator, pattern: []const u8, input: []const u8) !void {
         return e;
     };
     defer regex.deinit();
-    mtl.debug(@src(), "{}", .{regex});
+    if (options.diagnose == .Yes)
+        mtl.debug(@src(), "{}", .{regex});
 
-    const input_str = try String.From(input);
-    defer input_str.deinit();
-    regex.setParams(&input_str, .{.qtty = .All(), .cs = .Yes});
-    try input_str.printGraphemes(@src());
+    const heap = try String.From(input);
+    defer heap.deinit();
+    regex.setParams(&heap, .{.qtty = .All(), .cs = .Yes});
+    if (options.diagnose == .Yes)
+        try heap.printGraphemes(@src());
+
+    var results = ArrayList(Slice).init(alloc);
+    defer results.deinit();
 
     for (0..std.math.maxInt(usize)) |i| {
         const searched_from = regex.params.from.gr;
         if (regex.searchNext()) |currently_at| {
-            mtl.debug(@src(), "{s}Search #{} (from:{}) =======>{s}", .{mtl.COLOR_ORANGE, i, searched_from, mtl.COLOR_DEFAULT});
-            if (regex.found) |slice| {
-                mtl.debug(@src(), "{s}Success!{s} Found between:{}-{}, slice:{dt}\n", .{mtl.BGCOLOR_ORANGE, mtl.BGCOLOR_DEFAULT, slice.start.gr, slice.end.gr, slice});
+            if (options.print_results == .Yes) {
+                mtl.debug(@src(), "{s}Search result #{} (from:{}) =======>{s}",
+                .{mtl.COLOR_ORANGE, i, searched_from, mtl.COLOR_DEFAULT});
             }
-            if (currently_at.gr >= input_str.size()) {
+            if (regex.foundSlice()) |slice| {
+                try results.append(slice);
+                if (options.print_results == .Yes) {
+                    mtl.debug(@src(), "{s}Success!{s} Found between:{}-{}, slice:{dt}\n",
+                    .{mtl.BGCOLOR_ORANGE, mtl.BGCOLOR_DEFAULT, slice.start.gr, slice.end.gr, slice});
+                }
+            }
+            if (currently_at.gr >= heap.size()) {
                 break;
             }
         } else {
             break;
         }
+    }
+    _ = &correct;
+    try expect(results.items.len == correct.len);
+
+    for (results.items, correct) |l, r| {
+        if (options.print_comparisons == .Yes) {
+            mtl.debug(@src(), "{dt} vs {s}", .{l, r});
+        }
+        try expect(l.equalsUtf8(r, .{}));
     }
 }
 
@@ -1820,36 +1930,32 @@ test "Test regex" {
     const alloc = std.testing.allocator;
     String.ctx = try String.Context.New(alloc);
     defer String.ctx.deinit();
+    const options: TerminalOutput = .{.print_results = .Yes};
 
-    if (false) {
+    if (true) {
         const pattern = \\(?<=[abc]xyz+\s)(\s\d{2,}ab)
 ;
-        const input = "bxyz  789ab cxyzz  012ab";
-        try Search(alloc, pattern, input);
+        const heap = "bxyz  789ab cxyzz  012ab";
+        const correct = [_][]const u8 {" 789ab", " 012ab"};
+        try Search(alloc, pattern, heap, &correct, options);
     }
 
     if (true) {
         //[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+(\.[a-zA-Z]{2,})+
-        const pattern = \\[\u._%+-]+@[\u-]+(\.\u{2,})+
+        const pattern = \\[\u.%+-]+@[\u-]+(\.\u{2,})+
 ;
-        const input = "at 用户_@例子.广告 or support@example.рф \u{AE} \u{1f4a9} or sales@company.co.uk";
-        try Search(alloc, pattern, input);
+        const heap = "at 用户_@例子.广告 or support@example.рф or sales@company.co.uk";
+        const correct = [_][]const u8{"用户_@例子.广告", "support@example.рф", "sales@company.co.uk"};
+        try Search(alloc, pattern, heap, &correct, options);
     }
 
-    if (false) {
+    if (true) {
         const pattern =
 \\=(=-){2,5}(AB|CD{2})[EF|^GH](?=Mi\S{2})(?<ClientName>\w+)(?:БГД[^zyA-Z0-9c]opq(?!05))xyz{2,3}(?=\d{2,}$)
 ;
-        const input = "A==-=-CDDKMikeБГДaopqxyzz567\n";
-        try Search(alloc, pattern, input);
-    }
-
-    if (false) {
-        const pattern =
-\\[^zyA-Z0-9c]opq
-;
-        const input = "aopqxyz";
-        try Search(alloc, pattern, input);
+        const heap = "A==-=-CDDKMikeБГДaopqxyzz567\n";
+        const correct = [_][]const u8 {"==-=-CDDKMikeБГДaopqxyzz"}; // incorrect!, no "567"!
+        try Search(alloc, pattern, heap, &correct, options);
     }
 }
 

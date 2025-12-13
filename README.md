@@ -24,25 +24,33 @@ For code examples check out the tests.
 <br/>
 Tested with Zig 0.14.1
 
+---
 
 ### Regex support is mostly done, backtracking not planned
 
 Example: finding an email address.
 Since emails can contain Unicode in domain names using \w is a bad approach.
-One can either set the regex.charset = .Unicode (default is .Ascii) which will
-interpret all \w as unicode or use a custom \u which is same as \w but also allows
-one-codepoint unicode letters, including Chinese. For example:
+One can either set the <code>regex.charset = .Unicode</code> (default is .Ascii) which will
+allow graphemes above ASCII to be part of <code>\w</code>,
+or use instead the custom escape code <code>\u</code> which is the same as
+<code>\w</code> except that it also includes one-codepoint unicode letters, including
+Chinese. Thus for example if this email regex pattern:
 
+> [\u.%+-]+@[\u-]+(\.\u{2,})+
 
-This email regex pattern: <code>[\u._%+-]+@[\u-]+(\.\u{2,})+</code>
+Tries to find email addresses in the string:
 
-Tries to find emails in <code>"at 用户_@例子.广告 or support@example.рф \u{AE} \u{1f4a9} or sales@company.co.uk"</code>
-And finds <code>用户_@例子.广告</code>, then <code>support@example.рф</code>, then
-<code>sales@company.co.uk</code>, as expected.
+> You can contact us at 用户_@例子.广告 or support@example.рф or sales@company.co.uk
+
+It will find as expected 3 matches:
+
+* 用户_@例子.广告
+* support@example.рф
+* sales@company.co.uk
 
 ---
 
-Example:<br/>
+Random ZigString examples:<br/>
  
  ```zig
     // before using the string class, must create a string context per thread, it contains cached amd shared data:

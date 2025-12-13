@@ -3,9 +3,9 @@
 
 .{
     .paths = .{""},
-    .fingerprint = 0xc96e70cfbdff4ff1,
+    .fingerprint = 0xd2ee692ed3ae2423,
     // the name of your project
-    .name = .app,
+    .name = .zig_string,
     // the version of your project
     .version = "0.5.0",
 
@@ -14,8 +14,6 @@
         .zg = .{
             .url = "https://codeberg.org/atman/zg/archive/v0.14.1.tar.gz",
             .hash = "zg-0.14.1-oGqU3IQ_tALZIiBN026_NTaPJqU-Upm8P_C7QED2Rzm8",
-            // .url = "https://codeberg.org/atman/zg/archive/v0.13.2.tar.gz",
-            // .hash = "122055beff332830a391e9895c044d33b15ea21063779557024b46169fb1984c6e40",
         },
     },
 }

@@ -26,14 +26,14 @@ pub fn build(b: *std.Build) void {
     });
     addZgImport(exe, zg);
 
-    const installAssembly = b.addInstallBinFile(exe.getEmittedAsm(), "assembly.s");
-    b.getInstallStep().dependOn(&installAssembly.step);
+    // const installAssembly = b.addInstallBinFile(exe.getEmittedAsm(), "assembly.s");
+    // b.getInstallStep().dependOn(&installAssembly.step);
 
      // Module
     _ = b.addModule("zigstring", .{
         .root_source_file = b.path("src/String.zig"),
         .imports = &.{
-            .{ .name = "grapheme", .module = zg.module("Graphemes") },
+            .{ .name = "Graphemes", .module = zg.module("Graphemes") },
             .{ .name = "code_point", .module = zg.module("code_point") },
             .{ .name = "Normalize", .module = zg.module("Normalize") },
             .{ .name = "CaseFolding", .module = zg.module("CaseFolding") },
@@ -67,56 +67,10 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    const default_test = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/test_default.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    addZgImport(default_test, zg);
-    const run1 = b.addRunArtifact(default_test);
-    const test_step = b.step("test", "Run default tests");
-    test_step.dependOn(&run1.step);
-
-    const speed_test = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/test_speed.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    // speed_test.root_module.addImport("zigstr", zigstr.module("zigstr"));
-    addZgImport(speed_test, zg);
-    const speed_run = b.addRunArtifact(speed_test);
-    const speed_test_step = b.step("test_speed", "Test Speed");
-    speed_test_step.dependOn(&speed_run.step);
-
-    const irl_test = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/test_irl.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    irl_test.linkLibC();
-    addZgImport(irl_test, zg);
-    const irl_run = b.addRunArtifact(irl_test);
-    const irl_step = b.step("test_irl", "Test IRL");
-    irl_step.dependOn(&irl_run.step);
-
-    const test_regexp = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/Regex.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    test_regexp.linkLibC();
-    addZgImport(test_regexp, zg);
-    const regexp_run = b.addRunArtifact(test_regexp);
-    const regexp_step = b.step("test_regex", "Test Regex");
-    regexp_step.dependOn(&regexp_run.step);
+    AddNewTest(b, target, optimize, zg, "src/test_default.zig", "test", "Run Default Test");
+    AddNewTest(b, target, optimize, zg, "src/test_speed.zig", "test_speed", "Test Speed");
+    AddNewTest(b, target, optimize, zg, "src/test_irl.zig", "test_irl", "Test IRL");
+    AddNewTest(b, target, optimize, zg, "src/Regex.zig", "test_regex", "Test Regex");
 }
 
 fn addZgImport(target: anytype, zg: *std.Build.Dependency) void {
@@ -126,4 +80,20 @@ fn addZgImport(target: anytype, zg: *std.Build.Dependency) void {
     target.root_module.addImport("GeneralCategories", zg.module("GeneralCategories"));
     target.root_module.addImport("Normalize", zg.module("Normalize"));
     target.root_module.addImport("CaseFolding", zg.module("CaseFolding"));
+}
+
+fn AddNewTest(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode,
+zg: *std.Build.Dependency, path: []const u8, name: []const u8, description: []const u8) void {
+    const new_test = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path(path),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    new_test.linkLibC();
+    addZgImport(new_test, zg);
+    const regexp_run = b.addRunArtifact(new_test);
+    const regexp_step = b.step(name, description);
+    regexp_step.dependOn(&regexp_run.step);
 }
