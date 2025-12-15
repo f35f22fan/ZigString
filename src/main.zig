@@ -9,12 +9,12 @@ const ArrayList = std.ArrayList;
 const Codepoint = String.Codepoint;
 const Index = String.Index;
 const Context = String.Context;
-const E = error {NotFound, Other};
-const alloc = std.heap.page_allocator;//std.testing.allocator;
+const E = error{ NotFound, Other };
+const alloc = std.heap.page_allocator; //std.testing.allocator;
 
 const Shape = struct {
     ptr: *anyopaque,
-    fnPtr: *const fn(ptr: *anyopaque) void,
+    fnPtr: *const fn (ptr: *anyopaque) void,
 
     fn from(pointer: anytype) Shape {
         const T = @TypeOf(pointer);
@@ -26,7 +26,7 @@ const Shape = struct {
             }
         };
 
-        return Shape {
+        return Shape{
             .ptr = pointer,
             .fnPtr = gen.opaqueFn,
             // .constFnPtr = gen.constOpaqueFn,
@@ -42,8 +42,7 @@ const Circle = struct {
     r: f32 = undefined,
 
     fn draw(self: *Circle) void {
-        mtl.debug(@src(), "Circle::draw() r={d:.4}, area={d:.4}",
-            .{self.r, self.r * self.r * std.math.pi});
+        mtl.debug(@src(), "Circle::draw() r={d:.4}, area={d:.4}", .{ self.r, self.r * self.r * std.math.pi });
     }
 };
 
@@ -53,29 +52,17 @@ const Triangle = struct {
     side3: usize = undefined,
 
     fn draw(self: *Triangle) void {
-        mtl.debug(@src(), "Triangle::draw() {}, {}, {}", .{self.side1, self.side2, self.side3});
+        mtl.debug(@src(), "Triangle::draw() {}, {}, {}", .{ self.side1, self.side2, self.side3 });
     }
 };
 
-fn getString() struct {i64, []const u8} {
-    return .{5, "Hello"};
+fn getString() struct { i64, []const u8 } {
+    return .{ 5, "Hello" };
 }
 
 pub fn main() !u8 {
     String.ctx = try Context.New(alloc);
     defer String.ctx.deinit();
-
-    const pattern = \\[a-z]
-        //[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+\.
-;
-    const input = "at support@example.com";
-
-//at support@example.com or sales@company.org
-    try Regex.Search(alloc, pattern, input);
-
-    if (true) {
-        return 0;
-    }
 
     const values = .{
         @as(u32, 1234),
@@ -85,20 +72,20 @@ pub fn main() !u8 {
     } ++ .{false} ** 2;
 
     inline for (values, 0..) |v, i| {
-        mtl.debug(@src(), "{} => {any}", .{i, v});
+        mtl.debug(@src(), "{} => {any}", .{ i, v });
     }
 
     const len, const str = getString();
-    mtl.debug(@src(), "len={}, str={s}", .{len, str});
+    mtl.debug(@src(), "len={}, str={s}", .{ len, str });
 
-    var all = ArrayList(Shape).init(alloc);
-    defer all.deinit();
+    var all: ArrayList(Shape) = .empty;
+    defer all.deinit(alloc);
 
-    var triangle = Triangle {.side1=3, .side2=4, .side3=7};
-    try all.append(Shape.from(&triangle));
+    var triangle = Triangle{ .side1 = 3, .side2 = 4, .side3 = 7 };
+    try all.append(alloc, Shape.from(&triangle));
 
-    var circle = Circle {.r = 5};
-    try all.append(Shape.from(&circle));
+    var circle = Circle{ .r = 5 };
+    try all.append(alloc, Shape.from(&circle));
 
     for (all.items) |item| {
         item.draw();
@@ -111,7 +98,7 @@ pub fn main() !u8 {
 }
 
 pub fn getData() [2]u32 {
-    return .{15, 32};
+    return .{ 15, 32 };
 }
 
 pub fn parseU64(buf: []const u8, radix: u8) !u64 {
@@ -132,7 +119,7 @@ pub fn parseU64(buf: []const u8, radix: u8) !u64 {
         ov = @addWithOverflow(ov[0], digit);
         if (ov[1] != 0) return error.OverFlow;
         x = ov[0];
-        mtl.debug(@src(), "x={}, ov[0]={}", .{x, ov[0]});
+        mtl.debug(@src(), "x={}, ov[0]={}", .{ x, ov[0] });
     }
 
     return x;

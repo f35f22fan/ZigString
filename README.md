@@ -22,7 +22,7 @@ Internally it uses SIMD or linear operations depending on the string length.
 <p/>
 For code examples check out the tests.
 <br/>
-Tested with Zig 0.14.1
+Tested with Zig 0.15.2
 
 ---
 

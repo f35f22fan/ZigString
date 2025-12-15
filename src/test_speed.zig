@@ -44,7 +44,7 @@ fn FindOneSimd(haystack: String, needle: Codepoint, from: usize, correct: ?usize
     const result = haystack.findOneSimd(needle, from, depth);
     const done_in = getTime() - start_time;
     const print_color = getFgColor(result, correct);
-    mtl.debug(@src(), "{s}FoundAt={?}, From={}, Time={}{s}", .{ print_color, result, from, done_in, TimeExt});
+    mtl.debug(@src(), "{s}FoundAt={?}, From={}, Time={}{s}", .{ print_color, result, from, done_in, TimeExt });
 
     return if (result) |t| t else Error.NotFound;
 }
@@ -53,7 +53,7 @@ fn FindOneLinear(haystack: String, needle: Codepoint) !String.Index {
     const start_time = getTime();
     const result = std.mem.indexOfScalar(Codepoint, haystack.codepoints.items, needle);
     const done_in = getTime() - start_time;
-    mtl.debug(@src(), "FoundAt={?}, T={}{s}", .{result, done_in, TimeExt});
+    mtl.debug(@src(), "FoundAt={?}, T={}{s}", .{ result, done_in, TimeExt });
 
     return result;
 }
@@ -61,17 +61,17 @@ fn FindOneLinear(haystack: String, needle: Codepoint) !String.Index {
 fn FindManySimd(haystack: String, needles: ConstCpSlice, from: ?Index, comptime depth: u16, correct: ?usize) !String.Index {
     const start_time = getTime();
     const result = haystack.findManySimd(needles, from, depth) orelse {
-        const buf = try String.utf8_from_slice(alloc, needles);
-        defer buf.deinit();
-        mtl.debug(@src(), "Not found '{s}' from={?}, haystack.cp_count={}", .{buf.items, from, haystack.size_cp()});
+        var buf = try String.utf8_from_slice(alloc, needles);
+        defer buf.deinit(alloc);
+        mtl.debug(@src(), "Not found '{s}' from={?f}, haystack.cp_count={}", .{ buf.items, from, haystack.size_cp() });
         if (haystack.size() < 50) {
-            mtl.debug(@src(), "Haystack: {dt}", .{haystack});
+            mtl.debug(@src(), "Haystack: {f}", .{haystack});
         }
         return Error.NotFound;
     };
     const done_in = getTime() - start_time;
     const print_color = getFgColor(result.gr, correct);
-    mtl.debug(@src(), "{s}FoundAt={?}, From={?}, Time={}{s}", .{ print_color, result, from, done_in, TimeExt});
+    mtl.debug(@src(), "{s}FoundAt={f}, From={?f}, Time={}{s}", .{ print_color, result, from, done_in, TimeExt });
 
     return result;
 }
@@ -81,7 +81,7 @@ fn FindManyLinear(haystack: String, needles: ConstCpSlice, from: ?Index, correct
     const result = haystack.findManyLinear(needles, from, CaseSensitive.Yes) orelse return Error.NotFound;
     const done_in = getTime() - start_time;
     const print_color = getFgColor(result.gr, correct);
-    mtl.debug(@src(), "{s}FoundAt={?}, From={?}, Time={}{s}", .{print_color, result, from, done_in, TimeExt});
+    mtl.debug(@src(), "{s}FoundAt={f}, From={?f}, Time={}{s}", .{ print_color, result, from, done_in, TimeExt });
 
     return result;
 }
@@ -89,7 +89,7 @@ fn FindManyLinear(haystack: String, needles: ConstCpSlice, from: ?Index, correct
 fn FindBackwards() !void {
     String.ctx = try Context.New(alloc);
     defer String.ctx.deinit();
-    
+
     const str = "<human><age>27</age><name>Jos\u{65}\u{301}</name></human>";
     const haystack = try String.From(str);
     defer haystack.deinit();
@@ -101,17 +101,16 @@ fn FindBackwards() !void {
         const result = haystack.lastIndexOf(needles_raw, from);
         const done_in = getTime() - start_time;
 
-        mtl.debug(@src(), "findManySimdFromEnd() FoundAt={?}, From={?}, needles=\"{s}\", Time={}{s}",
-        .{ result, from, needles_raw, done_in, TimeExt});
+        mtl.debug(@src(), "findManySimdFromEnd() FoundAt={f?}, From={f?}, needles=\"{s}\", Time={}{s}", .{ result, from, needles_raw, done_in, TimeExt });
     }
 }
 
 pub fn test_find_index(raw_str: []const u8, needles: ConstCpSlice, froms: []const usize, answers: ?[]const usize) !void {
-    std.debug.print("="**70++"\n", .{});
+    std.debug.print("=" ** 70 ++ "\n", .{});
     const short_string_len: usize = 255;
-    const needles_buf = try String.utf8_from_slice(alloc, needles);
-    defer needles_buf.deinit();
-    mtl.debug(@src(), "needles_count=\"{s}{s}\"", .{mtl.COLOR_GREEN, needles_buf.items});
+    var needles_buf = try String.utf8_from_slice(alloc, needles);
+    defer needles_buf.deinit(alloc);
+    mtl.debug(@src(), "needles_count=\"{s}{s}\"", .{ mtl.COLOR_GREEN, needles_buf.items });
     if (raw_str.len <= short_string_len) {
         mtl.debug(@src(), "raw_str.len={} bytes: '{s}'", .{ raw_str.len, raw_str });
     } else {
@@ -121,8 +120,7 @@ pub fn test_find_index(raw_str: []const u8, needles: ConstCpSlice, froms: []cons
     var haystack = try String.From(raw_str);
     defer haystack.deinit();
     const done_in = getTime() - start_time;
-    mtl.debug(@src(), "String(graphemes={}, cp={}) init done in {}{s}\n",
-    .{ haystack.size(), haystack.size_cp(), done_in, TimeExt });
+    mtl.debug(@src(), "String(graphemes={}, cp={}) init done in {}{s}\n", .{ haystack.size(), haystack.size_cp(), done_in, TimeExt });
     if (raw_str.len <= short_string_len) {
         try haystack.printGraphemes(@src());
         try haystack.printCodepoints(@src());
@@ -146,15 +144,15 @@ test "From File" {
 
     const path = try io.getHomeUtf8(alloc, "/Documents/content.xml");
     defer path.deinit();
-    const file_contents = try io.readFile(alloc, path);
-    defer alloc.free(file_contents);
+    var file_contents = try io.readFile(alloc, path);
+    defer file_contents.deinit(alloc);
     const needles_raw = "CONCAT(&quot;EC.TYPE=&quot;;[SLAVE1_CAN.G181]))\"";
     // "Это подтверждается разговором арестованного Иисуса";
-    const needles = try String.toCodepoints(alloc, needles_raw);
-    defer needles.deinit();
+    var needles = try String.toCodepoints(alloc, needles_raw);
+    defer needles.deinit(alloc);
     const from = [_]usize{0};
     const correct = [_]usize{7753055};
-    try test_find_index(file_contents, needles.items, from[0..], correct[0..]);
+    try test_find_index(file_contents.items[0..], needles.items, from[0..], correct[0..]);
 }
 
 test "Speed test 2" {
@@ -166,4 +164,3 @@ test "Speed test 2" {
     const correct = [_]usize{ 5, 5, 31 };
     try test_find_index(JoseStr, &needles, &from, &correct);
 }
-

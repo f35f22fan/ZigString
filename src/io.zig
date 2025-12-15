@@ -2,6 +2,7 @@ const std = @import("std");
 const Str = @import("String.zig");
 const mtl = @import("mtl.zig");
 const Allocator = std.mem.Allocator;
+const ArrayList = std.ArrayList;
 
 pub const Error = error{NotFound};
 
@@ -15,7 +16,7 @@ const FileEntry = struct {
     name: []const u8,
 
     pub fn From(alloc: Allocator, entry: std.fs.Dir.Entry) !FileEntry {
-        return .{.kind = entry.kind, .name = try alloc.dupe(u8, entry.name)};
+        return .{ .kind = entry.kind, .name = try alloc.dupe(u8, entry.name) };
     }
 
     pub fn deinit(self: FileEntry, alloc: Allocator) void {
@@ -64,7 +65,7 @@ pub fn getHomeUtf8(alloc: Allocator, subpath: ?[]const u8) !Str {
 }
 
 pub fn listFiles(alloc: Allocator, folder: ?Folder, subdir: ?Str) !std.ArrayList(FileEntry) {
-    var dir : std.fs.Dir = undefined;
+    var dir: std.fs.Dir = undefined;
 
     var fullpath: Str = Str.New();
     defer fullpath.deinit();
@@ -76,18 +77,17 @@ pub fn listFiles(alloc: Allocator, folder: ?Folder, subdir: ?Str) !std.ArrayList
         };
 
         if (subdir) |subpath| {
-            if (!subpath.startsWithCp('/')
-                and !fullpath.endsWithCp('/')) {
+            if (!subpath.startsWithCp('/') and !fullpath.endsWithCp('/')) {
                 try fullpath.addAscii("/");
             }
-            
+
             try fullpath.add(subpath);
         }
     } else {
         const utf8 = subdir orelse return error.BadArg;
         fullpath = try utf8.Clone();
     }
-    
+
     mtl.debug(@src(), "{dt}", .{fullpath});
     const bytes = try fullpath.toUtf8();
     defer bytes.deinit();
@@ -124,25 +124,39 @@ pub fn listFilesUtf8(alloc: Allocator, folder: ?Folder, subdir: ?[]const u8) !st
 }
 
 pub fn openDir(fullpath: Str) !std.fs.Dir {
-    const bytes = try fullpath.toUtf8();
-    defer bytes.deinit();
+    var bytes = try fullpath.toUtf8();
+    defer bytes.deinit(Str.ctx.a);
     return openDirUtf8(bytes.items);
 }
 
 pub fn openDirUtf8(fullpath: []const u8) !std.fs.Dir {
-    const dir = try std.fs.openDirAbsolute(fullpath, .{.iterate=true, .no_follow = true});
+    const dir = try std.fs.openDirAbsolute(fullpath, .{ .iterate = true, .no_follow = true });
     return dir;
 }
 
-pub fn readFile(alloc: Allocator, full_path: Str) ![]u8 {
-    const bytes = try full_path.toUtf8();
-    defer bytes.deinit();
+pub fn readFile(alloc: Allocator, full_path: Str) !ArrayList(u8) {
+    var bytes = try full_path.toUtf8();
+    defer bytes.deinit(Str.ctx.a);
     return readFileUtf8(alloc, bytes.items);
 }
 
-pub fn readFileUtf8(alloc: Allocator, full_path: []const u8) ![]u8 {
+pub fn readFileUtf8(alloc: Allocator, full_path: []const u8) !ArrayList(u8) {
     const file = try std.fs.openFileAbsolute(full_path, .{});
     defer file.close();
-    return file.reader().readAllAlloc(alloc, std.math.maxInt(usize));
-}
+    // return file.reader().readAllAlloc(alloc, std.math.maxInt(usize));
+    var buf_in: [4096]u8 = undefined;
+    var dest_buf: [4096]u8 = undefined;
+    var r = file.reader(&buf_in);
+    var reader = &r.interface;
+    var arr: ArrayList(u8) = .empty;
 
+    while (true) {
+        const num = try reader.readSliceShort(&dest_buf);
+        if (num == 0) {
+            break;
+        }
+        try arr.appendSlice(alloc, dest_buf[0..num]);
+    }
+
+    return arr;
+}

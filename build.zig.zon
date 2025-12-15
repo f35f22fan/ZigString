@@ -12,8 +12,10 @@
     // the actual packages you need as dependencies of your project
     .dependencies = .{
         .zg = .{
-            .url = "https://codeberg.org/atman/zg/archive/v0.14.1.tar.gz",
-            .hash = "zg-0.14.1-oGqU3IQ_tALZIiBN026_NTaPJqU-Upm8P_C7QED2Rzm8",
+            .url = "https://codeberg.org/neurocyte/zg/archive/v0.15.2.tar.gz",
+            .hash = "zg-0.15.2-oGqU3AtAtAI7gs7zPvzg2_TlVIqi9wCNEw7DLvD5OvDN",
+            //.url = "https://codeberg.org/atman/zg/archive/v0.14.1.tar.gz",
+            //.hash = "zg-0.14.1-oGqU3IQ_tALZIiBN026_NTaPJqU-Upm8P_C7QED2Rzm8",
         },
     },
 }

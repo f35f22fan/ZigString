@@ -3,22 +3,19 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 fn print(out: anytype, comptime fg: []const u8, src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
-    nosuspend out.print("{s}{s}{s}[{s}]{s}:{d} {s}",
-    .{fg, src.file, COLOR_CYAN, src.fn_name, fg, src.line, COLOR_DEFAULT}) catch {};
-    nosuspend out.print(fmt, args) catch {};
-    nosuspend out.print("{s}\n", .{COLOR_DEFAULT}) catch {};
-}
-
-inline fn msg(comptime fg: []const u8, src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
-    print(std.io.getStdOut().writer(), fg, src, fmt, args);
+    _ = &out;
+    std.debug.print("{s}{s}{s}[{s}]{s}:{d} {s}", .{ fg, src.file, COLOR_CYAN, src.fn_name, fg, src.line, COLOR_DEFAULT });
+    std.debug.print(fmt, args);
+    std.debug.print("{s}\n", .{COLOR_DEFAULT});
 }
 
 inline fn debugger(comptime fg: []const u8, src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
-    print(std.io.getStdErr().writer(), fg, src, fmt, args);
+    //print(std.io.getStdErr().writer(), fg, src, fmt, args);
+    print(null, fg, src, fmt, args);
 }
 
 pub inline fn info(src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
-    msg(COLOR_BLUE, src, fmt, args);
+    print(null, COLOR_BLUE, src, fmt, args);
 }
 
 pub inline fn debug(src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
@@ -44,7 +41,6 @@ pub inline fn tbd(src: std.builtin.SourceLocation) void {
 pub fn separator(src: std.builtin.SourceLocation, comptime chars: []const u8) void {
     debug(src, chars ** 30, .{});
 }
-
 
 const posix = (builtin.target.os.tag != .windows);
 
@@ -76,4 +72,3 @@ pub const BOLD_START = if (posix) "\x1B[1m" else "";
 pub const BOLD_END = if (posix) "\x1B[0m" else "";
 pub const UNDERLINE_START = if (posix) "\x1B[4m" else "";
 pub const UNDERLINE_END = if (posix) "\x1B[0m" else "";
-

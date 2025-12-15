@@ -44,11 +44,11 @@ pub const TerminalOutput = struct {
     print_comparisons: PrintComparisons = .No,
 
     pub fn AllYes() TerminalOutput {
-        return .{.diagnose = .Yes, .print_results = .Yes};
+        return .{ .diagnose = .Yes, .print_results = .Yes };
     }
 
     pub fn OnlyComparisons() TerminalOutput {
-        return .{.print_comparisons = .Yes};
+        return .{ .print_comparisons = .Yes };
     }
 };
 
@@ -62,7 +62,7 @@ pub const FindParams = struct {
     from: Index = Index.strStart(),
 };
 
-const Error = error {
+const Error = error{
     BadRange,
     Parsing,
 };
@@ -90,12 +90,11 @@ pub const Item = struct {
 
         regex.setLookingBehind(true);
         if (TraceLookBehind) {
-            mtl.debug(@src(), "group_{?} from:{} negative_lb:{}",
-                .{lb_group.id, from, lb_group.look_around.negative_lookbehind});
+            mtl.debug(@src(), "group_{?} from:{} negative_lb:{}", .{ lb_group.id, from, lb_group.look_around.negative_lookbehind });
         }
         const idx = lb_group.matches(haystack, from);
         if (TraceLookBehind) {
-            mtl.debug(@src(), "group_{?} result:{?}", .{lb_group.id, idx});
+            mtl.debug(@src(), "group_{?} result:{?}", .{ lb_group.id, idx });
         }
         regex.setLookingBehind(false);
 
@@ -135,38 +134,36 @@ pub const Item = struct {
     }
 
     pub fn newGroup(g: Group) Item {
-        return Item {
-            .data = ItemData {.group = g }
-        };
+        return Item{ .data = ItemData{ .group = g } };
     }
 
     pub fn newMeta(m: Meta) Item {
         return Item{
-            .data = ItemData {.meta = m},
+            .data = ItemData{ .meta = m },
         };
     }
 
     pub fn newName(s: String) Item {
-        return Item {
-            .data = ItemData {.name = s},
+        return Item{
+            .data = ItemData{ .name = s },
         };
     }
 
     pub fn newQtty(q: Qtty) Item {
-        return Item {
-            .data = ItemData {.qtty = q},
+        return Item{
+            .data = ItemData{ .qtty = q },
         };
     }
 
     pub fn newRange(r: GraphemeRange) Item {
-        return Item {
-            .data = ItemData {.range = r},
+        return Item{
+            .data = ItemData{ .range = r },
         };
     }
 
     pub fn newString(s: String) Item {
-        return Item {
-            .data = ItemData{.str = s},
+        return Item{
+            .data = ItemData{ .str = s },
         };
     }
 };
@@ -180,14 +177,14 @@ const ItemData = union(enum) {
     range: GraphemeRange,
 
     inline fn isMeta(self: ItemData, param: Meta) bool {
-        switch(self) {
+        switch (self) {
             .meta => |m| return (m == param),
             else => return false,
         }
     }
 
     inline fn isRange(self: ItemData) bool {
-        switch(self) {
+        switch (self) {
             .range => return true,
             else => return false,
         }
@@ -257,7 +254,7 @@ const LookAround = struct {
 
     inline fn anyLookAround(self: LookAround) bool {
         return self.negative_lookahead or self.positive_lookahead or
-        self.negative_lookbehind or self.positive_lookbehind;
+            self.negative_lookbehind or self.positive_lookbehind;
     }
 
     inline fn anyLookBehind(self: LookAround) bool {
@@ -275,7 +272,7 @@ const LookAround = struct {
     pub fn From(tokens_iter: *Iterator(Item)) LookAround {
         var la: LookAround = .{};
         const token = tokens_iter.peekFirst() orelse return la;
-            
+
         switch (token.data) {
             .meta => |m| {
                 switch (m) {
@@ -350,13 +347,13 @@ pub const Qtty = struct {
             defer s1.deinit();
             const n1: i32 = try s1.parseInt(i32, 10);
             if (comma_idx.eq(input.beforeLast())) {
-                return Qtty {.a = n1, .b = inf()};
+                return Qtty{ .a = n1, .b = inf() };
             } else {
                 const s2 = try input.betweenIndices(comma_idx.addRaw(1), input.beforeLast().addRaw(1));
                 defer s2.deinit();
                 const n2: i32 = try s2.parseInt(i32, 10);
                 const qtty = Qtty.FixedRange(n1, n2);
-                
+
                 return qtty;
             }
         } else {
@@ -378,21 +375,24 @@ pub const Qtty = struct {
     pub inline fn inf() i64 {
         return std.math.maxInt(i64);
     }
-    /// format implements the `std.fmt` format interface for printing types.
-    pub fn format(self: Qtty, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        _ = fmt;
-        _ = options;
+
+    pub fn format(self: *const Qtty, writer: *std.Io.Writer) !void {
         var buf: [8]u8 = undefined;
         var s: []const u8 = undefined;
         const lazy = if (self.greedy) "" else "(lazy)";
         if (self.b == inf()) {
-            try writer.print("Qtty[{}+{s}]", .{self.a, lazy});
+            try writer.print("Qtty[{}+{s}]", .{ self.a, lazy });
         } else {
             if (self.a == self.b) {
-                try writer.print("Qtty[{}{s}]", .{self.a, lazy});
+                try writer.print("Qtty[{}{s}]", .{ self.a, lazy });
             } else {
-                s = if (self.b == inf()) "+" else try std.fmt.bufPrint(&buf, "{}", .{self.b});
-                try writer.print("Qtty[{}..{s}{s}]", .{self.a, s, lazy});
+                if (self.b == inf()) {
+                    s = "+";
+                } else {
+                    s = std.fmt.bufPrint(&buf, "{}", .{self.b}) catch return;
+                }
+
+                try writer.print("Qtty[{}..{s}{s}]", .{ self.a, s, lazy });
             }
         }
     }
@@ -406,15 +406,15 @@ pub const Qtty = struct {
     }
 
     pub fn ExactNumber(a: i64) Qtty {
-        return Qtty {.a = a, .b = a};
+        return Qtty{ .a = a, .b = a };
     }
 
     pub fn All() Qtty {
-        return Qtty {.a = 1, .b = inf() };
+        return Qtty{ .a = 1, .b = inf() };
     }
 
     pub fn One() Qtty {
-        return Qtty {.a = 1, .b = 1};
+        return Qtty{ .a = 1, .b = 1 };
     }
 
     pub fn setExactNumber(self: *Qtty, a: i64) void {
@@ -422,8 +422,8 @@ pub const Qtty = struct {
         self.b = a;
     }
 
-     pub fn FixedRange(a: i64, b: i64) Qtty {
-        return Qtty {.a = a, .b = b};
+    pub fn FixedRange(a: i64, b: i64) Qtty {
+        return Qtty{ .a = a, .b = b };
     }
 
     pub fn fixedRange(self: Qtty) bool { // x{a,b}
@@ -457,17 +457,23 @@ pub const Qtty = struct {
         return count < self.a or self.greedy;
     }
 
-    pub fn ZeroOrMore() Qtty { return Qtty {.a = 0, .b = inf()}; }
+    pub fn ZeroOrMore() Qtty {
+        return Qtty{ .a = 0, .b = inf() };
+    }
     pub fn zeroOrMore(self: Qtty) bool { // x*
         return self.a == 0 and self.b == inf();
     }
 
-    pub fn ZeroOrOne() Qtty { return Qtty {.a = 0, .b = 1}; }
+    pub fn ZeroOrOne() Qtty {
+        return Qtty{ .a = 0, .b = 1 };
+    }
     pub fn zeroOrOne(self: Qtty) bool { // x?
         return self.a == 0 and self.b == 1;
     }
 
-    pub fn OneOrMore() Qtty { return Qtty {.a = 1, .b = inf()}; }
+    pub fn OneOrMore() Qtty {
+        return Qtty{ .a = 1, .b = inf() };
+    }
     pub fn oneOrMore(self: Qtty) bool { // x+
         return self.a == 1 and self.b >= 1;
     }
@@ -475,9 +481,9 @@ pub const Qtty = struct {
     pub fn nOrMore(self: Qtty) bool {
         return self.b == inf();
     }
-    
+
     pub fn New(a: i64, b: ?i64) Qtty {
-        return Qtty {
+        return Qtty{
             .a = a,
             .b = if (b) |n| n else 1,
         };
@@ -510,22 +516,22 @@ pub const Group = struct {
 
     pub fn New(regex: *Regex, parent: ?*Group) Group {
         const parent_id = if (parent) |p| p.id else null;
-        var new_group = Group{.regex = regex, .id = regex.next_group_id, .parent_id = parent_id};
+        var new_group = Group{ .regex = regex, .id = regex.next_group_id, .parent_id = parent_id };
         regex.next_group_id += 1;
-        new_group.token_arr = ArrayList(ArrayList(Item)).init(regex.alloc);
+        new_group.token_arr = .empty;
 
         return new_group;
     }
 
     pub fn deinit(self: *Group) void {
-        for (self.token_arr.items) |arr| {
+        for (self.token_arr.items) |*arr| {
             for (arr.items) |*t| {
                 t.deinit();
             }
-            arr.deinit();
+            arr.deinit(self.regex.alloc);
         }
 
-        self.token_arr.deinit();
+        self.token_arr.deinit(self.regex.alloc);
     }
 
     fn clearCapture(self: *Group) void {
@@ -555,46 +561,46 @@ pub const Group = struct {
         }
     }
 
-    pub fn addGrapheme(tokens: *ArrayList(Item), gr: Grapheme) !void {
+    pub fn addGrapheme(a: Allocator, tokens: *ArrayList(Item), gr: Grapheme) !void {
         // If the last token is a string add to it, otherwise append a new string Item and add to it:
         const len = tokens.items.len;
-        if (len > 0 and tokens.items[len-1].isString()) {
-            const t = &tokens.items[len-1];
+        if (len > 0 and tokens.items[len - 1].isString()) {
+            const t = &tokens.items[len - 1];
             switch (t.data) {
                 .str => |*s| {
                     try s.addGrapheme(gr);
                 },
                 else => {
                     unreachable;
-                }
+                },
             }
         } else {
             var s = String.New();
             try s.addGrapheme(gr);
-            try tokens.append(Item.newString(s));
+            try tokens.append(a, Item.newString(s));
         }
     }
 
-    fn addName(arr: *ArrayList(Item), s: String) !void {
-        try arr.append(Item.newName(s));
+    fn addName(a: Allocator, arr: *ArrayList(Item), s: String) !void {
+        try arr.append(a, Item.newName(s));
     }
 
-    fn addQtty(arr: *ArrayList(Item), qtty: Qtty) !void {
-        try arr.append(Item.newQtty(qtty));
+    fn addQtty(a: Allocator, arr: *ArrayList(Item), qtty: Qtty) !void {
+        try arr.append(a, Item.newQtty(qtty));
     }
 
-    fn addStr(arr: *ArrayList(Item), s: String) !void {
-        try arr.append(Item.newString(s));
+    fn addStr(a: Allocator, arr: *ArrayList(Item), s: String) !void {
+        try arr.append(a, Item.newString(s));
     }
 
-    fn addAscii(arr: *ArrayList(Item), s: []const u8) !void {
+    fn addAscii(a: Allocator, arr: *ArrayList(Item), s: []const u8) !void {
         const item = Item.newString(try String.FromAscii(s));
         // mtl.debug(@src(), "item:{}", .{item});
-        try arr.append(item);
+        try arr.append(a, item);
     }
 
-    fn addUtf8(arr: *ArrayList(Item), s: []const u8) !void {
-        try arr.append(Item.newString(try String.From(s)));
+    fn addUtf8(a: Allocator, arr: *ArrayList(Item), s: []const u8) !void {
+        try arr.append(a, Item.newString(try String.From(s)));
     }
 
     fn adjustLookBehinds(self: *Group, parent: ?LookAround) void {
@@ -609,7 +615,7 @@ pub const Group = struct {
                     .group => |*subgroup| {
                         subgroup.adjustLookBehinds(self.look_around);
                     },
-                    else => {}
+                    else => {},
                 }
             }
         }
@@ -621,18 +627,18 @@ pub const Group = struct {
             while (token_iter.nextPtr()) |t| {
                 switch (t.data) {
                     .str => |*s| {
-                        var new_tokens = ArrayList(Item).init(self.regex.alloc);
-                        defer new_tokens.deinit();
-                        try parseRange(s.*, &new_tokens);
+                        var new_tokens: ArrayList(Item) = .empty;
+                        defer new_tokens.deinit(self.regex.alloc);
+                        try parseRange(self.regex.alloc, s.*, &new_tokens);
                         if (new_tokens.items.len > 0) {
                             var x = arr.orderedRemove(token_iter.at);
                             x.deinit();
                             for (new_tokens.items) |item| {
-                                try arr.insert(token_iter.at, item);
+                                try arr.insert(self.regex.alloc, token_iter.at, item);
                             }
                         }
                     },
-                    else => {}
+                    else => {},
                 }
             }
         }
@@ -660,7 +666,7 @@ pub const Group = struct {
     }
 
     fn createArgs(self: Group) Args {
-        return Args{.cs=self.regex.params.cs, .look_ahead = !self.regex.lookingBehind()};
+        return Args{ .cs = self.regex.params.cs, .look_ahead = !self.regex.lookingBehind() };
     }
 
     fn endsWithMeta(slice: []const Item, meta: Meta) bool {
@@ -682,28 +688,28 @@ pub const Group = struct {
 
         while (string_iter.go(direction)) |gr| {
             if (self.anyLookBehind()) {
-                // mtl.debug(@src(), "Look behind: {dt}, at:{}", .{gr, gr.idx});
+                // mtl.debug(@src(), "Look behind: {f}, at:{}", .{gr, gr.idx});
             }
 
             var found_next_one = false;
             switch (meta) {
                 .SymbolWordChar => {
                     found_next_one = gr.isWordChar(self.regex.charset);
-                    // mtl.debug(@src(), "SymbolWordChar:\"{dt}\", ({})", .{gr, found_next_one});
+                    // mtl.debug(@src(), "SymbolWordChar:\"{f}\", ({})", .{gr, found_next_one});
                 },
                 .SymbolNonWordChar => {
                     found_next_one = !gr.isWordChar(self.regex.charset);
                 },
                 .SymbolUnicodeWordChar => {
                     found_next_one = gr.isWordChar(.Unicode);
-                    // mtl.debug(@src(), "SymbolUnicodeWordChar:{dt}, ({}), qtty:{}, count:{}", .{gr, found_next_one, qtty, count});
+                    // mtl.debug(@src(), "SymbolUnicodeWordChar:{f}, ({}), qtty:{}, count:{}", .{gr, found_next_one, qtty, count});
                 },
                 .SymbolNonUnicodeWordChar => {
                     found_next_one = !gr.isWordChar(.Unicode);
                 },
                 .SymbolNumber => {
                     found_next_one = gr.isNumber();
-                    // mtl.debug(@src(), "SymbolNumber:\"{dt}\", ({}), look_ahead:{}", .{gr, found_next_one, self.anyLookAhead()});
+                    // mtl.debug(@src(), "SymbolNumber:\"{f}\", ({}), look_ahead:{}", .{gr, found_next_one, self.anyLookAhead()});
                 },
                 .SymbolNonNumber => {
                     found_next_one = !gr.isNumber();
@@ -718,8 +724,8 @@ pub const Group = struct {
                     // mtl.debug(@src(), "SymbolNonWhitespace, ({})", .{found_next_one});
                 },
                 else => {
-                    mtl.debug(@src(), "Symbol(Other):\"{dt}\", ({})", .{gr, found_next_one});
-                }
+                    mtl.debug(@src(), "Symbol(Other):\"{f}\", ({})", .{ gr, found_next_one });
+                },
             }
 
             if (!found_next_one) {
@@ -728,7 +734,7 @@ pub const Group = struct {
 
             ret_idx = if (self.regex.lookingBehind()) string_iter.position else gr.idx.plusGrapheme(gr);
             count += 1;
-            
+
             if (qtty.shouldBreakAfter(count)) {
                 // found_enough = true;
                 break;
@@ -747,7 +753,7 @@ pub const Group = struct {
                 ret_idx = null;
             }
         }
-        
+
         if (self.matchAnyOf()) {
             // mtl.debug(@src(), "from:{}", .{from});
             return from;
@@ -757,18 +763,8 @@ pub const Group = struct {
         }
     }
 
-    pub fn format(self: Group, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        _ = options;
-
-        if (fmt.len > 0) {
-            if (std.mem.eql(u8, fmt, "id")) {
-                try writer.print("Group:{?}", .{self.id});
-                return;
-            }
-        }
-
-        try writer.print("{s}Group:{?} {} (parent:{?}) {s}", .{mtl.COLOR_ORANGE,
-        self.id, self.match_type, self.parent_id, mtl.COLOR_DEFAULT});
+    pub fn format(self: Group, writer: *std.Io.Writer) !void {
+        try writer.print("{s}Group:{?} {} (parent:{?}) {s}", .{ mtl.COLOR_ORANGE, self.id, self.match_type, self.parent_id, mtl.COLOR_DEFAULT });
         for (self.token_arr.items, 0..) |arr, array_index| {
             for (arr.items, 0..) |t, item_index| {
                 if (array_index > 0 and item_index == 0) {
@@ -776,23 +772,23 @@ pub const Group = struct {
                 }
                 switch (t.data) {
                     .group => |g| {
-                        try writer.print("{s}Group={?}{s} ", .{mtl.COLOR_BLUE, g.id, mtl.COLOR_DEFAULT});
+                        try writer.print("{s}Group={?}{s} ", .{ mtl.COLOR_BLUE, g.id, mtl.COLOR_DEFAULT });
                     },
                     .qtty => |q| {
-                        try writer.print("{s}{}{s} ", .{mtl.COLOR_GREEN, q, mtl.COLOR_DEFAULT});
+                        try writer.print("{s}{f}{s} ", .{ mtl.COLOR_GREEN, q, mtl.COLOR_DEFAULT });
                     },
                     .meta => |m| {
                         try printMeta(writer, m);
                     },
                     .str => |s| {
-                        try writer.print("{dt} ", .{s});
+                        try writer.print("{f} ", .{s._(2)});
                     },
                     .name => |s| {
-                        try writer.print("{dt} ", .{s});
+                        try writer.print("{f} ", .{s._(2)});
                     },
                     .range => |r| {
-                        try writer.print("{s}{}{s} ", .{mtl.COLOR_MAGENTA, r, mtl.COLOR_DEFAULT});
-                    }
+                        try writer.print("{s}{f}{s} ", .{ mtl.COLOR_MAGENTA, r, mtl.COLOR_DEFAULT });
+                    },
                 }
             }
         }
@@ -833,7 +829,7 @@ pub const Group = struct {
                             return slice;
                         }
                     },
-                    else => {}
+                    else => {},
                 }
             }
         }
@@ -843,7 +839,7 @@ pub const Group = struct {
 
     fn getNextQtty(tokens_iter: *Iterator(Item), looking_behind: bool) Qtty {
         if (tokens_iter.peekNext()) |next_token| {
-            switch(next_token.data) {
+            switch (next_token.data) {
                 .qtty => |q| {
                     if (!looking_behind) {
                         _ = tokens_iter.next(); // if so then need to advance
@@ -868,7 +864,7 @@ pub const Group = struct {
     }
 
     pub fn isRoot(self: Group) bool {
-       return self.parent_id == null;
+        return self.parent_id == null;
     }
 
     fn matchAnyOf(self: *const Group) bool {
@@ -889,7 +885,7 @@ pub const Group = struct {
         while (qtty.loop(count)) {
             const gr = input.charAtIndex(pos) orelse return .Null;
             const success = gr.within(range, self.regex.params.cs);
-            // mtl.debug(@src(), "gr: {dt}, result:{}, range: {}", .{gr, success, range});
+            // mtl.debug(@src(), "gr: {f}, result:{}, range: {}", .{gr, success, range});
             if (!success) {
                 if (self.matchAnyOf() and !starts_with_not) {
                     // mtl.debug(@src(), "CONTINUE_NEXT at:{?} pos:{}", .{at, pos});
@@ -913,7 +909,7 @@ pub const Group = struct {
         }
 
         if (!starts_with_not and !qtty.satisfiedBy(count)) {
-            mtl.debug(@src(), "group_{?} {} VS {}", .{self.id, qtty, count});
+            // mtl.debug(@src(), "group_{?} {f} VS {}", .{ self.id, qtty, count });
             return .Null;
         }
 
@@ -929,7 +925,7 @@ pub const Group = struct {
             } else {
                 if (found) {
                     // in case of success for .AnyOf no need to try to match all elements inside []
-                    return RangeMatch{.Pos = at};
+                    return RangeMatch{ .Pos = at };
                 } else {
                     return .GoToNextItem;
                 }
@@ -946,7 +942,7 @@ pub const Group = struct {
                     return .GoToNextItem;
                 } else {
                     return .Null;
-                } 
+                }
             }
         }
 
@@ -960,7 +956,7 @@ pub const Group = struct {
 
         if (self.regex.lookingBehind()) {
             const idx = self.matchAllBehind(haystack, needles, qtty, not);
-            // mtl.debug(@src(), "haystack: {dt}, needles:{}, result:{?}", .{haystack, needles, idx});
+            // mtl.debug(@src(), "haystack: {f}, needles:{}, result:{?}", .{haystack, needles, idx});
             return idx;
         }
 
@@ -968,7 +964,7 @@ pub const Group = struct {
             if (self.regex.lookingBehind()) {
                 mtl.trace(@src());
             }
-            const args = Args {.cs=self.regex.params.cs};
+            const args = Args{ .cs = self.regex.params.cs };
             const past_match = matchStr(not, needles, haystack, args);
             if (self.look_around.anyNegative()) {
                 return if (past_match == null) haystack.start else null; // must not advance
@@ -982,8 +978,8 @@ pub const Group = struct {
         // the last grapheme that qtty refers to.
         const last_gr_index = needles.beforeLast(); // when "abc?" or "abc+"
         const needles_minus_last = needles.leftSlice(last_gr_index);
-        // mtl.debug(@src(), "needles_base:{dt}, needles:{dt}, haystack:{dt}",
-            // .{needles_minus_last, needles, haystack});
+        // mtl.debug(@src(), "needles_base:{f}, needles:{f}, haystack:{f}",
+        // .{needles_minus_last, needles, haystack});
         var at = haystack.start;
         {
             const args = self.createArgs();
@@ -1000,9 +996,9 @@ pub const Group = struct {
         }
 
         const last_char_slice = needles.midSlice(last_gr_index);
-        // mtl.debug(@src(), "base_str:{dt}, last_char:{}", .{base_str, last_char_str});
+        // mtl.debug(@src(), "base_str:{f}, last_char:{}", .{base_str, last_char_str});
         var count: usize = 0;
-        
+
         while (true) {
             const args = self.createArgs();
             if (matchStr(not, last_char_slice, haystack.midSlice(at), args)) |idx_after| {
@@ -1026,16 +1022,15 @@ pub const Group = struct {
     fn matchAllBehind(self: *const Group, haystack: Slice, needles: Slice, qtty: Qtty, not: bool) ?Index {
         const last_gr = needles.lastChar() orelse return null;
         if (TraceLookBehind) {
-            mtl.debug(@src(), "group_{?} haystack: {dt}, needles: {dt}, last_char:{dt}, qtty: {}",
-            .{self.id, haystack, needles, last_gr, qtty});
+            mtl.debug(@src(), "group_{?} haystack: {f}, needles: {f}, last_char:{f}, qtty: {}", .{ self.id, haystack, needles, last_gr, qtty });
         }
-        
+
         const negative = self.look_around.negative_lookbehind or not;
         var count: usize = 0;
         var haystack_iter = haystack.iteratorFromEnd();
         var at: ?Index = null;
         while (haystack_iter.prev()) |char| {
-            // mtl.debug(@src(), "{dt} vs {dt}", .{char, last_gr});
+            // mtl.debug(@src(), "{f} vs {f}", .{char, last_gr});
             const found = char.eq(last_gr, .Yes);
             if (found) {
                 at = char.idx;
@@ -1051,9 +1046,8 @@ pub const Group = struct {
 
         if (count < qtty.a) {
             const result = if (negative) haystack.end else null;
-            mtl.debug(@src(), "count({}) < qtty.a({}) for {dt}, not_value={}, result={?}",
-                .{count, qtty.a, last_gr, negative, result});
-            
+            mtl.debug(@src(), "count({}) < qtty.a({}) for {f}, not_value={}, result={?f}", .{ count, qtty.a, last_gr, negative, result });
+
             return result;
         }
 
@@ -1072,7 +1066,7 @@ pub const Group = struct {
         }
 
         if (TraceLookBehind) {
-            mtl.debug(@src(), "group_{?} count: {}, h:{dt}, retval:{?}", .{self.id, count, h, retval});
+            mtl.debug(@src(), "group_{?} count: {}, h:{f}, retval:{?}", .{ self.id, count, h, retval });
         }
 
         return retval;
@@ -1085,7 +1079,7 @@ pub const Group = struct {
         var retval = false;
         while (anyof_iter.go(direction)) |anyof_gr| {
             const found = anyof_gr.eq(compare_to, args.cs);
-            
+
             if (starts_with_not) {
                 if (found) {
                     retval = false; // none of them must match, so it's a failure
@@ -1102,10 +1096,7 @@ pub const Group = struct {
         }
 
         if (TraceAnyOf or (TraceLookBehind and any_lb)) {
-            mtl.debug(@src(),
-            "group_{?} retval:{?}, args.from:{}, compare anyof {dt}, to:{dt}, lb:{}, looking_behind:{}, not:{}",
-                .{self.id, retval, args.from, any_of, compare_to, any_lb, self.regex.lookingBehind(),
-                starts_with_not});
+            mtl.debug(@src(), "group_{?} retval:{?}, args.from:{}, compare anyof {f}, to:{f}, lb:{}, looking_behind:{}, not:{}", .{ self.id, retval, args.from, any_of, compare_to, any_lb, self.regex.lookingBehind(), starts_with_not });
         }
 
         return retval;
@@ -1115,12 +1106,12 @@ pub const Group = struct {
         if (haystack.matchesSlice(needles, args)) |past_idx| {
             return if (starts_with_not) null else past_idx;
         }
-        
+
         return null;
     }
 
     pub fn matches(self: *Group, haystack: *const String, from: Index) ?Index {
-        const args = Args {.from = from, .cs = self.regex.params.cs };
+        const args = Args{ .from = from, .cs = self.regex.params.cs };
         var result: ?Index = null;
         var arr_idx: usize = 0;
         var skip = false;
@@ -1134,7 +1125,7 @@ pub const Group = struct {
                 skip = true;
                 continue;
             }
-            
+
             arr_idx = i;
             if (self.matchesArray(arr, haystack, args)) |idx_after| {
                 skip = false;
@@ -1145,12 +1136,10 @@ pub const Group = struct {
 
         if (!self.isRoot() and TraceGroupResult and !skip) {
             if (arr_idx > 0) {
-                mtl.debug(@src(), "TraceResult group_{?} from:{} {s}arr_idx:{}{s} result:{?}",
-                .{self.id, from.gr, mtl.COLOR_ORANGE, arr_idx, mtl.COLOR_DEFAULT, result});
+                mtl.debug(@src(), "TraceResult group_{?} from:{} {s}arr_idx:{}{s} result:{?}", .{ self.id, from.gr, mtl.COLOR_ORANGE, arr_idx, mtl.COLOR_DEFAULT, result });
             } else {
                 const ch = haystack.charAtIndex(from);
-                mtl.debug(@src(), "TraceResult group_{?} from:{} '{?}' result:{?}, any_lb:{}",
-                .{self.id, from.gr, ch, result, self.anyLookBehind()});
+                mtl.debug(@src(), "TraceResult group_{?} from:{} '{?}' result:{?}, any_lb:{}", .{ self.id, from.gr, ch, result, self.anyLookBehind() });
             }
         }
 
@@ -1212,9 +1201,9 @@ pub const Group = struct {
                                 return null;
                             }
                             at = after_last;
-                            // mtl.debug(@src(), "group_{?} result:{}, str:{dt}, at:{}", .{self.id, after_last, needles, last_at});
+                            // mtl.debug(@src(), "group_{?} result:{}, str:{f}, at:{}", .{self.id, after_last, needles, last_at});
                         } else {
-                            // mtl.debug(@src(), "group_{?}, result:null, str:{dt}, at:{}", .{self.id, needles, last_at});
+                            // mtl.debug(@src(), "group_{?}, result:null, str:{f}, at:{}", .{self.id, needles, last_at});
                             return null;
                         }
                     } else { // == .AnyOf
@@ -1228,12 +1217,12 @@ pub const Group = struct {
                             mtl.trace(@src());
                             return null;
                         };
-                        
-                        if (self.matchAnyChar(needles, compare_to, .{.from=last_at, .cs=args.cs}, starts_with_not)) {
+
+                        if (self.matchAnyChar(needles, compare_to, .{ .from = last_at, .cs = args.cs }, starts_with_not)) {
                             if (!item.checkBehind(input, last_at)) {
                                 return null;
                             }
-                            
+
                             at = last_at;
                             self.regex.params.from = last_at;
                             if (TraceAnyOf) {
@@ -1249,12 +1238,11 @@ pub const Group = struct {
                 },
                 .meta => |m| {
                     switch (m) {
-                        .SymbolWordChar, .SymbolNonWordChar, .SymbolUnicodeWordChar, .SymbolNonUnicodeWordChar,
-                        .SymbolNumber, .SymbolNonNumber, .SymbolWhitespace, .SymbolNonWhitespace=> {
+                        .SymbolWordChar, .SymbolNonWordChar, .SymbolUnicodeWordChar, .SymbolNonUnicodeWordChar, .SymbolNumber, .SymbolNonNumber, .SymbolWhitespace, .SymbolNonWhitespace => {
                             at = self.findNextChars(item, haystack, last_at, m, qtty) orelse return null;
                             // mtl.debug(@src(), "SymbolWordChar at:{?}", .{at});
                         },
-                        
+
                         .SymbolWordBoundary => {
                             if (!haystack.isWordBoundary(last_at, self.regex.charset)) {
                                 return null;
@@ -1276,14 +1264,13 @@ pub const Group = struct {
                                 if (gr.eqCp('\n')) {
                                     at = last_at;
                                 }
-                                
                             }
                         },
                         else => |v| {
                             at = at_copy;
                             // mtl.debug(@src(), "UNTREATED META:{}", .{v});
                             _ = &v;
-                        }
+                        },
                     }
 
                     if (at != null) {
@@ -1294,7 +1281,7 @@ pub const Group = struct {
                 },
                 .group => |*subgroup| {
                     // mtl.debug(@src(), "SUB_GROUP: {?}, start: {}", .{sub_group.id, at});
-                    
+
                     var count: usize = 0;
                     var now_at = last_at;
                     while (qtty.loop(count)) {
@@ -1336,13 +1323,13 @@ pub const Group = struct {
                             }
                             at = pos;
                             break :next_item;
-                        }
+                        },
                     }
                 },
                 else => |v| {
                     _ = &v;
                     // mtl.debug(@src(), "UNTREATED => {}", .{v});
-                }
+                },
             }
         }
 
@@ -1359,7 +1346,7 @@ pub const Group = struct {
                 at = args.from.plusGrapheme(gr);
             }
             if (TraceAnyOf) {
-                mtl.debug(@src(), "was:{}, is:{?}", .{last_at, at});
+                mtl.debug(@src(), "was:{}, is:{?}", .{ last_at, at });
             }
         }
 
@@ -1372,8 +1359,8 @@ pub const Group = struct {
     fn parseIntoTokens(self: *Group, index: Index) !Index {
         var str_iter = StringIterator.New(&self.regex.pattern, index);
         var ret_idx: ?Index = null;
-        const new_array = ArrayList(Item).init(self.regex.alloc);
-        try self.token_arr.append(new_array);
+        const new_array: ArrayList(Item) = .empty;
+        try self.token_arr.append(self.regex.alloc, new_array);
         var current_arr: *ArrayList(Item) = &self.token_arr.items[0];
 
         var plb: ?*Group = null;
@@ -1388,7 +1375,7 @@ pub const Group = struct {
                     new_group.match_type = .AnyOf;
                     const newg = str_iter.next() orelse return error.Other;
                     str_iter.continueFrom(try new_group.parseIntoTokens(newg.idx));
-                    try current_arr.append(Item.newGroup(new_group));
+                    try current_arr.append(self.regex.alloc, Item.newGroup(new_group));
                 } else {
                     self.match_type = .AnyOf;
                 }
@@ -1401,7 +1388,7 @@ pub const Group = struct {
                     new_group.match_type = .All;
                     const newg = str_iter.next() orelse return error.Other;
                     str_iter.continueFrom(try new_group.parseIntoTokens(newg.idx));
-                    try current_arr.append(Item.newGroup(new_group));
+                    try current_arr.append(self.regex.alloc, Item.newGroup(new_group));
                 } else {
                     self.match_type = .All;
                 }
@@ -1410,82 +1397,82 @@ pub const Group = struct {
                 break;
             } else if (gr.eqCp('?')) {
                 const s: *String = &self.regex.pattern;
-                if (s.matchesAscii("?:", .{.from=gr.idx})) |idx| {
+                if (s.matchesAscii("?:", .{ .from = gr.idx })) |idx| {
                     str_iter.continueFrom(idx);
-                    try current_arr.append(Item.newMeta(.NonCapture));
+                    try current_arr.append(self.regex.alloc, Item.newMeta(.NonCapture));
                     // self.non_capture = true;
-                } else if (s.matchesAscii("?!", .{.from=gr.idx})) |idx_past| {
+                } else if (s.matchesAscii("?!", .{ .from = gr.idx })) |idx_past| {
                     str_iter.continueFrom(idx_past);
-                    try current_arr.append(Item.newMeta(.NegativeLookAhead));
-                } else if (s.matchesAscii("?=", .{.from=gr.idx})) |idx| {
+                    try current_arr.append(self.regex.alloc, Item.newMeta(.NegativeLookAhead));
+                } else if (s.matchesAscii("?=", .{ .from = gr.idx })) |idx| {
                     str_iter.continueFrom(idx);
-                    try current_arr.append(Item.newMeta(.PositiveLookAhead));
-                } else if (s.matchesAscii("?<!", .{.from=gr.idx})) |idx| {
+                    try current_arr.append(self.regex.alloc, Item.newMeta(.PositiveLookAhead));
+                } else if (s.matchesAscii("?<!", .{ .from = gr.idx })) |idx| {
                     str_iter.continueFrom(idx);
-                    try current_arr.append(Item.newMeta(.NegativeLookBehind));
-                } else if (s.matchesAscii("?<=", .{.from=gr.idx})) |idx| {
+                    try current_arr.append(self.regex.alloc, Item.newMeta(.NegativeLookBehind));
+                } else if (s.matchesAscii("?<=", .{ .from = gr.idx })) |idx| {
                     str_iter.continueFrom(idx);
-                    try current_arr.append(Item.newMeta(.PositiveLookBehind));
-                } else if (s.matchesAscii("?<", .{.from=gr.idx})) |idx| { //(?<name>\\w+) = name = e.g."Jordan"
+                    try current_arr.append(self.regex.alloc, Item.newMeta(.PositiveLookBehind));
+                } else if (s.matchesAscii("?<", .{ .from = gr.idx })) |idx| { //(?<name>\\w+) = name = e.g."Jordan"
                     str_iter.continueFrom(idx);
                     // named capture
-                    if (s.indexOfAscii(">", .{.from = idx.addRaw("?<".len)})) |closing_idx| {
+                    if (s.indexOfAscii(">", .{ .from = idx.addRaw("?<".len) })) |closing_idx| {
                         const name = try s.betweenIndices(idx, closing_idx);
                         // mtl.debug(@src(), "Name: \"{}\"", .{name});
-                        try current_arr.append(Item.newMeta(.NamedCapture));
-                        try addName(current_arr, name);
+                        try current_arr.append(self.regex.alloc, Item.newMeta(.NamedCapture));
+                        try addName(self.regex.alloc, current_arr, name);
                         str_iter.continueFrom(closing_idx.addRaw(1)); // go past ">"
                     }
                 } else { // just "?"
-                    try addQtty(current_arr, Qtty.ZeroOrOne());
+                    try addQtty(self.regex.alloc, current_arr, Qtty.ZeroOrOne());
                 }
             } else if (gr.eqCp('{')) {
                 const s: *String = &self.regex.pattern;
-                if (s.indexOfAscii("}", .{.from = gr.idx.addRaw(1)})) |idx| {
+                if (s.indexOfAscii("}", .{ .from = gr.idx.addRaw(1) })) |idx| {
                     const qtty_in_curly = try s.betweenIndices(gr.idx.addRaw("}".len), idx);
                     defer qtty_in_curly.deinit();
                     str_iter.continueFrom(idx.addRaw("}".len));
                     const qtty = try Qtty.FromCurly(qtty_in_curly);
-                    try addQtty(current_arr, qtty);
+                    try addQtty(self.regex.alloc, current_arr, qtty);
                 } else {
                     mtl.debug(@src(), "Not found closing '}}'", .{});
                 }
             } else if (gr.eqCp('\\')) {
                 const symbol = str_iter.next() orelse break;
                 if (symbol.eqCp('d')) {
-                    try current_arr.append(Item.newMeta(.SymbolNumber));
+                    try current_arr.append(self.regex.alloc, Item.newMeta(.SymbolNumber));
                 } else if (symbol.eqCp('D')) {
-                    try current_arr.append(Item.newMeta(.SymbolNonNumber));
+                    try current_arr.append(self.regex.alloc, Item.newMeta(.SymbolNonNumber));
                 } else if (symbol.eqCp('w')) {
-                    try current_arr.append(Item.newMeta(.SymbolWordChar));
+                    try current_arr.append(self.regex.alloc, Item.newMeta(.SymbolWordChar));
                 } else if (symbol.eqCp('W')) {
-                    try current_arr.append(Item.newMeta(.SymbolNonWordChar));
+                    try current_arr.append(self.regex.alloc, Item.newMeta(.SymbolNonWordChar));
                 } else if (symbol.eqCp('u')) {
-                    try current_arr.append(Item.newMeta(.SymbolUnicodeWordChar));
+                    try current_arr.append(self.regex.alloc, Item.newMeta(.SymbolUnicodeWordChar));
                 } else if (symbol.eqCp('U')) {
-                    try current_arr.append(Item.newMeta(.SymbolNonUnicodeWordChar));
+                    try current_arr.append(self.regex.alloc, Item.newMeta(.SymbolNonUnicodeWordChar));
                 } else if (symbol.eqCp('s')) {
-                    try current_arr.append(Item.newMeta(.SymbolWhitespace));
+                    try current_arr.append(self.regex.alloc, Item.newMeta(.SymbolWhitespace));
                 } else if (symbol.eqCp('S')) {
-                    try current_arr.append(Item.newMeta(.SymbolNonWhitespace));
+                    try current_arr.append(self.regex.alloc, Item.newMeta(.SymbolNonWhitespace));
                 } else if (symbol.eqCp('.')) {
-                    try addAscii(current_arr, "."); // literally the dot character
+                    try addAscii(self.regex.alloc, current_arr, "."); // literally the dot character
                 } else if (symbol.eqCp('b')) {
-                    try current_arr.append(Item.newMeta(.SymbolWordBoundary));
+                    try current_arr.append(self.regex.alloc, Item.newMeta(.SymbolWordBoundary));
                 } else if (symbol.eqCp('B')) {
-                    try current_arr.append(Item.newMeta(.SymbolNonWordBoundary));
+                    try current_arr.append(self.regex.alloc, Item.newMeta(.SymbolNonWordBoundary));
                 } else if (symbol.eqCp('|')) {
-                    try addAscii(current_arr, "|");
+                    try addAscii(self.regex.alloc, current_arr, "|");
                 }
             } else if (gr.eqCp('^')) {
                 if (gr.idx.gr == 0) {
-                    try current_arr.append(Item.newMeta(.SymbolStartOfLine));
+                    try current_arr.append(self.regex.alloc, Item.newMeta(.SymbolStartOfLine));
                 } else {
-                    try current_arr.append(Item.newMeta(.Not));
+                    try current_arr.append(self.regex.alloc, Item.newMeta(.Not));
                 }
             } else if (gr.eqCp('+')) {
                 if (self.match_type == .AnyOf) {
-                    try addGrapheme(current_arr, gr);
+                    try addGrapheme(self.regex.alloc, current_arr, gr);
                 } else {
                     var qtty = Qtty.OneOrMore();
                     if (str_iter.next()) |ng| {
@@ -1495,11 +1482,11 @@ pub const Group = struct {
                             str_iter.continueFrom(gr.idx.addRaw(1));
                         }
                     }
-                    try addQtty(current_arr, qtty);
+                    try addQtty(self.regex.alloc, current_arr, qtty);
                 }
             } else if (gr.eqCp('*')) {
                 if (self.match_type == .AnyOf) {
-                    try addGrapheme(current_arr, gr);
+                    try addGrapheme(self.regex.alloc, current_arr, gr);
                 } else {
                     var qtty = Qtty.ZeroOrMore();
                     if (str_iter.next()) |ng| {
@@ -1509,30 +1496,30 @@ pub const Group = struct {
                             str_iter.continueFrom(gr.idx.addRaw(1));
                         }
                     }
-                    try addQtty(current_arr, qtty);
+                    try addQtty(self.regex.alloc, current_arr, qtty);
                 }
             } else if (gr.eqCp('\n')) {
-                try current_arr.append(Item.newMeta(.SymbolNewLine));
+                try current_arr.append(self.regex.alloc, Item.newMeta(.SymbolNewLine));
             } else if (gr.eqCp('\t')) {
-                try current_arr.append(Item.newMeta(.SymbolTab));
+                try current_arr.append(self.regex.alloc, Item.newMeta(.SymbolTab));
             } else if (gr.eqCp('.')) {
                 // mtl.debug(@src(), "anyof: {}", .{self.match_type});
                 if (self.match_type == .AnyOf) {
-                    try addGrapheme(current_arr, gr);
+                    try addGrapheme(self.regex.alloc, current_arr, gr);
                 } else {
-                    try current_arr.append(Item.newMeta(.SymbolAnyChar));
+                    try current_arr.append(self.regex.alloc, Item.newMeta(.SymbolAnyChar));
                 }
             } else if (gr.eqCp('$')) {
-                try current_arr.append(Item.newMeta(.SymbolEndOfLine));
+                try current_arr.append(self.regex.alloc, Item.newMeta(.SymbolEndOfLine));
             } else if (gr.eqCp('|')) {
                 if (current_arr.items.len == 0) {
                     return error.Parsing;
                 }
-                const new_arr = ArrayList(Item).init(self.regex.alloc);
-                try self.token_arr.append(new_arr);
+                const new_arr: ArrayList(Item) = .empty;
+                try self.token_arr.append(self.regex.alloc, new_arr);
                 current_arr = &self.token_arr.items[self.token_arr.items.len - 1];
             } else {
-                try addGrapheme(current_arr, gr);
+                try addGrapheme(self.regex.alloc, current_arr, gr);
             }
         }
 
@@ -1546,23 +1533,23 @@ pub const Group = struct {
         return if (ret_idx) |idx| idx else str_iter.position;
     }
 
-    fn parseRange(s: String, tokens: *ArrayList(Item)) !void {
+    fn parseRange(a: Allocator, s: String, tokens: *ArrayList(Item)) !void {
         const idx = s.indexOfAscii("-", .{}) orelse return;
         var iter = s.iteratorFrom(idx);
         const prev_idx = iter.prevFrom(idx) orelse return;
         const next_idx = iter.nextFrom(idx) orelse return;
         const cp1 = prev_idx.getCodepoint() orelse return;
         const cp2 = next_idx.getCodepoint() orelse return;
-        // mtl.debug(@src(), "{dt} cp1:{}, cp2:{}", .{s, cp1, cp2});
+        // mtl.debug(@src(), "{f} cp1:{}, cp2:{}", .{s, cp1, cp2});
         if (cp1 > cp2) {
-            mtl.debug(@src(), "Error: {}({}) > {}({})", .{prev_idx, cp1, next_idx, cp2});
+            // mtl.debug(@src(), "Error: {}({}) > {}({})", .{ prev_idx, cp1, next_idx, cp2 });
             return;
         }
         const range = GraphemeRange.New(cp1, cp2);
         // mtl.debug(@src(), "Range: {}", .{range});
-        
+
         if (s.size() == 3) {
-            try tokens.append(Item.newRange(range));
+            try tokens.append(a, Item.newRange(range));
             return;
         }
 
@@ -1577,23 +1564,23 @@ pub const Group = struct {
             const next_gr = iter.nextIndex() orelse return;
             right = try s.midIndex(next_gr);
         }
-        
+
         if (!right.isEmpty()) {
             const len = tokens.items.len;
-            try parseRange(right, tokens);
+            try parseRange(a, right, tokens);
             const items_added = len != tokens.items.len;
             if (items_added) {
                 right.deinit();
             } else {
-                try tokens.append(Item.newString(right));
+                try tokens.append(a, Item.newString(right));
             }
         } else {
             right.deinit();
         }
 
-        try tokens.append(Item.newRange(range));
+        try tokens.append(a, Item.newRange(range));
         if (!left.isEmpty()) {
-            try tokens.append(Item.newString(left));
+            try tokens.append(a, Item.newString(left));
         } else {
             left.deinit();
         }
@@ -1608,9 +1595,8 @@ pub const Group = struct {
                     .group => |*g| {
                         g.prepareForNewSearch();
                     },
-                    else => {}
+                    else => {},
                 }
-            
             }
         }
     }
@@ -1641,25 +1627,25 @@ pub const Group = struct {
                     .group => |*g| {
                         g.setupRegexFoundSlice();
                     },
-                    else => {}
+                    else => {},
                 }
             }
         }
     }
 
     fn printMeta(writer: anytype, m: Meta) !void {
-         try writer.print("{s}{}{s} ", .{mtl.COLOR_CYAN, m, mtl.COLOR_DEFAULT});
+        try writer.print("{s}{}{s} ", .{ mtl.COLOR_CYAN, m, mtl.COLOR_DEFAULT });
     }
 
-    pub fn printTokens(self: Group, writer: anytype) void {
-        writer.print("{}\n", .{self}) catch {};
+    pub fn printTokens(self: Group, writer: *std.Io.Writer) !void {
+        try writer.print("{f}\n", .{self});
         for (self.token_arr.items, 0..) |arr, i| {
             _ = i;
             // mtl.debug(@src(), "Group Array={}", .{i});
             for (arr.items) |item| {
                 switch (item.data) {
                     .group => |*g| {
-                        g.printTokens(writer);
+                        try g.printTokens(writer);
                     },
                     else => {},
                 }
@@ -1683,7 +1669,6 @@ pub const Group = struct {
                         } else {
                             my_lb = subgroup.registerLookBehinds(my_lb);
                         }
-                        
                     },
                     else => {
                         if (my_lb) |lb_unwrapped| {
@@ -1712,7 +1697,7 @@ pub const Group = struct {
                     .group => |*g| {
                         new_index = g.setCaptureIndex(new_index);
                     },
-                    else => {}
+                    else => {},
                 }
             }
         }
@@ -1755,12 +1740,12 @@ pub fn New(alloc: Allocator, pattern: String) !*Regex {
     errdefer pattern.deinit();
     const regex = try alloc.create(Regex);
     errdefer alloc.destroy(regex);
-    regex.* = Regex {
+    regex.* = Regex{
         .alloc = alloc,
         .pattern = pattern,
-        .tokens = ArrayList(Item).init(alloc),
+        .tokens = .empty,
     };
-    
+
     var top_group: Group = Group.New(regex, null);
     errdefer top_group.deinit();
     _ = try top_group.parseIntoTokens(String.strStart());
@@ -1772,12 +1757,11 @@ pub fn New(alloc: Allocator, pattern: String) !*Regex {
 }
 
 pub fn deinit(self: *Regex) void {
-    
     for (self.tokens.items) |*g| {
         g.deinit();
     }
-    self.tokens.deinit();
-    
+    self.tokens.deinit(self.alloc);
+
     self.top_group.deinit();
     self.pattern.deinit();
     self.alloc.destroy(self);
@@ -1799,25 +1783,23 @@ pub fn findNext(self: *Regex) ?Index {
             string_iter.first_time = false;
             continue;
         }
-        
+
         if (self.top_group.matches(self.input, gr.idx)) |end_pos| {
             self.setupFoundSlice();
             return end_pos;
         }
     }
 
-    _ = self.top_group.setCaptureIndex(1);    
+    _ = self.top_group.setCaptureIndex(1);
 
     return null;
 }
 
-pub fn format(self: Regex, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-    _ = options;
-    _ = fmt;
-    _ = &writer;
+pub fn format(self: Regex, writer: *std.Io.Writer) !void {
+    //comptime fmt: []const u8, options: std.fmt.FormatOptions,
     const charset = if (self.charset == .Ascii) "Ascii" else "Unicode";
-    try writer.print("Regex(\\w={s}): {dt}\n", .{charset, self.pattern});
-    self.top_group.printTokens(writer);
+    try writer.print("Regex(\\w={s}): {f}\n", .{ charset, self.pattern._(2) });
+    try self.top_group.printTokens(writer);
 }
 
 pub fn foundSlice(self: *const Regex) ?Slice {
@@ -1854,7 +1836,7 @@ fn setLookingBehind(self: *Regex, flag: bool) void {
     self.state.looking_behind = flag;
 }
 
-pub fn Search(alloc: Allocator, pattern: []const u8, input: []const u8, correct:[]const []const u8, options: TerminalOutput) !void {
+pub fn Search(alloc: Allocator, pattern: []const u8, input: []const u8, correct: []const []const u8, options: TerminalOutput) !void {
     const regex_pattern = try String.From(pattern);
 
     const regex = Regex.New(alloc, regex_pattern) catch |e| {
@@ -1863,29 +1845,27 @@ pub fn Search(alloc: Allocator, pattern: []const u8, input: []const u8, correct:
     };
     defer regex.deinit();
     if (options.diagnose == .Yes)
-        mtl.debug(@src(), "{}", .{regex});
+        mtl.debug(@src(), "{f}", .{regex});
 
     const heap = try String.From(input);
     defer heap.deinit();
-    regex.setParams(&heap, .{.qtty = .All(), .cs = .Yes});
+    regex.setParams(&heap, .{ .qtty = .All(), .cs = .Yes });
     if (options.diagnose == .Yes)
         try heap.printGraphemes(@src());
 
-    var results = ArrayList(Slice).init(alloc);
-    defer results.deinit();
+    var results: ArrayList(Slice) = .empty;
+    defer results.deinit(alloc);
 
     for (0..std.math.maxInt(usize)) |i| {
         const searched_from = regex.params.from.gr;
         if (regex.searchNext()) |currently_at| {
             if (options.print_results == .Yes) {
-                mtl.debug(@src(), "{s}Search result #{} (from:{}) =======>{s}",
-                .{mtl.COLOR_ORANGE, i, searched_from, mtl.COLOR_DEFAULT});
+                mtl.debug(@src(), "{s}Search result #{} (from:{}) =======>{s}", .{ mtl.COLOR_ORANGE, i, searched_from, mtl.COLOR_DEFAULT });
             }
             if (regex.foundSlice()) |slice| {
-                try results.append(slice);
+                try results.append(alloc, slice);
                 if (options.print_results == .Yes) {
-                    mtl.debug(@src(), "{s}Success!{s} Found between:{}-{}, slice:{dt}\n",
-                    .{mtl.BGCOLOR_ORANGE, mtl.BGCOLOR_DEFAULT, slice.start.gr, slice.end.gr, slice});
+                    mtl.debug(@src(), "{s}Success!{s} Found between:{}-{}, slice:{f}\n", .{ mtl.BGCOLOR_ORANGE, mtl.BGCOLOR_DEFAULT, slice.start.gr, slice.end.gr, slice._(2) });
                 }
             }
             if (currently_at.gr >= heap.size()) {
@@ -1900,7 +1880,7 @@ pub fn Search(alloc: Allocator, pattern: []const u8, input: []const u8, correct:
 
     for (results.items, correct) |l, r| {
         if (options.print_comparisons == .Yes) {
-            mtl.debug(@src(), "{dt} vs {s}", .{l, r});
+            mtl.debug(@src(), "{f} vs {s}", .{ l, r });
         }
         try expect(l.equalsUtf8(r, .{}));
     }
@@ -1930,38 +1910,40 @@ test "Test regex" {
     const alloc = std.testing.allocator;
     String.ctx = try String.Context.New(alloc);
     defer String.ctx.deinit();
-    const options: TerminalOutput = .{.print_results = .Yes};
+    const options: TerminalOutput = .AllYes(); //.{ .print_results = .Yes };
 
     if (true) {
-        const pattern = \\(?<=[abc]xyz+\s)(\s\d{2,}ab)
-;
+        const pattern =
+            \\(?<=[abc]xyz+\s)(\s\d{2,}ab)
+        ;
         const heap = "bxyz  789ab cxyzz  012ab";
-        const correct = [_][]const u8 {" 789ab", " 012ab"};
+        const correct = [_][]const u8{ " 789ab", " 012ab" };
         try Search(alloc, pattern, heap, &correct, options);
     }
 
     if (true) {
         //[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+(\.[a-zA-Z]{2,})+
-        const pattern = \\[\u.%+-]+@[\u-]+(\.\u{2,})+
-;
+        const pattern =
+            \\[\u.%+-]+@[\u-]+(\.\u{2,})+
+        ;
         const heap = "at 用户_@例子.广告 or support@example.рф or sales@company.co.uk";
-        const correct = [_][]const u8{"用户_@例子.广告", "support@example.рф", "sales@company.co.uk"};
+        const correct = [_][]const u8{ "用户_@例子.广告", "support@example.рф", "sales@company.co.uk" };
         try Search(alloc, pattern, heap, &correct, options);
     }
 
     if (true) {
         const pattern =
-\\=(=-){2,5}(AB|CD{2})[EF|^GH](?=Mi\S{2})(?<ClientName>\w+)(?:БГД[^zyA-Z0-9c]opq(?!05))xyz{2,3}(?=\d{2,}$)
-;
+            \\=(=-){2,5}(AB|CD{2})[EF|^GH](?=Mi\S{2})(?<ClientName>\w+)(?:БГД[^zyA-Z0-9c]opq(?!05))xyz{2,3}(?=\d{2,}$)
+        ;
         const heap = "A==-=-CDDKMikeБГДaopqxyzz567\n";
-        const correct = [_][]const u8 {"==-=-CDDKMikeБГДaopqxyzz"}; // incorrect!, no "567"!
+        const correct = [_][]const u8{"==-=-CDDKMikeБГДaopqxyzz"}; // incorrect!, no "567"!
         try Search(alloc, pattern, heap, &correct, options);
     }
 }
 
 //() - catpure group, referred by index number preceded by $, like $1
 //(?:) - non capture group
-    
+
 // (?!) – negative lookahead
 // (?=) – positive lookahead
 
