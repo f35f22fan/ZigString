@@ -10,13 +10,6 @@ const io = @import("io.zig");
 const BitData = @import("bit_data.zig").BitData;
 const mtl = @import("mtl.zig");
 const Num = @import("Num.zig");
-
-// const c_ = @cImport({
-//     // See https://github.com/ziglang/zig/issues/515
-//     @cDefine("_NO_CRT_STDIO_INLINE", "1");
-//     @cInclude("stdio.h");
-// });
-
 const Normalize = @import("Normalize");
 const CaseFold = @import("CaseFold");
 const ScriptsData = @import("ScriptsData");

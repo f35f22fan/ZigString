@@ -1,3 +1,5 @@
+const std = @import("std");
+const builtin = @import("builtin");
 const ArrayList = std.ArrayList;
 const expect = std.testing.expect;
 const expectEqualStrings = std.testing.expectEqualStrings;
@@ -542,28 +544,48 @@ test "Slice functions" {
     }
 
     { // matches
-        const start = heap.indexOfAscii("se", .{}) orelse return error.NotFound;
-        const slice = heap.midSlice(start);
+        {
+            const start = heap.indexOfAscii("se", .{}) orelse return error.NotFound;
+            const slice = heap.midSlice(start);
 
-        const g5 = slice.charAt(5) orelse return error.NotFound;
-        try expect(g5.eqUtf8("\u{65}\u{301}"));
+            const g5 = slice.charAt(5) orelse return error.NotFound;
+            try expect(g5.eqUtf8("\u{65}\u{301}"));
 
-        const g7 = slice.charAt(7) orelse return error.NotFound;
-        try expect(g7.eqUtf8("a"));
+            const g7 = slice.charAt(7) orelse return error.NotFound;
+            try expect(g7.eqUtf8("a"));
 
-        try expect(slice.matchesAscii("a", .{ .from = g7.idx }) != null);
-        const g = slice.next(g7.idx) orelse return error.NotFound;
-        try expect(g.eqCp(' '));
+            // try slice.printGraphemes(@src());
+            // mtl.debug(@src(), "{f} g7:{f}, g7.idx={f}", .{slice._(2), g7, g7.idx});
+
+            try expect(slice.matchesAscii("a", .{ .from = g7.idx }) != null);
+            const g = slice.next(g7.idx) orelse return error.NotFound;
+            try expect(g.eqCp(' '));
+        }
+
+        {
+            const s = try String.From("bcd");
+            defer s.deinit();
+            const s2 = try String.From("abcdef");
+            defer s2.deinit();
+
+            const slice2 = s2.slice(.{.cp=1, .gr=1}, .{.cp=4, .gr=4});
+            try expect(slice2.matches(s, .{}) != null);
+        }
     }
 
     { // lastIndexOf
-        const start = heap.indexOfAscii("se", .{}) orelse return error.NotFound;
-        const slice = heap.midSlice(start);
-        const idx = slice.lastIndexOfUtf8("\u{65}\u{301}", .{}) orelse return error.NotFound;
+        const slice_end = heap.indexOfAscii("vi", .{}) orelse return error.NotFound;
+        const slice = heap.slice(.{}, slice_end);
+        try slice.printGraphemes(@src());
+        try slice.printCodepoints(@src());
+        const from = slice.beforeLast();//slice.indexOfAscii(" ", .{}) orelse return error.NotFound;
+        // mtl.debug(@src(), "from: {f}", .{from});
+        const idx = slice.lastIndexOfUtf8("\u{65}\u{301}", .{.from=from}) orelse return error.NotFound;
+        // mtl.debug(@src(), "from: {f} IDX EQUALS: {f}", .{from, idx});
         try expect(idx.eqCpGr(11, 10));
 
         const idx_a = slice.lastIndexOfAscii("a", .{}) orelse return error.NotFound;
-        try expect(idx_a.eqCpGr(31, 29));
+        try expect(idx_a.eqCpGr(14, 12));
     }
 
     { // find index
@@ -650,9 +672,9 @@ test "trimming and splitting slices" {
     {
         const heap = try String.From("  Hello, World! Again!   ");
         defer heap.deinit();
-        mtl.debug(@src(), "trimmed left slice:{f}", .{heap.asSlice().trimLeft()._(2)});
-        mtl.debug(@src(), "trimmed right slice:{f}", .{heap.asSlice().trimRight()._(2)});
-        mtl.debug(@src(), "trimmed both slice:{f}", .{heap.asSlice().trim()._(2)});
+        // mtl.debug(@src(), "trimmed left slice:{f}", .{heap.asSlice().trimLeft()._(2)});
+        // mtl.debug(@src(), "trimmed right slice:{f}", .{heap.asSlice().trimRight()._(2)});
+        // mtl.debug(@src(), "trimmed both slice:{f}", .{heap.asSlice().trim()._(2)});
     }
 
     {
@@ -662,14 +684,11 @@ test "trimming and splitting slices" {
         defer arr.deinit(alloc);
 
         for (arr.items) |item| {
-            mtl.debug(@src(), "{f}", .{item._(2)});
+            _ = &item;
+            // mtl.debug(@src(), "{f}", .{item._(2)});
         }
     }
 }
-
-const std = @import("std");
-const builtin = @import("builtin");
-
 
 pub fn main() !void {
     std.debug.print("\u{00a9}", .{});

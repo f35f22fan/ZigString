@@ -995,13 +995,13 @@ pub const Group = struct {
             }
         }
 
-        const last_char_slice = needles.midSlice(last_gr_index);
+        const last_char_slice = needles.mid(last_gr_index);
         // mtl.debug(@src(), "base_str:{f}, last_char:{}", .{base_str, last_char_str});
         var count: usize = 0;
 
         while (true) {
             const args = self.createArgs();
-            if (matchStr(not, last_char_slice, haystack.midSlice(at), args)) |idx_after| {
+            if (matchStr(not, last_char_slice, haystack.mid(at), args)) |idx_after| {
                 count += 1;
                 at = idx_after;
                 if (count == qtty.b) {

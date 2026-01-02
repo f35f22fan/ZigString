@@ -412,7 +412,7 @@ pub const StringIterator = struct {
         return StringIterator{ .str = str, .position = idx };
     }
 
-    pub fn NewFromSlice(s: *const Slice, from: ?Index) StringIterator {
+    pub fn NewFromSlice(s: Slice, from: ?Index) StringIterator {
         const idx = if (from) |i| i else s.start;
         return StringIterator{ .str = s.str, .position = idx, .start_cp = s.start.cp, .end_cp = s.end.cp };
     }
@@ -675,14 +675,14 @@ pub const Slice = struct {
     }
 
     pub fn _(self: *const Slice, context: i32) Slice_ {
-        return .{ .s = self, .context = context };
+        return .{ .slice = self, .context = context };
     }
 
     const Slice_ = struct {
         context: i32,
-        s: *const Slice,
+        slice: *const Slice,
         pub fn format(self: Slice_, writer: *std.Io.Writer) std.Io.Writer.Error!void {
-            var buf = self.s.toUtf8() catch return;
+            var buf = self.slice.toUtf8() catch return;
             defer buf.deinit(ctx.a);
             try printBytes(buf, writer, self.context);
         }
@@ -696,7 +696,7 @@ pub const Slice = struct {
         return self.end;
     }
 
-    pub fn beforeLast(self: *const Slice) Index {
+    pub fn beforeLast(self: Slice) Index {
         // returns index before last grapheme
         const data = self.str.d orelse return .{};
         var i: usize = self.size_cp();
@@ -815,16 +815,16 @@ pub const Slice = struct {
         return ret_index;
     }
 
-    fn getCpSlice(self: *const Slice) ?ConstCpSlice {
+    fn getCpSlice(self: Slice) ?ConstCpSlice {
         const data = self.str.d orelse return null;
         return self.codepoints(data);
     }
 
-    inline fn graphemes(self: *const Slice, data: Data) GraphemeSlice {
+    inline fn graphemes(self: Slice, data: Data) GraphemeSlice {
         return data.graphemes_.items[self.start.cp..self.end.cp];
     }
 
-    pub fn indexOf(self: *const Slice, input: String, args: Args) ?Index {
+    pub fn indexOf(self: Slice, input: String, args: Args) ?Index {
         const input_data = input.d orelse return null;
         const data = self.str.d orelse return null;
         var a = args;
@@ -849,7 +849,7 @@ pub const Slice = struct {
         return indexOfCpSlice_real(data.codepoints(), data.graphemes(), needles.items, a);
     }
 
-    pub fn indexOfSlice(self: *const Slice, input: Slice, args: Args) ?Index {
+    pub fn indexOfSlice(self: Slice, input: Slice, args: Args) ?Index {
         const data = self.str.d orelse return null;
         const input_codepoints = input.getCpSlice() orelse return null;
         var a = args;
@@ -862,7 +862,7 @@ pub const Slice = struct {
         return idx;
     }
 
-    pub fn indexOfUtf8(self: *const Slice, input: []const u8, args: Args) ?Index {
+    pub fn indexOfUtf8(self: Slice, input: []const u8, args: Args) ?Index {
         const data = self.str.d orelse return null;
         var a = args;
         if (a.from.cp == 0 and self.start.cp != 0) {
@@ -892,31 +892,32 @@ pub const Slice = struct {
         return self.str.isWordChar(at, charset);
     }
 
-    pub fn iterator(self: *const Slice) StringIterator {
+    pub fn iterator(self: Slice) StringIterator {
         return StringIterator.NewFromSlice(self, null);
     }
 
-    pub fn iteratorFrom(self: *const Slice, from: Index) StringIterator {
+    pub fn iteratorFrom(self: Slice, from: Index) StringIterator {
         return StringIterator.NewFromSlice(self, from);
     }
 
-    pub fn iteratorFromEnd(self: *const Slice) StringIterator {
+    pub fn iteratorFromEnd(self: Slice) StringIterator {
         return self.iteratorFrom(self.beforeLast());
     }
 
-    pub fn lastChar(self: *const Slice) ?Grapheme {
+    pub fn lastChar(self: Slice) ?Grapheme {
         const idx = self.beforeLast();
         return self.charAtIndex(idx);
     }
 
-    fn lastIndexGeneric(self: *const Slice, comptime T: type, needles: []const T, args: Args) ?Index {
+    fn lastIndexGeneric(self: Slice, comptime T: type, needles: []const T, args: Args) ?Index {
         const data = self.str.d orelse return null;
+        // const idx = lastIndexGeneric_real(data.codepoints(), data.graphemes(), self.size(), T, needles, args) orelse return null;
         const idx = lastIndexGeneric_real(self.codepoints(data), self.graphemes(data), self.size(), T, needles, args) orelse return null;
 
         return self.start.plus(idx);
     }
 
-    pub fn lastIndexOf(self: *const Slice, needles_str: String, args: Args) ?Index {
+    pub fn lastIndexOf(self: Slice, needles_str: String, args: Args) ?Index {
         const ndata = needles_str.d orelse return null;
         const needles = ndata.codepoints_.items[0..];
         return self.lastIndexGeneric(Codepoint, needles, args);
@@ -947,34 +948,28 @@ pub const Slice = struct {
         return Slice{ .str = self.str, .start = .{}, .end = from };
     }
 
-    // IS THIS METHOD WRONG?
-    pub fn matches(self: *const Slice, input: *const String, args: Args) ?Index {
-        const data = self.str.d orelse return null;
-        var a = args;
-        if (a.from.cp == 0 and self.start.cp != 0) {
-            a.from = self.start;
-        }
-
-        return matches_real(data.codepoints(), data.graphemes(), input.asSlice(), a);
+    pub fn matches(self: Slice, input: String, args: Args) ?Index {
+        return self.matchesSlice(input.asSlice(), args);
     }
 
-    pub fn matchesAscii(self: *const Slice, input: []const u8, args: Args) ?Index {
-        const data = self.str.d orelse return null;
+    pub fn matchesAscii(self: Slice, input: []const u8, args: Args) ?Index {
         var a = args;
         if (a.from.cp == 0 and self.start.cp != 0) {
             a.from = self.start;
         }
 
+        // mtl.debug(@src(), "ARGS: {}", .{a});
+        const data = self.str.d orelse return null;
         return matchesAscii_real(data.codepoints(), data.graphemes(), input, a);
     }
 
-    pub fn matchesSlice(self: *const Slice, input: Slice, args: Args) ?Index {
-        const data = self.str.d orelse return null;
+    pub fn matchesSlice(self: Slice, input: Slice, args: Args) ?Index {
         var a = args;
         if (a.from.cp == 0 and self.start.cp != 0) {
             a.from = self.start;
         }
 
+        const data = self.str.d orelse return null;
         return matches_real(data.codepoints(), data.graphemes(), input, a);
     }
 
@@ -1020,12 +1015,12 @@ pub const Slice = struct {
 
     pub fn printCodepoints(self: Slice, src: std.builtin.SourceLocation) !void {
         const data = self.str.d orelse return;
-        try printCodepoints_real(self.codepoints(data), self.graphemes(data), src);
+        try printCodepoints_real(self.codepoints(data), self.graphemes(data), src, self.start);
     }
 
     pub fn printGraphemes(self: Slice, src: std.builtin.SourceLocation) !void {
         const data = self.str.d orelse return;
-        try printGraphemes_real(self.codepoints(data), self.graphemes(data), src);
+        try printGraphemes_real(self.codepoints(data), self.graphemes(data), src, self.start);
     }
 
     pub fn size(self: Slice) usize {
@@ -1862,7 +1857,6 @@ pub fn init(self: *String, input: []const u8, clear: Clear) !void {
     }
 }
 
-/// inserts `what` at grapheme index `at(.gr)`
 pub fn insertUtf8(self: *String, at_gr_pos: ?Index, what: []const u8) !void {
     const input = try String.From(what);
     defer input.deinit();
@@ -2111,17 +2105,18 @@ fn printCpBuf(out: anytype, cp_buf: ArrayList(Codepoint), gr_index: isize, see_a
 
     const end_final_fg = if (attr == Attr.Codepoint) mtl.COLOR_DEFAULT ++ mtl.BOLD_END else mtl.COLOR_DEFAULT;
     const num_color = if (theme == Theme.Light) mtl.COLOR_OTHER else mtl.COLOR_YELLOW;
+// mtl.debug(@src(), "gr_index: {}", .{gr_index});
     out.print(print_format_str, .{ mtl.COLOR_BLUE, gr_index, mtl.COLOR_DEFAULT, final_fg, cp_as_str, end_final_fg, num_color, codepoints_str, mtl.COLOR_DEFAULT });
 }
 
 pub fn printCodepoints(self: String, src: std.builtin.SourceLocation) !void {
     const data = self.d orelse return;
-    try printCodepoints_real(data.codepoints_.items[0..], data.graphemes_.items[0..], src);
+    try printCodepoints_real(data.codepoints_.items[0..], data.graphemes_.items[0..], src, .{});
 }
 
 pub fn printGraphemes(self: String, src: std.builtin.SourceLocation) !void {
     const data = self.d orelse return;
-    try printGraphemes_real(data.codepoints_.items[0..], data.graphemes_.items[0..], src);
+    try printGraphemes_real(data.codepoints_.items[0..], data.graphemes_.items[0..], src, .{});
 }
 
 pub fn printFind(self: String, needles: []const u8, from: usize, cs: CaseSensitive) ?Index {
@@ -2882,6 +2877,7 @@ fn lastIndexGeneric_real(codepoints: ConstCpSlice, graphemes: GraphemeSlice, gra
     var skip_gr: usize = 0;
     const sensitive = args.cs == .Yes;
     while (from >= 0) {
+        // from -= 1;
         const at: usize = @intCast(from);
         if (graphemes[at] == 1) {
             skip_gr += 1;
@@ -3010,7 +3006,8 @@ pub fn print_out(src: std.builtin.SourceLocation, msg: ?String) void {
     mtl.debug(src, "{f}", .{info._(2)});
 }
 
-pub fn printCodepoints_real(codepoints: ConstCpSlice, graphemes: GraphemeSlice, src: std.builtin.SourceLocation) !void {
+pub fn printCodepoints_real(codepoints: ConstCpSlice, graphemes: GraphemeSlice, src: std.builtin.SourceLocation,
+offset: Index) !void {
     var cp_buf: ArrayList(Codepoint) = .empty;
     defer cp_buf.deinit(ctx.a);
     const out = std.debug;
@@ -3025,19 +3022,21 @@ pub fn printCodepoints_real(codepoints: ConstCpSlice, graphemes: GraphemeSlice, 
         }
         const attr = if (graphemes[i] == 1) Attr.Grapheme else Attr.Codepoint;
         try cp_buf.append(ctx.a, cp);
-        try printCpBuf(out, cp_buf, @intCast(i), SeeAs.CodepointOnly, attr);
+        var cp_index: isize = @intCast(i);
+        cp_index += @intCast(offset.cp);
+        try printCpBuf(out, cp_buf, cp_index, SeeAs.CodepointOnly, attr);
         cp_buf.clearRetainingCapacity();
     }
     out.print("\n", .{});
 }
 
-pub fn printGraphemes_real(codepoints: ConstCpSlice, graphemes: GraphemeSlice, src: std.builtin.SourceLocation) !void {
+pub fn printGraphemes_real(codepoints: ConstCpSlice, graphemes: GraphemeSlice, src: std.builtin.SourceLocation,
+    offset: Index) !void {
     var cp_buf: ArrayList(Codepoint) = .empty;
     defer cp_buf.deinit(ctx.a);
     var gr_index: isize = -1;
     const out = std.debug;
     var info = try String.FromCpGr(codepoints, graphemes);
-    // try info.insertAscii(Index.strStart(), "Graphemes: ");
     defer info.deinit();
 
     print_out(src, info);
@@ -3045,9 +3044,11 @@ pub fn printGraphemes_real(codepoints: ConstCpSlice, graphemes: GraphemeSlice, s
         if (i > 255) {
             break;
         }
-
         if (graphemes[i] == 1) {
-            try printCpBuf(out, cp_buf, gr_index, SeeAs.PartOfGrapheme, Attr.Ignore);
+            // mtl.debug(@src(), "gr_index: {}", .{gr_index});
+            var final_index = gr_index;
+            final_index += @intCast(offset.gr);
+            try printCpBuf(out, cp_buf, final_index, SeeAs.PartOfGrapheme, Attr.Ignore);
             gr_index += 1;
             cp_buf.clearRetainingCapacity();
         }
