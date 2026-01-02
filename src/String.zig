@@ -14,7 +14,7 @@ pub const mtl = @import("mtl.zig");
 pub const Num = @import("Num.zig");
 
 const zg_codepoint = @import("code_point");
-const Graphemes = @import("grapheme");
+const Graphemes = @import("Graphemes");
 const LetterCasing = @import("LetterCasing");
 const Normalize = @import("Normalize");
 const CaseFolding = @import("CaseFolding");
@@ -83,10 +83,6 @@ pub const Charset = enum(u8) {
     Ascii,
     Unicode,
 };
-
-// pub const CharsetArgs = struct {
-//     charset: Charset = .Ascii,
-// };
 
 pub const Grapheme = struct {
     len: u32 = 0,
@@ -607,6 +603,11 @@ pub const Index = struct {
         return Index{ .cp = self.cp + n, .gr = self.gr + n };
     }
 
+    pub fn plusStr(self: Index, input: String) Index {
+        const d = input.d orelse return self;
+        return Index {.cp = self.cp + d.codepoints_.items.len, .gr = self.gr + d.grapheme_count };
+    }
+
     fn prev(self: *Index, codepoints: ConstCpSlice, graphemes: GraphemeSlice, limit: ?usize) bool {
         if (self.cp == 0 or self.cp > codepoints.len)
             return false;
@@ -649,11 +650,11 @@ pub const Index = struct {
 pub fn printBytes(buf: ArrayList(u8), writer: *std.Io.Writer, context: i32) !void {
     const fmtstr = "{s}{s}{s}{s}{s}";
 
-    if (context == 1) { // light theme
+    if (context == 1) { // colored
         try writer.print(fmtstr, .{ mtl.COLOR_YELLOW, mtl.BGCOLOR_BLACK, buf.items, mtl.BGCOLOR_DEFAULT, mtl.COLOR_DEFAULT });
-    } else if (context == 2) { // dark theme
+    } else if (context == 2) { // highlighted
         try writer.print(fmtstr, .{ mtl.COLOR_BLACK, mtl.BGCOLOR_YELLOW, buf.items, mtl.BGCOLOR_DEFAULT, mtl.COLOR_DEFAULT });
-    } else { // no coloring, default
+    } else { // no color, default
         try writer.print("{s}", .{buf.items});
     }
 }
@@ -670,19 +671,17 @@ pub const Slice = struct {
     str: *const String,
 
     pub fn format(self: Slice, writer: *std.Io.Writer) !void {
-        var buf = self.toUtf8() catch return;
-        defer buf.deinit(ctx.a);
-        try printBytes(buf, writer, 0);
+        return self._(0).format(writer);
     }
 
-    pub fn _(self: *const Slice, context: i32) SliceF {
+    pub fn _(self: *const Slice, context: i32) Slice_ {
         return .{ .s = self, .context = context };
     }
 
-    const SliceF = struct {
+    const Slice_ = struct {
         context: i32,
         s: *const Slice,
-        pub fn format(self: SliceF, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        pub fn format(self: Slice_, writer: *std.Io.Writer) std.Io.Writer.Error!void {
             var buf = self.s.toUtf8() catch return;
             defer buf.deinit(ctx.a);
             try printBytes(buf, writer, self.context);
@@ -948,6 +947,7 @@ pub const Slice = struct {
         return Slice{ .str = self.str, .start = .{}, .end = from };
     }
 
+    // IS THIS METHOD WRONG?
     pub fn matches(self: *const Slice, input: *const String, args: Args) ?Index {
         const data = self.str.d orelse return null;
         var a = args;
@@ -984,7 +984,7 @@ pub const Slice = struct {
         return self.matches(s, args);
     }
 
-    pub fn midSlice(self: Slice, from: Index) Slice {
+    pub fn mid(self: Slice, from: Index) Slice {
         return Slice{ .str = self.str, .start = from, .end = self.afterLast() };
     }
 
@@ -1046,6 +1046,35 @@ pub const Slice = struct {
         };
     }
 
+    pub fn splitPair(self: Slice, sep: []const u8) ![2]Slice {
+        // var arr = try self.split(sep, .{});
+        // defer arr.deinit(ctx.a);
+        // if (arr.items.len != 2) {
+        //     for (arr.items) |item| {
+        //         item.deinit();
+        //     }
+        //     return error.Other;
+        // }
+
+        // return .{ arr.items[0], arr.items[1] };
+
+        const sep_str = try String.From(sep);
+        defer sep_str.deinit();
+        if (self.indexOf(sep_str, .{})) |idx| {
+            const slice1: Slice = self.slice(.{}, idx);
+            const idx2 = idx.plusStr(sep_str);
+            const slice2 = self.slice(idx2, self.afterLast());
+            return .{slice1, slice2};
+        }
+
+        return error.Other;
+    }
+
+
+    pub fn startsWithAscii(self: Slice, needles: []const u8, cmp: Comparison) bool {
+        return self.matchesAscii(needles, .{.cs = cmp.cs}) != null;
+    }
+
     pub fn toString(self: Slice) !String {
         return self.str.betweenIndices(self.start, self.end);
     }
@@ -1054,6 +1083,75 @@ pub const Slice = struct {
         const ret: ArrayList(u8) = .empty;
         const data = self.str.d orelse return ret;
         return utf8_from_slice(ctx.a, self.codepoints(data));
+    }
+
+    pub fn trim(self: Slice) Slice {
+        const s1 = self.trimLeft();
+        const s2 = s1.trimRight();
+        return s2;
+    }
+
+    pub fn trimLeft(self: Slice) Slice {
+        const data = self.str.d orelse return self;
+        const cps = self.codepoints(data);
+        if (cps.len == 0) {
+            return self;
+        }
+
+        var remove_count: usize = 0;
+        const offset = self.start.cp;
+        for (0..cps.len) |i| {
+            if (!data.isOneCodepointGrapheme(offset + i))
+                break;
+            const cp = cps[i];
+            if (std.mem.indexOfScalar(u21, &CodepointsToTrim, cp)) |index| {
+                _ = index;
+                remove_count += 1;
+            } else {
+                break;
+            }
+        }
+
+        if (remove_count > 0) {
+            const cp = self.start.cp + remove_count;
+            const gr = self.start.gr + remove_count;
+            return .{.str = self.str, .start = .{.cp=cp, .gr=gr}, .end = self.end};
+        }
+
+        return self;
+    }
+
+    pub fn trimRight(self: Slice) Slice {
+        const data = self.str.d orelse return self;
+        const cps = self.codepoints(data);
+        const cp_count = cps.len;
+        if (cp_count == 0) {
+            return self;
+        }
+
+        const grs = self.graphemes(data);
+        var remove_count: usize = 0;
+        for (1..cp_count) |i| {
+            const ri = (cp_count - i);
+            if (grs[ri] == 0)
+                break;
+            
+            const cp = cps[ri];
+            if (std.mem.indexOfScalar(u21, &CodepointsToTrim, cp)) |index| {
+                _ = index;
+                remove_count += 1;
+            } else {
+                break;
+            }
+        }
+
+        if (remove_count > 0) {
+            const cp = self.end.cp - remove_count;
+            const gr = self.end.gr - remove_count;
+            return .{.str = self.str, .start = self.start, .end = .{.cp=cp, .gr=gr}};
+        }
+
+        return self;
     }
 };
 
@@ -1175,6 +1273,14 @@ pub fn FromAscii(input: []const u8) !String {
     var s = String{};
     try s.addAsciiSlice(input);
     return s;
+}
+
+pub fn Init(a: Allocator) !void {
+    String.ctx = try Context.New(a);
+}
+
+pub fn Deinit() void {
+    String.ctx.deinit();
 }
 
 pub fn deinit(self: String) void {
@@ -1616,48 +1722,23 @@ pub fn findOneSimdFromEnd(self: String, needle: Codepoint, start: ?usize, compti
     return findOneSimdFromEnd_real(data.codepoints_.items[0..], needle, start, vector_len);
 }
 
-// format implements the `std.fmt` format interface for printing types.
-// comptime fmt: []const u8, options: std.fmt.FormatOptions,
-pub fn format(self: String, writer: *std.Io.Writer) !void {
-    var buf = self.toUtf8() catch return;
-    defer buf.deinit(ctx.a);
-    try printBytes(buf, writer, 0);
+pub fn format(self: *const String, writer: *std.Io.Writer) !void {
+    return self._(0).format(writer);
 }
 
-pub fn _(self: *const String, context: i32) F {
+pub fn _(self: *const String, context: i32) String_ {
     return .{ .s = self, .context = context };
 }
 
-const F = struct {
+const String_ = struct {
     context: i32,
     s: *const String,
-    pub fn format(self: F, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+    pub fn format(self: String_, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         var buf = self.s.toUtf8() catch return;
         defer buf.deinit(ctx.a);
         try printBytes(buf, writer, self.context);
     }
 };
-
-pub fn getU3(data: []const u8, u3_index: usize) !u3 {
-    const bit_index = u3_index * 3;
-    const byte_index = bit_index / 8;
-    const remainder: u3 = @intCast(bit_index % 8);
-    const byte = data[byte_index];
-    if (remainder <= 5) {
-        const k = (byte >> remainder) & 0b111;
-        return @intCast(k);
-    } else if (remainder == 6) {
-        var b: u8 = byte >> 6;
-        const nb = data[byte_index + 1];
-        b |= (nb << 2) & 0b0000_0100;
-        return @intCast(b);
-    } else {
-        var b: u8 = byte >> 7;
-        const nb = data[byte_index + 1] << 1;
-        b |= nb & 0b0000_0110;
-        return @intCast(b);
-    }
-}
 
 inline fn getConstPointer(self: *const String) ?*const Data {
     if (self.d) |*k| {
@@ -2179,6 +2260,42 @@ pub fn split(self: String, sep: []const u8, sa: SplitArgs) !ArrayList(String) {
         if (sa.keep == KeepEmptyParts.No and s.isEmpty()) {
             //try s.print(std.debug, "Skipping2: ");
             s.deinit();
+        } else {
+            try array.append(ctx.a, s);
+        }
+    }
+
+    return array;
+}
+
+pub fn splitSlices(self: *const String, sep: []const u8, sa: SplitArgs) !ArrayList(Slice) {
+    const sd = self.d orelse return Error.Alloc;
+    var array: ArrayList(Slice) = .empty;
+    errdefer array.deinit(ctx.a);
+    const sep_str = try String.From(sep);
+    defer sep_str.deinit();
+    var from = Index.strStart();
+
+    while (self.indexOf(sep_str, .{ .from = from, .cs = sa.cs })) |found| {
+        // const end = Index {.cp = found.cp - from.cp, .gr = found.gr - from.gr};
+        const s = self.slice(from, found);
+        // const s = try self.midSlice(from.gr, @intCast(found.gr - from.gr));
+        from = Index{ .cp = found.cp + 1, .gr = found.gr + 1 };
+
+        if (sa.keep == KeepEmptyParts.No and s.isEmpty()) {
+            continue;
+        }
+
+        try array.append(ctx.a, s);
+        if (from.cp >= sd.codepoints_.items.len) {
+            break;
+        }
+    }
+
+    if (from.cp < sd.codepoints_.items.len) {
+        const s = self.slice(from, self.afterLast());
+        if (sa.keep == KeepEmptyParts.No and s.isEmpty()) {
+            // s.deinit();
         } else {
             try array.append(ctx.a, s);
         }
@@ -2941,3 +3058,4 @@ pub fn printGraphemes_real(codepoints: ConstCpSlice, graphemes: GraphemeSlice, s
     try printCpBuf(out, cp_buf, gr_index, SeeAs.PartOfGrapheme, Attr.Ignore);
     out.print("\n", .{});
 }
+

@@ -1908,8 +1908,8 @@ pub fn setParams(self: *Regex, input: *const String, params: FindParams) void {
 
 test "Test regex" {
     const alloc = std.testing.allocator;
-    String.ctx = try String.Context.New(alloc);
-    defer String.ctx.deinit();
+    try String.Init(alloc);
+    defer String.Deinit();
     const options: TerminalOutput = .AllYes(); //.{ .print_results = .Yes };
 
     if (true) {

@@ -139,8 +139,8 @@ pub fn test_find_index(raw_str: []const u8, needles: ConstCpSlice, froms: []cons
 }
 
 test "From File" {
-    String.ctx = try Context.New(alloc);
-    defer String.ctx.deinit();
+    try String.Init(alloc);
+    defer String.Deinit();
 
     const path = try io.getHomeUtf8(alloc, "/Documents/content.xml");
     defer path.deinit();
@@ -156,8 +156,8 @@ test "From File" {
 }
 
 test "Speed test 2" {
-    String.ctx = try Context.New(alloc);
-    defer String.ctx.deinit();
+    try String.Init(alloc);
+    defer String.Deinit();
 
     const needles = [_]Codepoint{ 's', 'e' };
     const from = [_]usize{ 0, 2, 31 };

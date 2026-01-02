@@ -38,8 +38,8 @@ test "Desktop File" {
     if (true)
         return error.SkipZigTest;
 
-    String.ctx = try Context.New(alloc);
-    defer String.ctx.deinit();
+    try String.Init(alloc);
+    defer String.Deinit();
 
     var chromium = try DesktopFile.NewCstr(alloc, "/usr/share/applications/chromium-browser.desktop");
     defer chromium.deinit();
@@ -94,9 +94,9 @@ inline fn getTime() i128 {
     return std.time.microTimestamp();
 }
 
-pub fn buildAHref(line: *const String, session_num: String) !String {
+pub fn buildAHref(line: String, session_num: String) !String {
     // Generates: <a class="anchor" id="1_0" href="#1_0">1.0</a>
-    const anchor = try line.mid(2, -1);
+    const anchor = try line.midIndex(.{.cp=2, .gr=2});
     defer anchor.deinit();
     var nums: ArrayList(String) = .empty;
     defer {
@@ -142,6 +142,7 @@ pub fn buildAHref(line: *const String, session_num: String) !String {
 const Speaking = enum {
     Ra,
     Questioner,
+    Jim,
 };
 
 const tloo_path = "/dev/tloo/";
@@ -155,27 +156,32 @@ fn replace(en: *String, idx: Index, bytes: []const u8) !void {
     try en.addConsume(try en_cloned.midIndex(idx));
 }
 
-fn addEng(to: *String, line: *const String, speaking: ?Speaking) !?Speaking {
-    var en = try line.Clone();
-    en.trimLeft(); // in case between "-en-" and "RA" there's a space
+fn addEng(to: *String, line: *String, speaking: ?Speaking) !?Speaking {
+    line.trimLeft(); // in case between "-en-" and "RA" there's a space
+    var en = line;
     var ret_speaking: ?Speaking = speaking;
     if (speaking == null) {
         const ra = "RA";
         const q = "QUESTIONER";
+        const jim = "JIM";
         if (en.startsWithAscii(ra, .{})) {
             ret_speaking = .Ra;
-            try replace(&en, .{ .cp = ra.len, .gr = ra.len }, "<span class=ra_en>RA:</span>");
+            try replace(en, .{ .cp = ra.len, .gr = ra.len }, "<span class=ra_en>RA:</span>");
         } else if (en.startsWithAscii(q, .{})) {
             ret_speaking = .Questioner;
-            try replace(&en, .{ .cp = q.len, .gr = q.len }, "<span class=qa_en>QUESTIONER:</span>");
+            try replace(en, .{ .cp = q.len, .gr = q.len }, "<span class=qa_en>QUESTIONER:</span>");
+        } else if (en.startsWithAscii(jim, .{})) {
+            ret_speaking = .Jim;
+            try replace(en, .{ .cp = jim.len, .gr = jim.len }, "<span class=qa_en>JIM:</span>");
         } else {}
     }
-    try to.addConsume(en);
+    
+    try to.add(en.*);
 
     return ret_speaking;
 }
 
-fn addRus(to: *String, line: *const String, speaking: ?Speaking) !void {
+fn addRus(to: *String, line: *String, speaking: ?Speaking) !void {
     var ru = String.New();
     if (speaking) |s| {
         switch (s) {
@@ -184,6 +190,9 @@ fn addRus(to: *String, line: *const String, speaking: ?Speaking) !void {
             },
             .Questioner => {
                 try ru.addUtf8("<span class=qa_ru>Собеседник:</span>");
+            },
+            .Jim => {
+                try ru.addUtf8("<span class=qa_ru>Джим:</span>");
             },
         }
     }
@@ -196,8 +205,8 @@ test "Translate En to Ru" {
     if (false)
         return error.SkipZigTest;
 
-    String.ctx = try Context.New(alloc);
-    defer String.ctx.deinit();
+    try String.Init(alloc);
+    defer String.Deinit();
 
     const dirpath = try io.getHomeAscii(alloc, "/dev/tloo/raw/");
     defer dirpath.deinit();
@@ -207,6 +216,13 @@ test "Translate En to Ru" {
 
     const only_last = true;
     var last_txt_name: ?String = null;
+
+    if (false) {
+        const name = try String.From("session_46.txt");
+        defer name.deinit();
+        try Translate(dirpath, name);
+        return;
+    }
 
     var filenames: ArrayList(String) = .empty;
     defer {
@@ -219,7 +235,7 @@ test "Translate En to Ru" {
 
     var dir_iter = dir.iterate();
     while (try dir_iter.next()) |entry| {
-        const txt_name = try String.From(entry.name);
+        var txt_name = try String.From(entry.name);
         defer txt_name.deinit();
         var html_name = try txt_name.Clone();
         try html_name.changeToAsciiExtension(".html");
@@ -337,6 +353,10 @@ fn Translate(dirpath: String, filename: String) !void {
     defer contents.deinit();
 
     var lines = try contents.split("\n", .{});
+    // mtl.debug(@src(), "line0: {f}", .{lines.items[0]._(2)});
+    // mtl.debug(@src(), "line1: {f}", .{lines.items[1]._(2)});
+    // mtl.debug(@src(), "line2: {f}", .{lines.items[2]._(2)});
+    // mtl.debug(@src(), "line3: {f}", .{lines.items[3]._(2)});
     defer {
         for (lines.items) |line| {
             line.deinit();
@@ -362,7 +382,7 @@ fn Translate(dirpath: String, filename: String) !void {
     try html.addUtf8(" - Закон Одного</title>\n</head>\n<body><div class=session>Сеанс ");
     try html.add(session_num);
     try html.addAscii("</div>\n<div class=session_date>");
-    const date: String = lines.orderedRemove(0);
+    const date = lines.orderedRemove(0);
     try html.addConsume(date);
     try html.addAscii("</div>\n");
     try html.addUtf8(all_sessions);
@@ -390,7 +410,7 @@ fn Translate(dirpath: String, filename: String) !void {
             }
             last_was = .anchor;
             try html.addAscii("\n<table>\n\t<tr>\n\t\t<td>");
-            try html.addConsume(try buildAHref(line, session_num));
+            try html.addConsume(try buildAHref(line.*, session_num));
             try html.addAscii("</td>");
         } else if (line.startsWithAscii(en_prefix, .{})) {
             var was_anchor = false;
@@ -407,13 +427,13 @@ fn Translate(dirpath: String, filename: String) !void {
                 try html.addAscii("\n\t<tr>\n\t\t<td></td>\n\t\t<td class=\"eng\">");
             }
 
-            const en = try line.mid(4, -1);
+            var en = try line.midIndex(.{.cp=4, .gr=4});
             defer en.deinit();
             speaking = try addEng(&html, &en, speaking);
         } else if (line.startsWithAscii(ru_prefix, .{})) {
             last_was = .ru;
             try html.addAscii("</td>\n\t</tr>\n\t<tr>\n\t\t<td></td>\n\t\t<td class=\"rus\">");
-            const ru = try line.mid(4, -1);
+            var ru = try line.midIndex(.{.cp=4, .gr=4});
             defer ru.deinit();
             try addRus(&html, &ru, speaking);
             speaking = null;

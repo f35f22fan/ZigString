@@ -61,8 +61,16 @@ fn getString() struct { i64, []const u8 } {
 }
 
 pub fn main() !u8 {
-    String.ctx = try Context.New(alloc);
-    defer String.ctx.deinit();
+    try String.Init(alloc);
+    defer String.Deinit();
+
+    const s = try String.From("Hello, World!");
+    defer s.deinit();
+    mtl.debug(@src(), "{f}", .{s._(1)});
+
+    if (true) {
+        return 0;
+    }
 
     const values = .{
         @as(u32, 1234),

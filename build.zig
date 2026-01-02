@@ -75,7 +75,7 @@ pub fn build(b: *std.Build) void {
 
 fn addZgImport(target: anytype, zg: *std.Build.Dependency) void {
     target.root_module.addImport("code_point", zg.module("code_point"));
-    target.root_module.addImport("grapheme", zg.module("Graphemes"));
+    target.root_module.addImport("Graphemes", zg.module("Graphemes"));
     target.root_module.addImport("LetterCasing", zg.module("LetterCasing"));
     target.root_module.addImport("GeneralCategories", zg.module("GeneralCategories"));
     target.root_module.addImport("Normalize", zg.module("Normalize"));
@@ -93,7 +93,13 @@ zg: *std.Build.Dependency, path: []const u8, name: []const u8, description: []co
     });
     new_test.linkLibC();
     addZgImport(new_test, zg);
-    const regexp_run = b.addRunArtifact(new_test);
-    const regexp_step = b.step(name, description);
-    regexp_step.dependOn(&regexp_run.step);
+    const test_run = b.addRunArtifact(new_test);
+
+    if (b.args) |args| {
+        _ = &args;
+        // test_run.addArgs(args);
+    }
+
+    const test_step = b.step(name, description);
+    test_step.dependOn(&test_run.step);
 }

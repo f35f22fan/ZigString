@@ -1,4 +1,3 @@
-const std = @import("std");
 const ArrayList = std.ArrayList;
 const expect = std.testing.expect;
 const expectEqualStrings = std.testing.expectEqualStrings;
@@ -16,8 +15,8 @@ const JoseUtf8 = "Jos\u{65}\u{301} se fu\u{65}\u{301} a Sevilla sin pararse";
 const theme = String.Theme.Dark;
 
 test "Append Test" {
-    String.ctx = try Context.New(alloc);
-    defer String.ctx.deinit();
+    try String.Init(alloc);
+    defer String.Deinit();
 
     const additional = "[Ещё]";
     const correct_cstr = JoseUtf8 ++ additional;
@@ -37,8 +36,8 @@ test "Append Test" {
 }
 
 test "Get Grapheme Index" {
-    String.ctx = try Context.New(alloc);
-    defer String.ctx.deinit();
+    try String.Init(alloc);
+    defer String.Deinit();
 
     const main_str = try String.From(JoseUtf8);
     defer main_str.deinit();
@@ -67,8 +66,8 @@ test "Get Grapheme Index" {
 }
 
 test "Trim Left" {
-    String.ctx = try Context.New(alloc);
-    defer String.ctx.deinit();
+    try String.Init(alloc);
+    defer String.Deinit();
 
     const trim_left_str = "  \t Привет!";
     var main_str = try String.From(trim_left_str);
@@ -94,8 +93,8 @@ test "Trim Left" {
 }
 
 test "Trim Right" {
-    String.ctx = try Context.New(alloc);
-    defer String.ctx.deinit();
+    try String.Init(alloc);
+    defer String.Deinit();
 
     const trim_right_str = "Привет! \t  ";
     var main_str = try String.From(trim_right_str);
@@ -121,8 +120,8 @@ test "Trim Right" {
 }
 
 test "Substring" {
-    String.ctx = try Context.New(alloc);
-    defer String.ctx.deinit();
+    try String.Init(alloc);
+    defer String.Deinit();
 
     const main_str = try String.From("Jos\u{65}\u{301} se fu\u{65}\u{301}");
     defer main_str.deinit();
@@ -154,8 +153,8 @@ test "Substring" {
 }
 
 test "Equals" {
-    String.ctx = try Context.New(alloc);
-    defer String.ctx.deinit();
+    try String.Init(alloc);
+    defer String.Deinit();
 
     const c_str = "my file.desktop";
     const filename = try String.From(c_str);
@@ -182,8 +181,8 @@ test "Equals" {
 }
 
 test "FindInsertRemove" {
-    String.ctx = try Context.New(alloc);
-    defer String.ctx.deinit();
+    try String.Init(alloc);
+    defer String.Deinit();
 
     const html_ascii = "<human><name>Jos\u{65}\u{301}</name><age>27</age></human>\u{65}\u{301}";
     const html_str = try String.From(html_ascii);
@@ -266,8 +265,8 @@ test "FindInsertRemove" {
 }
 
 test "Split" {
-    String.ctx = try Context.New(alloc);
-    defer String.ctx.deinit();
+    try String.Init(alloc);
+    defer String.Deinit();
 
     const main_str = try String.From(JoseUtf8);
     defer main_str.deinit();
@@ -341,8 +340,8 @@ test "Split" {
 }
 
 test "To Upper, To Lower" {
-    String.ctx = try Context.New(alloc);
-    defer String.ctx.deinit();
+    try String.Init(alloc);
+    defer String.Deinit();
 
     const normal = [_][]const u8{ "Hello, World!", "Привет!", "Jos\u{65}\u{301}" };
     const upper = [_][]const u8{ "HELLO, WORLD!", "ПРИВЕТ!", "JOS\u{45}\u{301}" };
@@ -359,8 +358,8 @@ test "To Upper, To Lower" {
 }
 
 test "Char At" {
-    String.ctx = try Context.New(alloc);
-    defer String.ctx.deinit();
+    try String.Init(alloc);
+    defer String.Deinit();
 
     const str = try String.From(JoseUtf8);
     defer str.deinit();
@@ -512,8 +511,8 @@ test "Char At" {
 }
 
 test "Slice functions" {
-    String.ctx = try Context.New(alloc);
-    defer String.ctx.deinit();
+    try String.Init(alloc);
+    defer String.Deinit();
 
     const heap = try String.From(JoseUtf8);
     defer heap.deinit();
@@ -625,19 +624,55 @@ test "Slice functions" {
 }
 
 test "Printing Colors" {
-    String.ctx = try Context.New(alloc);
-    defer String.ctx.deinit();
+    if (true)
+        return error.SkipZigTest;
+
+    try String.Init(alloc);
+    defer String.Deinit();
 
     const s = try String.From("Hello, World!");
     defer s.deinit();
-    mtl.debug(@src(), "Colored string (light theme):{f}", .{s._(1)});
-    mtl.debug(@src(), "Colored string (dark theme):{f}", .{s._(2)});
+    mtl.debug(@src(), "Colored string (colored):{f}", .{s._(1)});
+    mtl.debug(@src(), "Colored string (highlighted):{f}", .{s._(2)});
     mtl.debug(@src(), "Colored string (no color):{f}", .{s._(0)});
     mtl.debug(@src(), "string:{f}", .{s});
 
     const slice = s.asSlice();
-    mtl.debug(@src(), "Colored slice (dark theme):{f}", .{slice._(2)});
+    mtl.debug(@src(), "Colored slice (highlighted):{f}", .{slice._(2)});
     mtl.debug(@src(), "slice:{f}", .{slice});
+
+}
+
+test "trimming and splitting slices" {
+    try String.Init(alloc);
+    defer String.Deinit();
+    
+    {
+        const heap = try String.From("  Hello, World! Again!   ");
+        defer heap.deinit();
+        mtl.debug(@src(), "trimmed left slice:{f}", .{heap.asSlice().trimLeft()._(2)});
+        mtl.debug(@src(), "trimmed right slice:{f}", .{heap.asSlice().trimRight()._(2)});
+        mtl.debug(@src(), "trimmed both slice:{f}", .{heap.asSlice().trim()._(2)});
+    }
+
+    {
+        const heap = try String.From(" Hello\nWorld,\n foo,\nbar,\nbaz");
+        defer heap.deinit();
+        var arr = try heap.splitSlices("\n", .{});
+        defer arr.deinit(alloc);
+
+        for (arr.items) |item| {
+            mtl.debug(@src(), "{f}", .{item._(2)});
+        }
+    }
+}
+
+const std = @import("std");
+const builtin = @import("builtin");
+
+
+pub fn main() !void {
+    std.debug.print("\u{00a9}", .{});
 }
 
 // test "Qt chars" {
