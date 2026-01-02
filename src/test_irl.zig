@@ -15,6 +15,7 @@ const CaseFold = @import("CaseFold");
 const ScriptsData = @import("ScriptsData");
 
 const String = @import("String.zig").String;
+const Slice = String.Slice;
 const CaseSensitive = String.CaseSensitive;
 const Codepoint = String.Codepoint;
 const CodepointSlice = String.CpSlice;
@@ -87,8 +88,10 @@ inline fn getTime() i128 {
     return std.time.microTimestamp();
 }
 
-pub fn buildAHref(line: String, session_num: String) !String {
+pub fn buildAHref(line_param: Slice, session_num: String) !String {
     // Generates: <a class="anchor" id="1_0" href="#1_0">1.0</a>
+    const line = try line_param.toString();
+    defer line.deinit();
     const anchor = try line.midIndex(.{.cp=2, .gr=2});
     defer anchor.deinit();
     var nums: ArrayList(String) = .empty;
@@ -141,40 +144,45 @@ const Speaking = enum {
 const tloo_path = "/dev/tloo/";
 const all_sessions = "<div class=session><a href=\"index.html\">Все сеансы</a></div>";
 
-fn replace(en: *String, idx: Index, bytes: []const u8) !void {
-    const en_cloned = try en.Clone();
-    defer en_cloned.deinit();
-    en.clearAndFree();
-    try en.addUtf8(bytes);
-    try en.addConsume(try en_cloned.midIndex(idx));
+fn replace(line: Slice, offset: usize, bytes: []const u8) !String {
+    var ret = try String.From(bytes);
+    const slice_start = line.start.plusNumber(offset);
+    try ret.addSlice(line.mid(slice_start));
+    return ret;
 }
 
-fn addEng(to: *String, line: *String, speaking: ?Speaking) !?Speaking {
+fn addEng(to: *String, line_param: Slice, speaking: ?Speaking) !?Speaking {
+    var line = line_param;
     line.trimLeft(); // in case between "-en-" and "RA" there's a space
-    var en = line;
     var ret_speaking: ?Speaking = speaking;
+    var added = false;
     if (speaking == null) {
         const ra = "RA";
         const q = "QUESTIONER";
         const jim = "JIM";
-        if (en.startsWithAscii(ra, .{})) {
+        if (line.startsWithAscii(ra, .{})) {
+            added = true;
             ret_speaking = .Ra;
-            try replace(en, .{ .cp = ra.len, .gr = ra.len }, "<span class=ra_en>RA:</span>");
-        } else if (en.startsWithAscii(q, .{})) {
+            try to.addConsume(try replace(line, ra.len, "<span class=ra_en>RA:</span>"));
+        } else if (line.startsWithAscii(q, .{})) {
+            added = true;
             ret_speaking = .Questioner;
-            try replace(en, .{ .cp = q.len, .gr = q.len }, "<span class=qa_en>QUESTIONER:</span>");
-        } else if (en.startsWithAscii(jim, .{})) {
+            try to.addConsume(try replace(line, q.len, "<span class=qa_en>QUESTIONER:</span>"));
+        } else if (line.startsWithAscii(jim, .{})) {
+            added = true;
             ret_speaking = .Jim;
-            try replace(en, .{ .cp = jim.len, .gr = jim.len }, "<span class=qa_en>JIM:</span>");
-        } else {}
+            try to.addConsume(try replace(line, jim.len, "<span class=qa_en>JIM:</span>"));
+        }
     }
     
-    try to.add(en.*);
+    if (!added) {
+        try to.addConsume(try line.toString());
+    }
 
     return ret_speaking;
 }
 
-fn addRus(to: *String, line: *String, speaking: ?Speaking) !void {
+fn addRus(to: *String, line: Slice, speaking: ?Speaking) !void {
     var ru = String.New();
     if (speaking) |s| {
         switch (s) {
@@ -190,7 +198,7 @@ fn addRus(to: *String, line: *String, speaking: ?Speaking) !void {
         }
     }
 
-    try ru.add(line.*);
+    try ru.addSlice(line);
     try to.addConsume(ru);
 }
 
@@ -345,15 +353,8 @@ fn Translate(dirpath: String, filename: String) !void {
     const contents = try String.From(contents_u8.items[0..]);
     defer contents.deinit();
 
-    var lines = try contents.split("\n", .{});
-    // mtl.debug(@src(), "line0: {f}", .{lines.items[0]._(2)});
-    // mtl.debug(@src(), "line1: {f}", .{lines.items[1]._(2)});
-    // mtl.debug(@src(), "line2: {f}", .{lines.items[2]._(2)});
-    // mtl.debug(@src(), "line3: {f}", .{lines.items[3]._(2)});
+    var lines = try contents.splitSlices("\n", .{});
     defer {
-        for (lines.items) |line| {
-            line.deinit();
-        }
         lines.deinit(alloc);
     }
 
@@ -365,9 +366,9 @@ fn Translate(dirpath: String, filename: String) !void {
         \\  <meta charset="UTF-8"/>
         \\  <link rel="stylesheet" href="styles.css">
     );
-    var idx1 = filename.indexOfAscii("_", .{}) orelse return String.Error.Other;
+    var idx1 = filename.indexOfAscii("_", .{}) orelse return error.Other;
     idx1.addOne();
-    const idx2 = filename.indexOfAscii(".", .{}) orelse return String.Error.Other;
+    const idx2 = filename.indexOfAscii(".", .{}) orelse return error.Other;
     const session_num = try filename.betweenIndices(idx1, idx2);
     defer session_num.deinit();
     try html.addUtf8("\t<title>Сеанс ");
@@ -376,11 +377,11 @@ fn Translate(dirpath: String, filename: String) !void {
     try html.add(session_num);
     try html.addAscii("</div>\n<div class=session_date>");
     const date = lines.orderedRemove(0);
-    try html.addConsume(date);
+    try html.addSlice(date);
     try html.addAscii("</div>\n");
     try html.addUtf8(all_sessions);
 
-    const anchor_prefix = "__";
+    const new_question_prefix = "__";
     const en_prefix = "-en-";
     const ru_prefix = "-ru-";
 
@@ -396,7 +397,7 @@ fn Translate(dirpath: String, filename: String) !void {
             continue;
         }
 
-        if (line.startsWithAscii(anchor_prefix, .{})) {
+        if (line.startsWithAscii(new_question_prefix, .{})) {
             speaking = null;
             if (last_was != null) {
                 try html.addAscii("</td>\n\t</tr>\n</table>");
@@ -420,23 +421,23 @@ fn Translate(dirpath: String, filename: String) !void {
                 try html.addAscii("\n\t<tr>\n\t\t<td></td>\n\t\t<td class=\"eng\">");
             }
 
-            var en = try line.midIndex(.{.cp=4, .gr=4});
-            defer en.deinit();
-            speaking = try addEng(&html, &en, speaking);
+            const from: Index = line.start.plusNumber(en_prefix.len);
+            const en = line.mid(from);
+            speaking = try addEng(&html, en, speaking);
         } else if (line.startsWithAscii(ru_prefix, .{})) {
             last_was = .ru;
             try html.addAscii("</td>\n\t</tr>\n\t<tr>\n\t\t<td></td>\n\t\t<td class=\"rus\">");
-            var ru = try line.midIndex(.{.cp=4, .gr=4});
-            defer ru.deinit();
-            try addRus(&html, &ru, speaking);
+            const from: Index = line.start.plusNumber(ru_prefix.len);
+            const ru = line.mid(from);
+            try addRus(&html, ru, speaking);
             speaking = null;
         } else if (last_was) |lw| {
             if (lw == .en) {
                 try html.addChar('\n');
-                speaking = try addEng(&html, line, speaking);
+                speaking = try addEng(&html, line.*, speaking);
             } else if (lw == .ru) {
                 try html.addChar('\n');
-                try addRus(&html, line, null);
+                try addRus(&html, line.*, null);
                 speaking = null;
             }
         }

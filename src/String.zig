@@ -771,7 +771,8 @@ pub const Slice = struct {
     }
 
     pub fn equalsAscii(self: Slice, input: []const u8, cmp: Comparison) bool {
-        const buf = toCodepointsFromAscii(ctx.a, input) catch return null;
+        var buf = toCodepointsFromAscii(ctx.a, input) catch return false;
+        defer buf.deinit(ctx.a);
         return self.equalsCpSlice(buf.items, cmp);
     }
 
@@ -927,7 +928,7 @@ pub const Slice = struct {
         return self.lastIndexGeneric(u8, needles, args);
     }
 
-    pub fn lastIndexOfCp(self: *const Slice, needle: Codepoint, args: Args) ?Index {
+    pub fn lastIndexOfCp(self: Slice, needle: Codepoint, args: Args) ?Index {
         const data = self.str.d orelse return null;
         const idx = lastIndexOfCp_real(self.codepoints(data), self.graphemes(data), self.size(), needle, args) orelse return null;
 
@@ -1080,17 +1081,17 @@ pub const Slice = struct {
         return utf8_from_slice(ctx.a, self.codepoints(data));
     }
 
-    pub fn trim(self: Slice) Slice {
-        const s1 = self.trimLeft();
-        const s2 = s1.trimRight();
-        return s2;
+    pub fn trim(self: *Slice) void {
+        self.trimLeft();
+        self.trimRight();
+        // return s2;
     }
 
-    pub fn trimLeft(self: Slice) Slice {
-        const data = self.str.d orelse return self;
+    pub fn trimLeft(self: *Slice) void {
+        const data = self.str.d orelse return;// self;
         const cps = self.codepoints(data);
         if (cps.len == 0) {
-            return self;
+            return;// self;
         }
 
         var remove_count: usize = 0;
@@ -1110,18 +1111,20 @@ pub const Slice = struct {
         if (remove_count > 0) {
             const cp = self.start.cp + remove_count;
             const gr = self.start.gr + remove_count;
-            return .{.str = self.str, .start = .{.cp=cp, .gr=gr}, .end = self.end};
+            const start: Index = .{.cp=cp, .gr=gr};
+            self.start = start;
+            // return .{.str = self.str, .start = start, .end = self.end};
         }
 
-        return self;
+        // return self;
     }
 
-    pub fn trimRight(self: Slice) Slice {
-        const data = self.str.d orelse return self;
+    pub fn trimRight(self: *Slice) void {
+        const data = self.str.d orelse return;// self;
         const cps = self.codepoints(data);
         const cp_count = cps.len;
         if (cp_count == 0) {
-            return self;
+            return;// self;
         }
 
         const grs = self.graphemes(data);
@@ -1143,10 +1146,12 @@ pub const Slice = struct {
         if (remove_count > 0) {
             const cp = self.end.cp - remove_count;
             const gr = self.end.gr - remove_count;
-            return .{.str = self.str, .start = self.start, .end = .{.cp=cp, .gr=gr}};
+            const end: Index = .{.cp=cp, .gr=gr};
+            self.end = end;
+            // return .{.str = self.str, .start = self.start, .end = end};
         }
 
-        return self;
+        // return self;
     }
 };
 
@@ -1266,7 +1271,7 @@ fn FromCpGr(codepoints: ConstCpSlice, graphemes: GraphemeSlice) !String {
 
 pub fn FromAscii(input: []const u8) !String {
     var s = String{};
-    try s.addAsciiSlice(input);
+    try s.addAscii(input);
     return s;
 }
 
@@ -1290,18 +1295,6 @@ pub fn add(self: *String, other: String) !void {
     try data.codepoints_.appendSlice(ctx.a, from_ptr.codepoints_.items);
     try data.graphemes_.appendSlice(ctx.a, from_ptr.graphemes_.items);
     data.grapheme_count += from_ptr.grapheme_count;
-}
-
-pub fn addAsciiSlice(self: *String, letters: []const u8) !void {
-    var data = self.dataMut();
-    var new_codepoints = try data.codepoints_.addManyAsSlice(ctx.a, letters.len);
-
-    for (letters, 0..) |letter, i| {
-        new_codepoints[i] = letter;
-    }
-
-    try data.graphemes_.appendNTimes(ctx.a, 1, letters.len);
-    data.grapheme_count += letters.len;
 }
 
 pub fn addAscii(self: *String, letters: []const u8) !void {

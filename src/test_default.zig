@@ -576,8 +576,8 @@ test "Slice functions" {
     { // lastIndexOf
         const slice_end = heap.indexOfAscii("vi", .{}) orelse return error.NotFound;
         const slice = heap.slice(.{}, slice_end);
-        try slice.printGraphemes(@src());
-        try slice.printCodepoints(@src());
+        // try slice.printGraphemes(@src());
+        // try slice.printCodepoints(@src());
         const from = slice.beforeLast();//slice.indexOfAscii(" ", .{}) orelse return error.NotFound;
         // mtl.debug(@src(), "from: {f}", .{from});
         const idx = slice.lastIndexOfUtf8("\u{65}\u{301}", .{.from=from}) orelse return error.NotFound;
@@ -670,22 +670,28 @@ test "trimming and splitting slices" {
     defer String.Deinit();
     
     {
-        const heap = try String.From("  Hello, World! Again!   ");
+        const heap = try String.From("  Hello, World!   ");
         defer heap.deinit();
-        // mtl.debug(@src(), "trimmed left slice:{f}", .{heap.asSlice().trimLeft()._(2)});
-        // mtl.debug(@src(), "trimmed right slice:{f}", .{heap.asSlice().trimRight()._(2)});
-        // mtl.debug(@src(), "trimmed both slice:{f}", .{heap.asSlice().trim()._(2)});
+        var slice = heap.asSlice();
+        slice.trimLeft();
+        try expect(slice.equalsAscii("Hello, World!   ", .{}));
+        slice.trimRight();
+        try expect(slice.equalsAscii("Hello, World!", .{}));
+        slice = heap.asSlice();
+        slice.trim();
+        try expect(slice.equalsAscii("Hello, World!", .{}));
     }
 
     {
-        const heap = try String.From(" Hello\nWorld,\n foo,\nbar,\nbaz");
+        const heap = try String.From(" Hello\nWorld,\n Жизнь,\nbar,\nbaz");
         defer heap.deinit();
         var arr = try heap.splitSlices("\n", .{});
         defer arr.deinit(alloc);
 
-        for (arr.items) |item| {
-            _ = &item;
-            // mtl.debug(@src(), "{f}", .{item._(2)});
+        const correct= [_][]const u8{" Hello", "World,", " Жизнь,", "bar,", "baz"};
+
+        for (arr.items, 0..) |slice, i| {
+            try expect(slice.equalsUtf8(correct[i], .{}));
         }
     }
 }

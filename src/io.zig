@@ -38,7 +38,7 @@ pub fn getHome(alloc: Allocator, subpath: ?Str) !Str {
     defer alloc.free(home);
     if (subpath) |s| {
         var ret = Str.New();
-        try ret.addAsciiSlice(home);
+        try ret.addAscii(home);
         try ret.add(s);
         return ret;
     } else {
