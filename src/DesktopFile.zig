@@ -44,7 +44,7 @@ const CstrCategories = "Categories";
 const CstrActions = "Actions";
 
 pub fn NewCstr(a: Allocator, fullpath: []const u8) !DesktopFile {
-    return New(a, try String.From(fullpath));
+    return New(a, try String.New(fullpath));
 }
 
 pub fn New(a: Allocator, fullpath: String) !DesktopFile {
@@ -81,13 +81,13 @@ pub fn deinit(self: *DesktopFile) void {
     }
 }
 
-fn buildKeyname(name: []const u8, lang: []const u8) !ArrayList(u8) {
-    var key = try String.From(name);
+fn buildKeyname(a: Allocator, name: []const u8, lang: []const u8) !ArrayList(u8) {
+    var key = try String.New(name);
     defer key.deinit();
     try key.addChar('[');
-    try key.addAsciiSlice(lang);
+    try key.addAscii(lang);
     try key.addChar(']');
-    return key.toUtf8();
+    return key.toUtf8(a);
 }
 
 pub fn getActions(self: DesktopFile) ?*const String {
@@ -111,8 +111,8 @@ group_name: ?[]const u8) ?*const String {
     const gn = if (group_name) |cstr| cstr else CstrMainGroup;
     const group = self.groups.getPtr(gn) orelse return null;
     if (lang) |lang_cstr| {
-        const key_name = buildKeyname(name, lang_cstr) catch return null;
-        defer key_name.deinit();
+        var key_name = buildKeyname(self.alloc, name, lang_cstr) catch return null;
+        defer key_name.deinit(self.alloc);
         return group.getPtr(key_name.items);
     }
     
@@ -137,17 +137,18 @@ pub fn getName(self: DesktopFile, lang: ?[]const u8) ?*const String {
 
 pub fn init(self: *DesktopFile) !void {
     const fp = self.fullpath orelse return String.Error.NotFound;
-    const data_cstr = try io.readFile(self.alloc, fp);
+    var file_contents = try io.readFile(self.alloc, fp);
+    defer file_contents.deinit(self.alloc);
 
-    const data_str = try String.From(data_cstr);
-    self.alloc.free(data_cstr);
+    const data_str = try String.New(file_contents.items);
     defer data_str.deinit();
+    
     var lines = try data_str.split("\n", .{.keep = .No});
     defer {
         for (lines.items) |line| {
             line.deinit();
         }
-        lines.deinit();
+        lines.deinit(self.alloc);
     }
 
     var current_hash_opt: ?*KVHash = null;
@@ -159,7 +160,7 @@ pub fn init(self: *DesktopFile) !void {
         }
         if (line.isBetween("[", "]")) |group_name| {
             defer group_name.deinit();
-            const name_cstr = try group_name.dupAsCstr();
+            const name_cstr = try group_name.toOwnedSlice(self.alloc);
             const h = KVHash.init(self.alloc);
             try self.groups.put(name_cstr, h);
             current_hash_opt = self.groups.getPtr(name_cstr) orelse break;
@@ -171,13 +172,13 @@ pub fn init(self: *DesktopFile) !void {
             for (kv.items) |s| {
                 s.deinit();
             }
-            kv.deinit();
+            kv.deinit(self.alloc);
         }
 
         const key = try kv.items[0].Clone();
         defer key.deinit();
-        const value = if (kv.items.len == 2) try kv.items[1].Clone() else String.New();
-        const final_key = try key.dupAsCstrAlloc(self.alloc);
+        const value = if (kv.items.len == 2) try kv.items[1].Clone() else String.Empty();
+        const final_key = try key.toOwnedSlice(self.alloc);
         try current_hash.put(final_key, value);
     }
 }

@@ -37,18 +37,17 @@ pub fn getHome(alloc: Allocator, subpath: ?Str) !Str {
     const home = try getEnv(alloc, Folder.Home);
     defer alloc.free(home);
     if (subpath) |s| {
-        var ret = Str.New();
-        try ret.addAscii(home);
+        var ret = try Str.NewAscii(home);
         try ret.add(s);
         return ret;
     } else {
-        return Str.From(home);
+        return Str.New(home);
     }
 }
 
 pub fn getHomeAscii(alloc: Allocator, subpath: ?[]const u8) !Str {
     if (subpath) |ascii| {
-        const s = try Str.FromAscii(ascii);
+        const s = try Str.NewAscii(ascii);
         defer s.deinit();
         return try getHome(alloc, s);
     }
@@ -57,7 +56,7 @@ pub fn getHomeAscii(alloc: Allocator, subpath: ?[]const u8) !Str {
 
 pub fn getHomeUtf8(alloc: Allocator, subpath: ?[]const u8) !Str {
     if (subpath) |utf8| {
-        const s = try Str.From(utf8);
+        const s = try Str.New(utf8);
         defer s.deinit();
         return try getHome(alloc, s);
     }
@@ -123,9 +122,9 @@ pub fn listFilesUtf8(alloc: Allocator, folder: ?Folder, subdir: ?[]const u8) !st
     return listFiles(alloc, folder, subpath);
 }
 
-pub fn openDir(fullpath: Str) !std.fs.Dir {
-    var bytes = try fullpath.toUtf8();
-    defer bytes.deinit(Str.ctx.a);
+pub fn openDir(a: Allocator, fullpath: Str) !std.fs.Dir {
+    var bytes = try fullpath.toUtf8(a);
+    defer bytes.deinit(a);
     return openDirUtf8(bytes.items);
 }
 
@@ -135,7 +134,7 @@ pub fn openDirUtf8(fullpath: []const u8) !std.fs.Dir {
 }
 
 pub fn readFile(alloc: Allocator, full_path: Str) !ArrayList(u8) {
-    var bytes = try full_path.toUtf8();
+    var bytes = try full_path.toUtf8(alloc);
     defer bytes.deinit(Str.ctx.a);
     return readFileUtf8(alloc, bytes.items);
 }

@@ -117,7 +117,7 @@ pub fn test_find_index(raw_str: []const u8, needles: ConstCpSlice, froms: []cons
         mtl.debug(@src(), "raw_str.len={} bytes", .{raw_str.len});
     }
     const start_time = getTime();
-    var haystack = try String.From(raw_str);
+    var haystack = try String.New(raw_str);
     defer haystack.deinit();
     const done_in = getTime() - start_time;
     mtl.debug(@src(), "String(graphemes={}, cp={}) init done in {}{s}\n", .{ haystack.size(), haystack.size_cp(), done_in, TimeExt });

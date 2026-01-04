@@ -575,7 +575,7 @@ pub const Group = struct {
                 },
             }
         } else {
-            var s = String.New();
+            var s = String.Empty();
             try s.addGrapheme(gr);
             try tokens.append(a, Item.newString(s));
         }
@@ -594,13 +594,13 @@ pub const Group = struct {
     }
 
     fn addAscii(a: Allocator, arr: *ArrayList(Item), s: []const u8) !void {
-        const item = Item.newString(try String.FromAscii(s));
+        const item = Item.newString(try String.NewAscii(s));
         // mtl.debug(@src(), "item:{}", .{item});
         try arr.append(a, item);
     }
 
     fn addUtf8(a: Allocator, arr: *ArrayList(Item), s: []const u8) !void {
-        try arr.append(a, Item.newString(try String.From(s)));
+        try arr.append(a, Item.newString(try String.New(s)));
     }
 
     fn adjustLookBehinds(self: *Group, parent: ?LookAround) void {
@@ -1809,7 +1809,7 @@ pub fn foundSlice(self: *const Regex) ?Slice {
 }
 
 pub fn getCapture(self: Regex, name: []const u8) ?Slice {
-    const name_str = String.From(name) catch return null;
+    const name_str = String.New(name) catch return null;
     defer name_str.deinit();
     if (self.top_group.getCaptureByName(name_str)) |result| {
         return result;
@@ -1837,7 +1837,7 @@ fn setLookingBehind(self: *Regex, flag: bool) void {
 }
 
 pub fn Search(alloc: Allocator, pattern: []const u8, input: []const u8, correct: []const []const u8, options: TerminalOutput) !void {
-    const regex_pattern = try String.From(pattern);
+    const regex_pattern = try String.New(pattern);
 
     const regex = Regex.New(alloc, regex_pattern) catch |e| {
         mtl.debug(@src(), "Can't create regex: {}", .{e});
@@ -1847,7 +1847,7 @@ pub fn Search(alloc: Allocator, pattern: []const u8, input: []const u8, correct:
     if (options.diagnose == .Yes)
         mtl.debug(@src(), "{f}", .{regex});
 
-    const heap = try String.From(input);
+    const heap = try String.New(input);
     defer heap.deinit();
     regex.setParams(&heap, .{ .qtty = .All(), .cs = .Yes });
     if (options.diagnose == .Yes)

@@ -50,86 +50,65 @@ It will find as expected 3 matches:
 
 ---
 
-Random ZigString examples:<br/>
+Some String examples, see test_default.zig for more:<br/>
  
  ```zig
-    // before using the string class, must create a string context per thread, it contains cached amd shared data:
-    String.ctx = try Context.New(alloc);
-    defer String.ctx.deinit();
+    // before using the string class, must create a string context per thread,
+    // it contains cached amd shared data:
+    try String.Init(alloc);
+    defer String.Deinit();
 
-    const hello_world = try String.From("Hello, World!");
-    defer hello_world.deinit();
-    const hello_split = try hello_world.split(" ", .{.keep = .No});
-    defer {
-        for(hello_split.items) |s| {
-            s.deinit();
-        }
-        hello_split.deinit();
-    }
+    const str_ru = try String.New("Жизнь");
+    defer str_ru.deinit();
+    try expect(str_ru.startsWithUtf8("Ж", .{}));
+    try expect(str_ru.charAt(4).?.eqUtf8("ь"));
 
-    const correct2 = [_][]const u8 {"Hello,", "World!"};
-    for (hello_split.items, correct2) |l, r| {
-        try expect(l.equalsUtf8(r, .{}));
-    }
-
-    const at = hello_world.indexOfAscii("lo", .{});
-    if (at) |index| {
-        // mtl.debug(@src(), "at={}", .{index});
-        try expect(index.gr == 3);
-    } else {
-        std.debug.print("IndexOf \"lo\" not found", .{});
-    }
-
-    const sub = try hello_world.substring(3, 5);
-    defer sub.deinit();
-    try expect(sub.equalsUtf8("lo, W", .{}));
-
-    const sub2 = try hello_world.substring(3, -1);
-    defer sub2.deinit();
-    try expect(sub2.equalsUtf8("lo, World!", .{}));
-    
-    // Efficient iteration over graphemes:
-    const both_ways = try String.From("Jos\u{65}\u{301}"); // "José"
+    // So here's usage of charAtIndex() which is used to *efficiently*
+    // iterate over a string forth and then backwards.
+    // The usage of "\u{65}\u{301}" (2 codepoints)
+    // instead of "é" (1 codepoint) is intentional to test that it
+    // iterates over graphemes, not codepoints:
+    const both_ways = try String.New("Jos\u{65}\u{301}"); // "José"
     defer both_ways.deinit();
     {
-        var result = String.New();
+        var result = String.Empty();
         defer result.deinit();
         var it = both_ways.iterator();
         while (it.next()) |gr| {
             try result.addGrapheme(gr); // the grapheme's index is at gr.idx
         }
-        
+
         try expect(both_ways.equals(result, .{}));
     }
-    
+
     {
         const correct = "\u{65}\u{301}soJ"; // "ésoJ"
-        var result = String.New();
+        var result = String.Empty();
         defer result.deinit();
         var it = both_ways.iteratorFromEnd();
         while (it.prev()) |gr| {
             try result.addGrapheme(gr);
         }
-        
+
         try expect(result.equalsUtf8(correct, .{}));
     }
 
     {
         // let's iterate from let's say the location of "s":
         const correct = "s\u{65}\u{301}"; // "sé"
-        var result = String.New();
+        var result = String.Empty();
         defer result.deinit();
         if (both_ways.indexOfAscii("s", .{})) |idx| {
             var it = both_ways.iteratorFrom(idx);
             while (it.next()) |gr| {
                 try result.addGrapheme(gr);
             }
-            
+
             try expect(result.equalsUtf8(correct, .{}));
         }
     }
 
-    const str_ch = try String.From("好久不见，你好吗？");
+    const str_ch = try String.New("好久不见，你好吗？");
     defer str_ch.deinit();
     try expect(str_ch.charAt(0).?.eqUtf8("好"));
     try expect(str_ch.charAt(3).?.eqUtf8("见"));
