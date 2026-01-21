@@ -29,7 +29,7 @@ const DesktopFile = @import("DesktopFile.zig").DesktopFile;
 const theme = String.Theme.Dark;
 
 test "Desktop File" {
-    if (true)
+    if (false)
         return error.SkipZigTest;
 
     try String.Init(alloc);
@@ -105,7 +105,7 @@ pub fn buildAHref(numbers_str: *Slice, session_num: String) !String {
         try nums.append(alloc, try pair[0].toString());
         try nums.append(alloc, try pair[1].toString());
     } else {
-        try nums.append(alloc, try session_num.Clone());
+        try nums.append(alloc, session_num);
         try nums.append(alloc, try numbers_str.toString());
     }
 
@@ -260,9 +260,9 @@ fn parseSession(name: String) !String {
     idx.addOne(); // skipping past "_"
     const idx2 = name.lastIndexOfAscii(".", .{}) orelse return error.Index;
 
-    const number = try name.betweenIndices(idx, idx2);
+    const number = name.slice(idx, idx2);
     var ret = try String.New("Сеанс ");
-    try ret.addConsume(number);
+    try ret.addSlice(number);
     return ret;
 }
 
@@ -349,6 +349,10 @@ fn Translate(dirpath: String, filename: String) !void {
         lines.deinit(alloc);
     }
 
+    if (lines.items.len <= 2) {
+        return;
+    }
+
     var html = String.Empty();
     defer html.deinit();
     try html.addAscii(
@@ -360,12 +364,11 @@ fn Translate(dirpath: String, filename: String) !void {
     var idx1 = filename.indexOfAscii("_", .{}) orelse return error.Other;
     idx1.addOne();
     const idx2 = filename.indexOfAscii(".", .{}) orelse return error.Other;
-    const session_num = try filename.betweenIndices(idx1, idx2);
-    defer session_num.deinit();
+    const session_num = filename.slice(idx1, idx2);
     try html.addUtf8("\t<title>Сеанс ");
-    try html.add(session_num);
+    try html.addSlice(session_num);
     try html.addUtf8(" - Закон Одного</title>\n</head>\n<body><div class=session>Сеанс ");
-    try html.add(session_num);
+    try html.addSlice(session_num);
     try html.addAscii("</div>\n<div class=session_date>");
     const date = lines.orderedRemove(0);
     try html.addSlice(date);
@@ -396,7 +399,7 @@ fn Translate(dirpath: String, filename: String) !void {
             last_was = .anchor;
             try html.addAscii("\n<table>\n\t<tr>\n\t\t<td>");
             // mtl.debug(@src(), "{f}, {f}", .{line._(2), session_num._(2)});
-            try html.addConsume(try buildAHref(line, session_num));
+            try html.addConsume(try buildAHref(line, try session_num.toString()));
             try html.addAscii("</td>");
         } else if (line.startsWithAscii(en_prefix, .{})) {
             var was_anchor = false;
@@ -440,12 +443,11 @@ fn Translate(dirpath: String, filename: String) !void {
     try html.addUtf8(all_sessions);
     try html.addAscii("</body></html>");
 
-    var html_fn = try filename.Clone();
-    try html_fn.changeToAsciiExtension(".html");
-    defer html_fn.deinit();
+    var html_filename = try filename.Clone();
+    try html_filename.changeToAsciiExtension(".html");
     var relative_path = try String.New(tloo_path);
     defer relative_path.deinit();
-    try relative_path.add(html_fn);
+    try relative_path.addConsume(html_filename);
 
     const save_to_path = try io.getHome(alloc, relative_path);
     defer save_to_path.deinit();

@@ -603,6 +603,14 @@ pub const Index = struct {
         return Index{ .cp = self.cp + input.cp, .gr = self.gr + input.gr };
     }
 
+    pub fn plusNull(self: Index, input: ?Index) ?Index {
+        if (input) |x| {
+            return Index{ .cp = self.cp + x.cp, .gr = self.gr + x.gr };
+        }
+        
+        return null;
+    }
+
     pub fn plusN(self: Index, n: usize) Index {
         // usable and fast when dealing with ASCII
         return Index{ .cp = self.cp + n, .gr = self.gr + n };
@@ -856,7 +864,7 @@ pub const Slice = struct {
         a.from.subtract(self.start);
         const idx = indexOfCpSlice_real(self.codepoints(data), self.graphemes(data), input_codepoints, a) orelse return null;
 
-        return idx.plus(self.start);
+        return self.start.plusNull(idx);
     }
 
     pub fn indexOfUtf8(self: Slice, input: []const u8, args: Args) ?Index {
@@ -866,7 +874,10 @@ pub const Slice = struct {
             a.from = self.start;
         }
 
-        return indexOfUtf8_real(data.codepoints(), data.graphemes(), input, a);
+        a.from.subtract(self.start);
+        const idx = indexOfUtf8_real(self.codepoints(data), self.graphemes(data), input, a);
+
+        return self.start.plusNull(idx);
     }
 
     pub fn isDigit(self: Slice, at: Index) bool {
@@ -907,9 +918,14 @@ pub const Slice = struct {
     }
 
     fn lastIndexGeneric(self: Slice, comptime T: type, needles: []const T, args: Args) ?Index {
+        var a = args;
+        if (a.from.cp == 0 and self.start.cp != 0) {
+            a.from = self.start;
+        }
         const data = self.str.d orelse return null;
+        a.from.subtract(self.start);
         const idx = lastIndexGeneric_real(self.codepoints(data), self.graphemes(data), self.size(), T, needles, args) orelse return null;
-        return self.start.plus(idx);
+        return self.start.plusNull(idx);
     }
 
     pub fn lastIndexOf(self: Slice, needles_str: String, args: Args) ?Index {
@@ -953,9 +969,11 @@ pub const Slice = struct {
             a.from = self.start;
         }
 
-        // mtl.debug(@src(), "ARGS: {}", .{a});
         const data = self.str.d orelse return null;
-        return matchesAscii_real(data.codepoints(), data.graphemes(), input, a);
+        a.from.subtract(self.start);
+        const idx = matchesAscii_real(self.codepoints(data), self.graphemes(data), input, a);
+
+        return self.start.plusNull(idx);
     }
 
     pub fn matchesSlice(self: Slice, input: Slice, args: Args) ?Index {
@@ -965,7 +983,9 @@ pub const Slice = struct {
         }
 
         const data = self.str.d orelse return null;
-        return matches_real(data.codepoints(), data.graphemes(), input, a);
+        a.from.subtract(self.start);
+        const idx = matches_real(self.codepoints(data), self.graphemes(data), input, a);
+        return self.start.plusNull(idx);
     }
 
     pub fn matchesUtf8(self: Slice, input: []const u8, args: Args) ?Index {
@@ -2936,6 +2956,10 @@ fn matches_real(codepoints: ConstCpSlice, graphemes: GraphemeSlice, input: Slice
         return null;
     }
 
+    if (graphemes.len < end) {
+        return null;
+    }
+
     const str_cps = codepoints[args.from.cp..end];
     const str_graphemes = graphemes[args.from.cp..end];
     var gr_count: usize = 0;
@@ -2960,7 +2984,14 @@ fn matchesAscii_real(codepoints: ConstCpSlice, graphemes: GraphemeSlice, input: 
     const end = args.from.cp + input.len;
     const sensitive = args.cs == .Yes;
     const bit: Codepoint = ~@as(Codepoint, 32);
-    for (graphemes[args.from.cp..end], codepoints[args.from.cp..end], input) |gr, cp, in| {
+    if (graphemes.len < end) {
+        return null;
+    }
+    const gr1 = graphemes[args.from.cp..end];
+    if (gr1.len < input.len) {
+        return null;
+    }
+    for (gr1, codepoints[args.from.cp..end], input) |gr, cp, in| {
         const l = if (sensitive) cp else (cp & bit);
         const r = if (sensitive) in else (in & bit);
         if (gr != 1 or l != r) {
