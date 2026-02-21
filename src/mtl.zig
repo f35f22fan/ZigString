@@ -3,42 +3,40 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 fn print(out: anytype, comptime fg: []const u8, src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
-    _ = &out;
-    std.debug.print("{s}{s}{s}[{s}]{s}:{d} {s}", .{ fg, src.file, COLOR_CYAN, src.fn_name, fg, src.line, COLOR_DEFAULT });
-    std.debug.print(fmt, args);
-    std.debug.print("{s}\n", .{COLOR_DEFAULT});
+    var buf: [512]u8 = undefined;
+    var wr = out.writer(&buf);
+    var writer = &wr.interface;
+    writer.print("{s}{s}{s}[{s}]{s}:{d} {s}", .{ fg, src.file, COLOR_CYAN, src.fn_name, fg, src.line, COLOR_DEFAULT }) catch {};
+    writer.print(fmt, args) catch {};
+    writer.print("{s}\n", .{COLOR_DEFAULT}) catch {};
+    writer.flush() catch {};
 }
 
-inline fn debugger(comptime fg: []const u8, src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
-    //print(std.io.getStdErr().writer(), fg, src, fmt, args);
-    print(null, fg, src, fmt, args);
+inline fn debug_fg(comptime fg: []const u8, src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
+    print(std.fs.File.stderr(), fg, src, fmt, args);
 }
 
-pub inline fn info(src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
-    print(null, COLOR_BLUE, src, fmt, args);
+pub fn info(src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
+    print(std.fs.File.stdout(), COLOR_BLUE, src, fmt, args);
 }
 
-pub inline fn debug(src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
-    debugger(COLOR_BLUE, src, fmt, args);
+pub fn debug(src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
+    debug_fg(COLOR_BLUE, src, fmt, args);
 }
 
-pub inline fn warn(src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
-    debugger(COLOR_RED, src, fmt, args);
+pub fn warn(src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
+    debug_fg(COLOR_RED, src, fmt, args);
 }
 
-pub inline fn trace(src: std.builtin.SourceLocation) void {
-    debug(src, "===================={{trace}}", .{});
+pub fn trace(src: std.builtin.SourceLocation) void {
+    line(src, "!");
 }
 
-pub inline fn wtf(src: std.builtin.SourceLocation) void {
-    debugger(COLOR_RED, src, "{s}", .{"============WTF"});
+pub fn tbd(src: std.builtin.SourceLocation) void {
+    debug_fg(COLOR_MAGENTA, src, "{s}", .{"TBD"});
 }
 
-pub inline fn tbd(src: std.builtin.SourceLocation) void {
-    debugger(COLOR_MAGENTA, src, "{s}", .{"TBD"});
-}
-
-pub fn separator(src: std.builtin.SourceLocation, comptime chars: []const u8) void {
+pub fn line(src: std.builtin.SourceLocation, comptime chars: []const u8) void {
     debug(src, chars ** 30, .{});
 }
 

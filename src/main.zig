@@ -64,7 +64,7 @@ pub fn main() !u8 {
     try String.Init(alloc);
     defer String.Deinit();
 
-    const s = try String.From("Hello, World!");
+    const s = try String.New("Hello, World!");
     defer s.deinit();
     mtl.debug(@src(), "{f}", .{s._(1)});
 
