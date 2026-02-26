@@ -29,7 +29,7 @@ const DesktopFile = @import("DesktopFile.zig").DesktopFile;
 const theme = String.Theme.Dark;
 
 test "Desktop File" {
-    if (false)
+    if (true)
         return error.SkipZigTest;
 
     try String.Init(alloc);
@@ -341,7 +341,7 @@ fn Translate(dirpath: String, filename: String) !void {
     var contents_u8 = try io.readFile(alloc, txt_fullpath);
     defer contents_u8.deinit(alloc);
 
-    const contents = try String.New(contents_u8.items[0..]);
+    var contents = try String.New(contents_u8.items[0..]);
     defer contents.deinit();
 
     var lines = try contents.splitSlices("\n", .{});

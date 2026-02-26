@@ -7,6 +7,7 @@ const alloc = std.testing.allocator;
 const mtl = @import("mtl.zig");
 
 const String = @import("String.zig").String;
+const Ctring = @import("Ctring.zig").Ctring;
 const CaseSensitive = String.CaseSensitive;
 const Codepoint = String.Codepoint;
 const Context = String.Context;
@@ -378,22 +379,22 @@ test "Char At" {
     // so it's invalid once the string changes.
     // But thanks to this it can hold an arbitrary long grapheme cluster
     // and doesn't need a deinit() call.
-    try expect(str.charAt(2).?.eqCp(letter_s));
-    try expect(str.charAt(32).?.eqCp('e'));
+    try expect(str.charAt(2).?.eq(letter_s));
+    try expect(str.charAt(32).?.eq('e'));
 
     const at: usize = 1;
     {
         const gr = str.charAt(at) orelse return error.NotFound;
-        try expect(!gr.eqCp('a'));
-        try expect(gr.eqCp('o'));
-        try expect(!gr.eqCp('G'));
+        try expect(!gr.eq('a'));
+        try expect(gr.eq('o'));
+        try expect(!gr.eq('G'));
         try expect(!gr.eqUtf8("\u{65}\u{301}"));
     }
 
     {
         const gr = str.charAt(3) orelse return error.NotFound;
         try expect(gr.eqUtf8("\u{65}\u{301}"));
-        try expect(!gr.eqCp('G'));
+        try expect(!gr.eq('G'));
     }
 
     const str_ru = try String.New("Жизнь");
@@ -451,7 +452,7 @@ test "Char At" {
     try expect(str_ch.charAt(0).?.eqUtf8("好"));
     try expect(str_ch.charAt(3).?.eqUtf8("见"));
     try expect(str_ch.charAt(8).?.eqUtf8("？"));
-    try expect(!str_ch.charAt(1).?.eqCp('A'));
+    try expect(!str_ch.charAt(1).?.eq('A'));
 
     {
         const jose = try String.New("Jos\u{65}\u{301}");
@@ -553,7 +554,7 @@ test "Slice functions" {
 
             try expect(slice.matchesAscii("a", .{ .from = g7.idx }) != null);
             const g = slice.next(g7.idx) orelse return error.NotFound;
-            try expect(g.eqCp(' '));
+            try expect(g.eq(' '));
         }
 
         {
@@ -587,7 +588,7 @@ test "Slice functions" {
         const slice = heap.midSlice(start);
         const idx = slice.findIndex(7) orelse return error.NotFound;
         const gr = slice.charAtIndex(idx) orelse return error.NotFound;
-        try expect(gr.idx.eqCpGr(14, 12) and gr.eqCp('a'));
+        try expect(gr.idx.eqCpGr(14, 12) and gr.eq('a'));
     }
 
     { // before last
@@ -597,7 +598,7 @@ test "Slice functions" {
         const slice = heap.slice(start, end);
         const gr = slice.charAtIndex(slice.beforeLast()) orelse return error.NotFound;
         // mtl.debug(@src(), "slice:{dt}, gr:{dt}, gr.idx:{}", .{slice, gr, gr.idx});
-        try expect(gr.eqCp('a') and gr.idx.eqCpGr(14, 12));
+        try expect(gr.eq('a') and gr.idx.eqCpGr(14, 12));
     }
 
     { // slice iterators
@@ -612,7 +613,7 @@ test "Slice functions" {
             while (iter.next()) |gr| {
                 const c = str_iter.next() orelse return error.NotFound;
                 // mtl.debug(@src(), "gr:{dt} vs {dt}", .{gr, c});
-                try expect(gr.eq(c, .Yes));
+                try expect(gr.eqGr(c, .Yes));
             }
         }
 
@@ -621,7 +622,7 @@ test "Slice functions" {
             var str_iter = heap.iteratorFrom(slice.beforeLast());
             while (iter.prev()) |gr| {
                 const c = str_iter.prev() orelse return error.NotFound;
-                try expect(gr.eq(c, .Yes));
+                try expect(gr.eqGr(c, .Yes));
                 // mtl.debug(@src(), "gr(back):{dt}", .{gr});
             }
         }
@@ -632,7 +633,7 @@ test "Slice functions" {
             var iter = slice.iteratorFrom(from);
             while (iter.prev()) |gr| {
                 const c = str_iter.prev() orelse return error.NotFound;
-                try expect(gr.eq(c, .Yes));
+                try expect(gr.eqGr(c, .Yes));
                 // mtl.debug(@src(), "gr(from):{dt}", .{gr});
             }
         }
@@ -677,7 +678,7 @@ test "trimming and splitting slices" {
     }
 
     {
-        const heap = try String.New(" Hello\nWorld,\n Жизнь,\nbar,\nbaz");
+        var heap = try String.New(" Hello\nWorld,\n Жизнь,\nbar,\nbaz");
         defer heap.deinit();
         var arr = try heap.splitSlices("\n", .{});
         defer arr.deinit(alloc);

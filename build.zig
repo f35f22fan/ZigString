@@ -71,6 +71,8 @@ pub fn build(b: *std.Build) void {
     AddNewTest(b, target, optimize, zg, "src/test_speed.zig", "test_speed", "Test Speed");
     AddNewTest(b, target, optimize, zg, "src/test_irl.zig", "test_irl", "Test IRL");
     AddNewTest(b, target, optimize, zg, "src/Regex.zig", "test_regex", "Test Regex");
+
+    AddNewTest(b, target, optimize, zg, "src/Ctring.zig", "test_ctring", "Test Ctring");
 }
 
 fn addZgImport(target: anytype, zg: *std.Build.Dependency) void {
