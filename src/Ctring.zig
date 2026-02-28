@@ -40,10 +40,16 @@ pub const CtringIterator = struct {
     str: *const Ctring,
     pos: usize,
     first_time: bool = true,
+    range: Range = .{},
 
     pub fn New(str: *const Ctring, from: ?usize) CtringIterator {
         const pos = if (from) |i| i else 0;
-        return CtringIterator{ .str = str, .pos = pos };
+        return CtringIterator{ .str = str, .pos = pos, .range = .{.start=0, .end=str.size()} };
+    }
+
+    pub fn FromView(v: *const View, from: ?usize) CtringIterator {
+        const pos = if (from) |i| i+v.start else v.start;
+        return CtringIterator{ .str = v.s, .pos = pos, .range = .{.start=v.start, .end=v.end} };
     }
 
     pub fn continueFrom(self: *CtringIterator, pos: usize) void {
@@ -56,11 +62,11 @@ pub const CtringIterator = struct {
     }
 
     pub fn hasMore(self: CtringIterator, dir: Direction) bool {
-        return if (dir == .Forward) self.pos + 1 < self.str.size() else self.pos > 0;
+        return if (dir == .Forward) self.pos + 1 < self.range.end else self.pos > self.start;
     }
 
     pub fn next(self: *CtringIterator) ?Grapheme {
-        if (self.pos < self.str.size() - 1) {
+        if (self.pos < self.range.end - 1) {
             if (self.first_time) {
                 self.first_time = false;
             } else {
@@ -83,7 +89,7 @@ pub const CtringIterator = struct {
         if (self.first_time) {
             self.first_time = false;
         } else {
-            if (self.pos == 0) {
+            if (self.pos == self.range.start) {
                 return null;
             }
             self.pos -= 1;
@@ -101,12 +107,16 @@ pub const CtringIterator = struct {
 };
 
 const View = struct {
+/// The `start` and `end` fields must contain absolute values. Thus all input
+/// Range args to the methods of `View` must contain absolute values. But for
+/// convenience the default constructor .{} (which is thus initialized to zeroes)
+/// is interpreted as to contain the whole string.
     start: usize,
     end: usize,
     s: *const Ctring,
 
     pub fn afterLast(self: View) usize {
-        return self.end + 1;
+        return self.end;
     }
 
     pub fn endsWith(self: View, rhs: Ctring) bool {
@@ -142,6 +152,13 @@ const View = struct {
     }
 
     pub fn eqAscii(self: View, ascii: []const u8) bool {
+        const self_len = self.end - self.start;
+        if (ascii.len != self_len) {
+            return false;
+        }
+        if (ascii.len == 0 and (self_len == 0)) {
+            return true;
+        }
         return self.s.eqAscii(ascii, self.range());
     }
 
@@ -151,10 +168,19 @@ const View = struct {
         return s.eqView(self);
     }
 
-    pub fn find(self: View, needle: Ctring, r: Range) ?usize {
-        const start = if (r.start == 0) self.start else r.start;
-        const end = if (r.end == 0) self.end else r.end;
-        return self.s.find(needle, .{.start=start, .end=end});
+    pub fn find(self: View, needles: Ctring, from: ?usize) ?usize {
+        const r: Range = if (from) |f| .{.start=f, .end=self.end} else self.range();
+        return self.s.find(needles, r);
+    }
+
+    pub fn findAscii(self: View, needles: []const u8, from: ?usize) ?usize {
+        const r: Range = if (from) |f| .{.start=f, .end=self.end} else self.range();
+        return self.s.findAscii(needles, r);
+    }
+
+    pub fn findUtf8(self: View, needles: []const u8, from: ?usize) ?usize {
+        const r: Range = if (from) |f| .{.start=f, .end=self.end} else self.range();
+        return self.s.findUtf8(needles, r);
     }
 
     pub fn format(self: *const View, writer: *std.Io.Writer) !void {
@@ -163,6 +189,22 @@ const View = struct {
 
     pub fn _(self: *const View, context: i32) View_ {
         return .{ .v = self, .context = context };
+    }
+
+    pub fn iterator(self: *const View, from: ?usize) CtringIterator {
+        return CtringIterator.FromView(self, from);
+    }
+    
+    pub fn lastIndexOf(self: View, needles: Ctring) ?usize {
+        return self.s.lastIndexOf(needles, self.range());
+    }
+
+    pub fn lastIndexOfAscii(self: View, needles: []const u8) ?usize {
+        return self.s.lastIndexOfAscii(needles, self.range());
+    }
+
+    pub fn lastIndexOfUtf8(self: View, needles: []const u8) ?usize {
+        return self.s.lastIndexOfUtf8(needles, self.range());
     }
 
     inline fn range(self: View) Range {
@@ -178,11 +220,63 @@ const View = struct {
         return self.end - self.start;
     }
 
-    pub fn split(self: View, sep: Ctring, keepEmptyParts: bool) !ArrayList(View) {
-        _ = self;
-        _ = keepEmptyParts;
-        _ = sep;
-        return error.Other;
+    pub fn split(self: View, sep: Ctring, keep_empty_parts: bool) !ArrayList(View) {
+        var arr: ArrayList(View) = .empty;
+        errdefer arr.deinit(ctx.a);
+        var at_idx: usize = self.start;
+        const sep_size = sep.size();
+        while (at_idx < self.end) {
+            const r: Range = .{.start=at_idx, .end=self.end};
+            if (self.s.find(sep, r)) |idx| {
+                const new_view = self.s.view(at_idx, idx);
+                const is_empty = (new_view.end - new_view.start == 0);
+                if (keep_empty_parts or !is_empty) {
+                    try arr.append(ctx.a, new_view);
+                }
+                at_idx = idx + sep_size;
+            } else {
+                const new_view = self.s.view(at_idx, self.end);
+                try arr.append(ctx.a, new_view);
+                break;
+            }
+        }
+
+        return arr;
+    }
+
+    pub fn splitAscii(self: View, sep: []const u8, keep_empty_parts: bool) !ArrayList(View) {
+        var arr: ArrayList(View) = .empty;
+        errdefer arr.deinit(ctx.a);
+        var at_idx: usize = self.start;
+        const sep_size = sep.len;
+        while (at_idx < self.end) {
+            const r: Range = .{.start=at_idx, .end=self.end};
+            if (self.s.findAscii(sep, r)) |idx| {
+                const new_view = self.s.view(at_idx, idx);
+                const is_empty = (new_view.end - new_view.start == 0);
+                if (keep_empty_parts or !is_empty) {
+                    try arr.append(ctx.a, new_view);
+                }
+                at_idx = idx + sep_size;
+            } else {
+                const new_view = self.s.view(at_idx, self.end);
+                try arr.append(ctx.a, new_view);
+                break;
+            }
+        }
+
+        return arr;
+    }
+
+    pub fn splitUtf8(self: View, sep: []const u8, keep_empty_parts: bool) !ArrayList(View) {
+        var s = try Ctring.New(sep);
+        defer s.deinit();
+        return self.split(s, keep_empty_parts);
+    }
+
+    pub fn startsWith(self: View, needles: Ctring) bool {
+        const r: Range = .{.start=self.start, .end=self.start+needles.size()};
+        return self.s.find(needles, r) != null;
     }
 
     pub fn startsWithAscii(self: View, rhs: []const u8) bool {
@@ -195,11 +289,6 @@ const View = struct {
         defer s.deinit();
         const r: Range = .{.start=self.start, .end=self.start+s.size()};
         return self.s.findUtf8(rhs, r) != null;
-    }
-
-    pub fn startsWith(self: View, needles: Ctring) bool {
-        const r: Range = .{.start=self.start, .end=self.start+needles.size()};
-        return self.s.find(needles, r) != null;
     }
 
     pub fn toBytes(self: View, a: Allocator) !ArrayList(u8) {
@@ -235,8 +324,8 @@ const Grapheme_ = struct {
     gr: *const Grapheme,
     pub fn format(self: Grapheme_, writer: *std.Io.Writer) !void {
         switch (self.gr.data) {
-            .ascii => |buf| {
-                try printBytes(buf, writer, self.context);
+            .ascii => |byte| {
+                try printBytes(&.{byte}, writer, self.context);
             },
             .cps => |cps| {
                 var buf: ArrayList(u8) = .empty;
@@ -256,7 +345,7 @@ const Grapheme_ = struct {
 
 const GrData = union(enum) {
     cps: ConstCpSlice,
-    ascii: []const u8,
+    ascii: u8,
 };
 
 pub const Grapheme = struct {
@@ -267,7 +356,7 @@ pub const Grapheme = struct {
         return .{.idx = idx, .data = GrData{.cps = cps}};
     }
 
-    pub fn NewAscii(idx: usize, ascii: []const u8) Grapheme {
+    pub fn NewAscii(idx: usize, ascii: u8) Grapheme {
         return .{.idx = idx, .data = GrData{.ascii = ascii}};
     }
 
@@ -290,17 +379,10 @@ pub const Grapheme = struct {
 
         switch (self.data) {
             .ascii => |ascii| {
-                if (ascii.len != graphemes.items.len) {
+                if (graphemes.items.len > 1) {
                     return false;
                 }
-
-                for (ascii, graphemes.items) |a, b| {
-                    if (a != b) {
-                        return false;
-                    }
-                }
-
-                return true;
+                return graphemes.items[0] == ascii;
             },
             .cps => |cps| {
                 return std.mem.eql(Cp, cps, graphemes.items);
@@ -332,7 +414,7 @@ pub const Grapheme = struct {
         return ascii_match or ctx.gencat.isLetter(cp);
     }
 
-    pub fn isNumber(self: Grapheme) bool {
+    pub fn isDigit(self: Grapheme) bool {
         const cp = self.oneCp() orelse return false;
         return cp >= '0' and cp <= '9';
     }
@@ -350,9 +432,7 @@ pub const Grapheme = struct {
                 }
             },
             .ascii => |ascii| {
-                if (ascii.len == 1) {
-                    return ascii[0];
-                }
+                return ascii;
             },
         }
         return null;
@@ -360,8 +440,8 @@ pub const Grapheme = struct {
 
     pub fn toBytes(self: Grapheme, a: Allocator, result: *ArrayList(u8)) !void {
         switch (self.gr.data) {
-            .ascii => |buf| {
-                try result.appendSlice(a, buf);
+            .ascii => |byte| {
+                try result.append(a, byte);
             },
             .cps => |cps| {
                 var tmp: [4]u8 = undefined;
@@ -723,7 +803,7 @@ pub fn at(self: Ctring, index: usize) ?Grapheme {
     switch (data.*) {
         .ascii => |*arr| {
             if (index < arr.items.len) {
-                return .NewAscii(index, arr.items[index..index+1]);
+                return .NewAscii(index, arr.items[index]);
             }
         },
         .utf8 => |*utf8| {
@@ -961,7 +1041,7 @@ pub fn eqView(self: Ctring, rhs: View) bool {
         return false;
     }
 
-    return rhs.find(self, .{}) != null;
+    return self.findView(rhs, .{}) != null;
 }
 
 fn findUtfInAscii(heap_slice: []const u8, utf: Utf8, utf_range: Range) ?usize {
@@ -992,11 +1072,14 @@ fn findUtfInAscii(heap_slice: []const u8, utf: Utf8, utf_range: Range) ?usize {
     return null;
 }
 
-pub fn find(self: Ctring, needle: Ctring, hp_range: Range) ?usize {
+pub fn find(self: Ctring, needle: Ctring, range: Range) ?usize {
     const data = self.data orelse return null;
     const rdata = needle.data orelse return null;
-    const start = hp_range.start;
-    const end = if (hp_range.end == 0) self.afterLast() else hp_range.end;
+    const start = range.start;
+    const end = if (range.end == 0) self.size() else range.end;
+    if (end - start < needle.size()) {
+        return null;
+    }
     switch (data.*) {
         .ascii => |ascii| {
             switch (rdata.*) {
@@ -1028,7 +1111,10 @@ pub fn find(self: Ctring, needle: Ctring, hp_range: Range) ?usize {
 pub fn findAscii(self: Ctring, needles:[]const u8, range: Range) ?usize {
     const data = self.data orelse return null;
     const start = range.start;
-    const end = if (range.end == 0) self.afterLast() else range.end;
+    const end = if (range.end == 0) self.size() else range.end;
+    if (end - start < needles.len) {
+        return null;
+    }
     switch (data.*) {
         .ascii => |ascii| {
             return std.mem.indexOf(u8, ascii.items[start..end], needles);
@@ -1104,18 +1190,123 @@ pub fn last(self: Ctring) usize {
     return if (sz == 0) 0 else sz - 1;
 }
 
+pub fn lastIndexOf(self: Ctring, needles: Ctring, range: Range) ?usize {
+    const sz = self.size();
+    const end = if (range.end == 0) sz else range.end;
+    const rsz = needles.size();
+    if (end == 0 or rsz == 0 or rsz > end) {
+        return null;
+    }
+
+    const data = self.data orelse unreachable;
+    const rdata = needles.data orelse unreachable;
+    var pos: usize = end - rsz + 1;
+    switch (data.*) {
+        .ascii => |ascii| {
+            switch (rdata.*) {
+                .ascii => |rascii| {
+                    const slice2 = rascii.items[0..];
+                    while (pos > 0) {
+                        pos -= 1;
+                        const slice1 = ascii.items[pos..pos+rsz];
+                        if (std.mem.eql(u8, slice1, slice2)) {
+                            return pos;
+                        }
+                    }
+                    return null;
+                },
+                .utf8 => |rutf| {
+                    const rutf_range: Range = .{.start = 0, .end=rsz};
+                    while (pos > 0) {
+                        pos -= 1;
+                        const slice1 = ascii.items[pos..pos+rsz];
+                        if (rutf.findAscii(slice1, rutf_range)) |_| {
+                            return pos;
+                        }
+                    }
+                }
+            }
+        },
+        .utf8 => |utf| {
+            switch (rdata.*) {
+                .ascii => |rascii| {
+                    const rslice = rascii.items[0..];
+                    while (pos > 0) {
+                        pos -= 1;
+                        const r: Range = .{.start=pos, .end=pos+rsz};
+                        if (utf.findAscii(rslice, r)) |_| {
+                            return pos;
+                        }
+                    }
+                },
+                .utf8 => |rutf| {
+                    while (pos > 0) {
+                        pos -= 1;
+                        const r: Range = .{.start=pos, .end=pos+rsz};
+                        if (utf.find(rutf, r, null)) |_| {
+                            return pos;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return null;
+}
+
+pub fn lastIndexOfAscii(self: Ctring, needles: []const u8, range: Range) ?usize {
+    const sz = self.size();
+    const end = if (range.end == 0) sz else range.end;
+    const rsz = needles.len;
+    if (end == 0 or rsz == 0 or rsz > end) {
+        return null;
+    }
+
+    const data = self.data orelse unreachable;
+    var pos: usize = end - needles.len + 1;
+    switch (data.*) {
+        .ascii => |ascii| {
+            while (pos > 0) {
+                pos -= 1;
+                const slice = ascii.items[pos..pos+rsz];
+                if (std.mem.eql(u8, slice, needles)) {
+                    return pos;
+                }
+            }
+        },
+        .utf8 => |utf| {
+            while (pos > 0) {
+                pos -= 1;
+                const r: Range = .{.start=pos, .end=pos+rsz};
+                if (utf.findAscii(needles, r)) |_| {
+                    return pos;
+                }
+            }
+        }
+    }
+
+    return null;
+}
+
+pub fn lastIndexOfUtf8(self: Ctring, needles: []const u8, range: Range) ?usize {
+    var s = Ctring.New(needles) catch return null;
+    defer s.deinit();
+    return self.lastIndexOf(s, range);
+}
+
 pub fn printStats(self: Ctring, src: std.builtin.SourceLocation) void {
     const used_memory = self.usedMemory();
     const used_mem: f128 = @floatFromInt(used_memory);
     const gr_count: f128 = @floatFromInt(self.size());
     const bytes_per_grapheme = used_mem / gr_count;
     
-    const max: usize = @min(32, self.size());
-    var buf: ArrayList(Cp) = .empty;
-    defer buf.deinit(ctx.a);
+    const max: usize = @min(36, self.size());
+    var grapheme: ArrayList(Cp) = .empty;
+    defer grapheme.deinit(ctx.a);
 
     if (self.size() <= max) {
-        mtl.debug(src, "{f}:", .{self._(2)});
+        mtl.debug(src, "{f} [STATS]:", .{self._(2)});
     }
 
     std.debug.print("Graphemes:{}(complex:{}) cps:{} dict.count:{} memory:{} bytes_per_gr:{d:.2}\n",
@@ -1126,24 +1317,22 @@ pub fn printStats(self: Ctring, src: std.builtin.SourceLocation) void {
         const gr = self.at(i) orelse break;
         switch (gr.data) {
             .cps => |cps| {
-                buf.appendSlice(ctx.a, cps) catch return;
+                grapheme.appendSlice(ctx.a, cps) catch return;
             },
-            .ascii => |ascii| {
-                for (ascii) |byte| {
-                    buf.append(ctx.a, byte) catch return;
-                }
+            .ascii => |byte| {
+                grapheme.append(ctx.a, byte) catch return;
             }
         }
         
-        
-        for (buf.items, 0..) |cp, n| {
+        for (grapheme.items, 0..) |cp, n| {
             std.debug.print("{X}", .{cp});
-            if (n < buf.items.len-1) {
+            if (n < grapheme.items.len-1) {
                 std.debug.print("_", .{});
             }
         }
-
-        buf.clearRetainingCapacity();
+        
+        std.debug.print("{f} ", .{gr._(2)});
+        grapheme.clearRetainingCapacity();
         if (i < max-1) {
             std.debug.print(" ", .{});
         }
@@ -1298,6 +1487,21 @@ fn utf8_to_bytes(a: Allocator, utf8: *Utf8, start: usize, end: usize) !ArrayList
     return buf;
 }
 
+fn cps_to_bytes(cps: ConstCpSlice) !ArrayList(u8) {
+    var buf: ArrayList(u8) = .empty;
+    errdefer buf.deinit(ctx.a);
+    var tmp: [4]u8 = undefined;
+    for (cps) |cp| {
+        if (cp >= 0) {
+            const c: u21 = @intCast(cp);
+            const len = try unicode.utf8Encode(c, &tmp);
+            try buf.appendSlice(ctx.a, tmp[0..len]);
+        }
+    }
+
+    return buf;
+}
+
 pub fn view(self: *const Ctring, start: usize, end: usize) View {
     return View {.s = self, .start = start, .end = end};
 }
@@ -1379,12 +1583,23 @@ test "Equals, Iteration" {
         }
         
         if (true) {
-            const correct = [_][]const u8 {"🧑‍🌾", " ", "橋", " ", "5", "b"};
-            var iter = top.iterator(0);
-            var idx: usize = 0;
-            while (iter.next()) |gr| {
-                try expect(gr.eqUtf8(correct[idx]));
-                idx += 1;
+            {
+                const correct = [_][]const u8 {"🧑‍🌾", " ", "橋", " ", "5", "b"};
+                var iter = top.iterator(0);
+                var idx: usize = 0;
+                while (iter.next()) |gr| {
+                    try expect(gr.eqUtf8(correct[idx]));
+                    idx += 1;
+                }
+            }
+            {
+                const correct = [_][]const u8 {"橋", " ", "5", "b"};
+                var iter = top.view(1, top.size()).iterator(1);
+                var idx: usize = 0;
+                while (iter.next()) |gr| {
+                    try expect(gr.eqUtf8(correct[idx]));
+                    idx += 1;
+                }
             }
         }
 
@@ -1445,6 +1660,8 @@ test "Find" {
     try Ctring.Init(alloc);
     defer Ctring.Deinit();
 
+    var top = try Ctring.New("🧑‍🌾 .橋 .5b.橋");
+    defer top.deinit();
     {
         var ascii = try Ctring.Ascii("Hello");
         defer ascii.deinit();
@@ -1455,10 +1672,14 @@ test "Find" {
         defer needles.deinit();
         try expect(ascii.find(needles, .{}) == 3);
         try expect(ascii.find(needles, .{.end=ascii.afterLast()}) == 3);
-        
-        // const my_view = ascii.view(0, ascii.afterLast());
-        // const view_idx = my_view.find(needles, .{});
-        // mtl.debug(@src(), "found_at: {?}, heap:{f}", .{view_idx, my_view._(2)});
+
+        const v = top.view(0, top.size());
+        try expect(v.findAscii(".", null) == 2);
+        try expect(v.findAscii(".", 3) == 5);
+        try expect(v.findUtf8("橋", null) == 3);
+        try expect(v.findUtf8(".橋", null) == 2);
+        try expect(v.findUtf8("橋", 4) == 9);
+        try expect(v.findUtf8(".橋", 3) == 8);
     }
 
     {
@@ -1473,7 +1694,111 @@ test "Find" {
         try expect(utf.findView(my_view, .{.start=10}) == 31);
         my_view.setView(10, 12);
         try expect(utf.findView(my_view, .{}) == 3);
-        // const idx = utf.findView(my_view, .{.start=10});
-        // mtl.debug(@src(), "idx:{?}", .{idx});
+    }
+
+    { // lastIndexOf
+        {
+            var suf = try Ctring.New(".");
+            defer suf.deinit();
+            const idx = top.lastIndexOf(suf, .{});
+            try expect(idx == 8);
+            try expect(top.find(suf, .{}) == 2);
+            try expect(top.lastIndexOfAscii(".5b", .{}) == 5);
+        }
+        {
+            var suf = try Ctring.Ascii(".");
+            defer suf.deinit();
+            const idx = top.lastIndexOf(suf, .{});
+            try expect(idx == 8);
+        }
+        {
+            var suf = try Ctring.New("橋");
+            defer suf.deinit();
+            const idx = top.lastIndexOf(suf, .{});
+            try expect(idx == 9);
+        }
+
+        {
+            var suf = try Ctring.New(".橋");
+            defer suf.deinit();
+            try expect(top.lastIndexOf(suf, .{}) == 8);
+            try expect(top.find(suf, .{}) == 2);
+        }
+
+        { // too long
+            var needle = try Ctring.New("lkajsdfkjlasjfsdfsdf");
+            defer needle.deinit();
+            try expect(top.lastIndexOf(needle, .{}) == null);
+        }
+
+        const v = top.view(0, top.size());
+        {
+            try expect(v.lastIndexOfUtf8("🧑‍🌾") == 0);
+            try expect(v.lastIndexOfUtf8(".橋") == v.size()-2);
+            try expect(v.lastIndexOfAscii(".") == v.size()-2);
+            var s = try Ctring.New(".5b");
+            defer s.deinit();
+            try expect(v.lastIndexOf(s) == 5);
+        }
+    }
+}
+
+test "Split" {
+    try Ctring.Init(alloc);
+    defer Ctring.Deinit();
+
+    var top = try Ctring.New(JoseBytes);
+    defer top.deinit();
+    // top.printStats(@src());
+    // mtl.debug(@src(), "{f}", .{top._(2)});
+
+    const top_view = top.view(0, top.size());
+    {
+        var sep = try Ctring.Ascii(" ");
+        defer sep.deinit();
+        var arr = try top_view.split(sep, true);
+        defer arr.deinit(ctx.a);
+        const correct = [_][]const u8{"Jos\u{65}\u{301}", "se", "fu\u{65}\u{301}",
+        "a", "Sevilla", "sin", "pararse"};
+        for (arr.items, correct) |a, b| {
+            try expect(a.eqUtf8(b));
+        }
+    }
+
+    {
+        var arr = try top_view.splitAscii(" ", true);
+        defer arr.deinit(ctx.a);
+        const correct = [_][]const u8{"Jos\u{65}\u{301}", "se", "fu\u{65}\u{301}",
+        "a", "Sevilla", "sin", "pararse"};
+        for (arr.items, correct) |a, b| {
+            try expect(a.eqUtf8(b));
+        }
+    }
+
+    {
+        var root = try Ctring.New("Hello,  world! Again!");
+        defer root.deinit();
+        const rootv = root.view(0, root.size());
+        {
+            var arr = try rootv.splitAscii(" ", true);
+            defer arr.deinit(ctx.a);
+
+            const correct = [_][]const u8{"Hello,", "", "world!", "Again!"};
+            for (arr.items, correct) |a, b| {
+                // mtl.debug(@src(), "{f} vs \"{s}\"", .{a._(2), b});
+                try expect(a.eqAscii(b));
+            }
+        }
+
+        {
+            var arr = try rootv.splitAscii(" ", false);
+            defer arr.deinit(ctx.a);
+
+            const correct = [_][]const u8{"Hello,", "world!", "Again!"};
+            for (arr.items, correct) |a, b| {
+                // mtl.debug(@src(), "{f} vs \"{s}\"", .{a._(2), b});
+                try expect(a.eqAscii(b));
+            }
+        }
     }
 }

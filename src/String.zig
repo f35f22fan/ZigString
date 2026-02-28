@@ -3003,8 +3003,7 @@ pub fn print_out(src: std.builtin.SourceLocation, msg: ?String) void {
     mtl.debug(src, "{f}", .{info._(2)});
 }
 
-pub fn printCodepoints_real(codepoints: ConstCpSlice, graphemes: GraphemeSlice, src: std.builtin.SourceLocation,
-off_by: Index) !void {
+pub fn printCodepoints_real(codepoints: ConstCpSlice, graphemes: GraphemeSlice, src: std.builtin.SourceLocation, off_by: Index) !void {
     var cp_buf: ArrayList(Codepoint) = .empty;
     defer cp_buf.deinit(ctx.a);
     const out = std.debug;
@@ -3027,8 +3026,7 @@ off_by: Index) !void {
     out.print("\n", .{});
 }
 
-pub fn printGraphemes_real(codepoints: ConstCpSlice, graphemes: GraphemeSlice, src: std.builtin.SourceLocation,
-    off_by: Index) !void {
+pub fn printGraphemes_real(codepoints: ConstCpSlice, graphemes: GraphemeSlice, src: std.builtin.SourceLocation, off_by: Index) !void {
     var cp_buf: ArrayList(Codepoint) = .empty;
     defer cp_buf.deinit(ctx.a);
     var gr_index: isize = -1;
