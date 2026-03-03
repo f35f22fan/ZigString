@@ -1,5 +1,6 @@
 const std = @import("std");
 const Str = @import("String.zig");
+const Ctring = @import("Ctring.zig");
 const mtl = @import("mtl.zig");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
@@ -33,6 +34,20 @@ pub fn getEnv(a: Allocator, folder: Folder) ![]const u8 {
     return std.process.getEnvVarOwned(a, var_name) catch return Error.NotFound;
 }
 
+pub fn getHome2(alloc: Allocator, subpath: ?Ctring) !Ctring {
+    const home = try getEnv(alloc, Folder.Home);
+    defer alloc.free(home);
+    if (subpath) |s| {
+        var ret = try Ctring.New(home);
+        // mtl.debug(@src(), "inital ret:{f}", .{ret._(2)});
+        try ret.add(s);
+        // mtl.debug(@src(), "home:{s}, ret:{f}, subpath:{f}", .{home, ret._(2), s._(2)});
+        return ret;
+    } else {
+        return Ctring.New(home);
+    }
+}
+
 pub fn getHome(alloc: Allocator, subpath: ?Str) !Str {
     const home = try getEnv(alloc, Folder.Home);
     defer alloc.free(home);
@@ -47,16 +62,25 @@ pub fn getHome(alloc: Allocator, subpath: ?Str) !Str {
 
 pub fn getHomeAscii(alloc: Allocator, subpath: ?[]const u8) !Str {
     if (subpath) |ascii| {
-        const s = try Str.NewAscii(ascii);
+        var s = try Str.NewAscii(ascii);
         defer s.deinit();
         return try getHome(alloc, s);
     }
     return try getHome(alloc, null);
 }
 
+pub fn getHomeAscii2(alloc: Allocator, subpath: ?[]const u8) !Ctring {
+    if (subpath) |ascii| {
+        var s = try Ctring.New(ascii);
+        defer s.deinit();
+        return try getHome2(alloc, s);
+    }
+    return try getHome2(alloc, null);
+}
+
 pub fn getHomeUtf8(alloc: Allocator, subpath: ?[]const u8) !Str {
     if (subpath) |utf8| {
-        const s = try Str.New(utf8);
+        var s = try Str.New(utf8);
         defer s.deinit();
         return try getHome(alloc, s);
     }
@@ -128,6 +152,12 @@ pub fn openDir(a: Allocator, fullpath: Str) !std.fs.Dir {
     return openDirUtf8(bytes.items);
 }
 
+pub fn openDir2(a: Allocator, fullpath: Ctring) !std.fs.Dir {
+    var bytes = try fullpath.toBytes(a, .{});
+    defer bytes.deinit(a);
+    return openDirUtf8(bytes.items);
+}
+
 pub fn openDirUtf8(fullpath: []const u8) !std.fs.Dir {
     const dir = try std.fs.openDirAbsolute(fullpath, .{ .iterate = true, .no_follow = true });
     return dir;
@@ -135,7 +165,13 @@ pub fn openDirUtf8(fullpath: []const u8) !std.fs.Dir {
 
 pub fn readFile(alloc: Allocator, full_path: Str) !ArrayList(u8) {
     var bytes = try full_path.toUtf8(alloc);
-    defer bytes.deinit(Str.ctx.a);
+    defer bytes.deinit(alloc);
+    return readFileUtf8(alloc, bytes.items);
+}
+
+pub fn readFile2(alloc: Allocator, full_path: Ctring) !ArrayList(u8) {
+    var bytes = try full_path.toBytes(alloc, .{});
+    defer bytes.deinit(alloc);
     return readFileUtf8(alloc, bytes.items);
 }
 

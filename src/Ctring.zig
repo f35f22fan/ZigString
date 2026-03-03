@@ -18,8 +18,6 @@ const Normalize = @import("Normalize");
 const CaseFolding = @import("CaseFolding");
 const GeneralCategories = @import("GeneralCategories");
 
-const alloc = std.testing.allocator;
-
 pub const Cp = i22;
 pub const CpSlice = []Cp;
 pub const ConstCpSlice = []const Cp;
@@ -111,7 +109,7 @@ pub const CtringIterator = struct {
 
 };
 
-const View = struct {
+pub const View = struct {
 /// The `start` and `end` fields must contain absolute values. Thus all input
 /// Range args to the methods of `View` must contain absolute values. But for
 /// convenience the default constructor .{} (which is thus initialized to zeroes)
@@ -224,6 +222,10 @@ const View = struct {
         return self.s.lastIndexOfUtf8(needles, self.range());
     }
 
+    pub fn mid(self: View, from: usize) View {
+        return .{ .s = self.s, .start = from, .end = self.end };
+    }
+
     inline fn range(self: View) Range {
         return .{.start = self.start, .end = self.end};
     }
@@ -303,6 +305,12 @@ const View = struct {
         return self.split(s, keep_empty_parts);
     }
 
+    pub fn splitPairAt(self: View, idx: usize, sep_len: usize) ![2]View {
+        const v1 = self.s.view(self.start, idx);
+        const v2 = self.s.view(idx + sep_len, self.end);
+        return .{v1, v2};
+    }
+
     pub fn startsWith(self: View, needles: Ctring) bool {
         const r: Range = .{.start=self.start, .end=self.start+needles.size()};
         return self.s.find(needles, r) != null;
@@ -331,6 +339,28 @@ const View = struct {
 
     pub fn toString(self: View) !Ctring {
         return try self.s.clone(self.range());
+    }
+
+    pub fn trimLeft(self: *View) void {
+        var index: usize = self.start;
+        var iter = self.iterator(null);
+        while (iter.next()) |gr| {
+            const one_cp = gr.oneCp() orelse break;
+            var found = false;
+            for (CpsToTrim) |cp| {
+                if (cp == one_cp) {
+                    found = true;
+                    break;
+                }
+            }
+            if (found) {
+                index += 1;
+            } else {
+                break;
+            }
+        }
+
+        self.start = index;
     }
 
     const View_ = struct {
@@ -569,6 +599,19 @@ const Utf8 = struct {
         return utf;
     }
 
+    pub fn deinit(self: *Utf8) void {
+        self.arr.deinit(ctx.a);
+        if (self.dict) |dict_| {
+            var iter = dict_.iterator();
+            while (iter.next()) |entry| {
+                ctx.a.free(entry.value_ptr.*);
+            }
+
+            dict_.deinit();
+            ctx.a.destroy(dict_);
+        }
+    }
+
     pub fn findAscii(self: Utf8, needles: []const u8, range: Range) ?usize {
         const haystack = self.arr.items[range.start..range.end];
         for (0..haystack.len) |i| {
@@ -751,8 +794,8 @@ pub fn Empty() Ctring {
     return Ctring{};
 }
 
-pub fn init() !Ctring {
-    const data = try alloc.create(Data);
+fn init() !Ctring {
+    const data = try ctx.a.create(Data);
     return Ctring {.data = data};
 }
 
@@ -760,26 +803,16 @@ pub fn deinit(self: *Ctring) void {
     if (self.data) |data| {
         switch (data.*) {
             .ascii => |*arr| arr.deinit(ctx.a),
-            .utf8 => |*utf8| {
-                utf8.arr.deinit(ctx.a);
-                if (utf8.dict) |dict_| {
-                    var iter = dict_.iterator();
-                    while (iter.next()) |entry| {
-                        ctx.a.free(entry.value_ptr.*);
-                    }
-                    dict_.deinit();
-                    ctx.a.destroy(dict_);
-                }
-            }
+            .utf8 => |*utf8| utf8.deinit(),
         }
 
-        alloc.destroy(data);
+        ctx.a.destroy(data);
     }
 }
 
 pub fn Ascii(s: []const u8) !Ctring {
     var arr: ArrayList(u8) = .empty;
-    try arr.appendSlice(alloc, s);
+    try arr.appendSlice(ctx.a, s);
     const result = try init();
     if (result.data) |data_| {
         data_.* = Data {.ascii = arr};
@@ -816,6 +849,11 @@ pub fn add(self: *Ctring, rhs: Ctring) !void {
     }
 }
 
+pub fn addConsume(self: *Ctring, rhs: *Ctring) !void {
+    defer rhs.deinit();
+    try self.add(rhs.*);
+}
+
 pub fn addAscii(self: *Ctring, rhs: []const u8) !void {
     const data = try self.dataMut();
     switch (data.*) {
@@ -831,14 +869,15 @@ pub fn addAscii(self: *Ctring, rhs: []const u8) !void {
 pub fn addChar(self: *Ctring, c: Cp) !void {
     const data = try self.dataMut();
     if (c > 127 and self.isAscii()) {
-        self.switchToUtf();
+        try self.switchToUtf();
     }
     switch (data.*) {
         .utf8 => |*utf| {
             try utf.arr.append(ctx.a, c);
         },
         .ascii => |*ascii| {
-            try ascii.append(ctx.a, c);
+            const b: u8 = @intCast(c);
+            try ascii.append(ctx.a, b);
         }
     }
 }
@@ -847,6 +886,12 @@ pub fn addUtf8(self: *Ctring, rhs: []const u8) !void {
     var s = try Ctring.New(rhs);
     defer s.deinit();
     return self.add(s);
+}
+
+pub fn addView(self: *Ctring, v: View) !void {
+    var s = try v.toString();
+    defer s.deinit();
+    try self.add(s);
 }
 
 pub inline fn afterLast(self: Ctring) usize {
@@ -914,6 +959,15 @@ pub fn changeCase(self: *Ctring, change: ChangeCase) void {
     }
 }
 
+pub fn changeToAsciiExtension(self: *Ctring, ext: []const u8) !void {
+    // Simple implementation, for now doesn't account for .tar.* types of extensions
+    if (self.lastIndexOfAscii(".", .{})) |idx| {
+        self.dropRight(idx);
+    }
+
+    try self.addAscii(ext);
+}
+
 pub fn clone(self: Ctring, range: Range) !Ctring {
     const end = if (range.end == 0) self.afterLast() else range.end;
     // mtl.debug(@src(), "{any}, end:{}, last:{}", .{range, end, self.size()});
@@ -940,7 +994,8 @@ inline fn dataMut(self: *Ctring) !*Data {
         return d;
     }
 
-    const data = try alloc.create(Data);
+    const data = try ctx.a.create(Data);
+    data.* = Data {.utf8 = .{}};
     self.data = data;
     return data;
 }
@@ -1001,40 +1056,16 @@ pub fn dictSize(self: Ctring) usize {
 
     return 0;
 }
-const CpsToTrim = [_]Cp{ ' ', '\t', '\n', '\r' };
-fn dropLeft(T: type, arr: *ArrayList(T)) void {
-    var drop: usize = 0;
-    for (arr.items) |byte| {
-        if (std.mem.indexOfScalar(Cp, &CpsToTrim, byte)) |index| {
-            _ = index;
-            drop += 1;
-        } else {
-            break;
+
+pub fn dropRight(self: *Ctring, from: usize) void {
+    const data = self.data orelse return;
+    switch (data.*) {
+        .ascii => |*ascii| {
+            ascii.shrinkRetainingCapacity(from);
+        },
+        .utf8 => |*utf| {
+            utf.arr.shrinkRetainingCapacity(from);
         }
-    }
-
-    if (drop > 0) {
-        const new_items: []const T = &[_]T{};
-        arr.replaceRange(ctx.a, 0, drop, new_items) catch {};
-    }
-}
-
-fn dropRight(T: type, arr: *ArrayList(T)) void {
-    var at_idx = arr.items.len;
-    var drop_from: usize = at_idx;
-    while (at_idx > 0) {
-        at_idx -= 1;
-        const cp = arr.items[at_idx];
-        if (std.mem.indexOfScalar(Cp, &CpsToTrim, cp)) |index| {
-            _ = index;
-            drop_from = at_idx;
-        } else {
-            break;
-        }
-    }
-
-    if (drop_from < arr.items.len) {
-        arr.shrinkAndFree(ctx.a, drop_from);
     }
 }
 
@@ -1481,14 +1512,51 @@ pub fn trim(self: *Ctring) void {
     self.trimRight();
 }
 
+const CpsToTrim = [_]Cp{ ' ', '\t', '\n', '\r' };
+fn trimArrayLeft(T: type, arr: *ArrayList(T)) void {
+    var drop: usize = 0;
+    for (arr.items) |byte| {
+        if (std.mem.indexOfScalar(Cp, &CpsToTrim, byte)) |index| {
+            _ = index;
+            drop += 1;
+        } else {
+            break;
+        }
+    }
+
+    if (drop > 0) {
+        const new_items: []const T = &[_]T{};
+        arr.replaceRange(ctx.a, 0, drop, new_items) catch {};
+    }
+}
+
+fn trimArrayRight(T: type, arr: *ArrayList(T)) void {
+    var at_idx = arr.items.len;
+    var drop_from: usize = at_idx;
+    while (at_idx > 0) {
+        at_idx -= 1;
+        const cp = arr.items[at_idx];
+        if (std.mem.indexOfScalar(Cp, &CpsToTrim, cp)) |index| {
+            _ = index;
+            drop_from = at_idx;
+        } else {
+            break;
+        }
+    }
+
+    if (drop_from < arr.items.len) {
+        arr.shrinkAndFree(ctx.a, drop_from);
+    }
+}
+
 pub fn trimLeft(self: *Ctring) void {
     const data = self.data orelse return;
     switch (data.*) {
         .ascii => |*ascii| {
-            dropLeft(u8, ascii);
+            trimArrayLeft(u8, ascii);
         },
         .utf8 => |*utf| {
-            dropLeft(Cp, &utf.arr);
+            trimArrayLeft(Cp, &utf.arr);
         }
     }
 }
@@ -1497,10 +1565,10 @@ pub fn trimRight(self: *Ctring) void {
     const data = self.data orelse return;
     switch (data.*) {
         .ascii => |*ascii| {
-            dropRight(u8, ascii);
+            trimArrayRight(u8, ascii);
         },
         .utf8 => |*utf| {
-            dropRight(Cp, &utf.arr);
+            trimArrayRight(Cp, &utf.arr);
         }
     }
 }
@@ -1592,8 +1660,8 @@ pub fn printBytes(buf: []const u8, writer: *std.Io.Writer, context: i32) !void {
 }
 
 fn analyze(fullpath: []const u8) !void {
-    var arr = try io.readFileUtf8(alloc, fullpath);
-    defer arr.deinit(alloc);
+    var arr = try io.readFileUtf8(ctx.a, fullpath);
+    defer arr.deinit(ctx.a);
     var s = try Ctring.New(arr.items);
     defer s.deinit();
     s.printStats(@src());
@@ -1603,9 +1671,10 @@ fn analyze(fullpath: []const u8) !void {
 const JoseBytes = "Jos\u{65}\u{301} se fu\u{65}\u{301} a Sevilla sin pararse";
 
 test "Equals, Iteration" {
-    if (true) {
+    if (false) {
         return error.SkipZigTest;
     }
+    const alloc = std.testing.allocator;
     try Ctring.Init(alloc);
     defer Ctring.Deinit();
 
@@ -1725,9 +1794,10 @@ test "Equals, Iteration" {
 }
 
 test "Find" {
-    if (true) {
+    if (false) {
         return error.SkipZigTest;
     }
+    const alloc = std.testing.allocator;
     try Ctring.Init(alloc);
     defer Ctring.Deinit();
 
@@ -1815,9 +1885,10 @@ test "Find" {
 }
 
 test "Split" {
-    if (true) {
+    if (false) {
         return error.SkipZigTest;
     }
+    const alloc = std.testing.allocator;
     try Ctring.Init(alloc);
     defer Ctring.Deinit();
 

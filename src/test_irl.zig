@@ -15,6 +15,7 @@ const CaseFold = @import("CaseFold");
 const ScriptsData = @import("ScriptsData");
 
 const Ctring = @import("Ctring.zig").Ctring;
+const View = Ctring.View;
 const String = @import("String.zig").String;
 const Slice = String.Slice;
 const CaseSensitive = String.CaseSensitive;
@@ -94,20 +95,20 @@ inline fn getTime() i128 {
     return std.time.microTimestamp();
 }
 
-pub fn buildAHref(alloc: Allocator, numbers_str: *Slice, session_num: String) !String {
+pub fn buildAHref(alloc: Allocator, numbers_str: *View, session_num: Ctring) !Ctring {
     // Generates: <a class="anchor" id="1_0" href="#1_0">1.0</a>
     numbers_str.moveBy(2, .Left); // 2 is length of "__"
-    var nums: ArrayList(String) = .empty;
+    var nums: ArrayList(Ctring) = .empty;
     defer {
-        for (nums.items) |item| {
+        for (nums.items) |*item| {
             item.deinit();
         }
         nums.deinit(alloc);
     }
     var has_both = false;
-    if (numbers_str.indexOfAscii(".", .{})) |idx| {
+    if (numbers_str.findAscii(".", null)) |idx| {
         has_both = true;
-        const pair = try numbers_str.splitPairAt(idx, null);
+        const pair = try numbers_str.splitPairAt(idx, 1);
         try nums.append(alloc, try pair[0].toString());
         try nums.append(alloc, try pair[1].toString());
     } else {
@@ -115,16 +116,16 @@ pub fn buildAHref(alloc: Allocator, numbers_str: *Slice, session_num: String) !S
         try nums.append(alloc, try numbers_str.toString());
     }
 
-    var a_href = try String.NewAscii("<a class=\"anchor\" id=\"");
-    var sub = try nums.items[0].Clone();
+    var a_href = try Ctring.Ascii("<a class=\"anchor\" id=\"");
+    var sub = try nums.items[0].clone(.{});
     try sub.addChar('_');
     try sub.add(nums.items[1]);
     try a_href.add(sub);
     try a_href.addAscii("\" href=\"#");
-    try a_href.addConsume(sub);
+    try a_href.addConsume(&sub);
     try a_href.addAscii("\">");
     if (has_both) {
-        try a_href.addSlice(numbers_str.*);
+        try a_href.addView(numbers_str.*);
     } else {
         try a_href.add(nums.items[0]);
         try a_href.addChar('.');
@@ -144,14 +145,14 @@ const Speaking = enum {
 const tloo_path = "/dev/tloo/";
 const all_sessions = "<div class=session><a href=\"index.html\">Все сеансы</a></div>";
 
-fn replace(line: *const Slice, offset: usize, bytes: []const u8) !String {
-    var ret = try String.New(bytes);
-    const slice_start = line.start.plusN(offset);
-    try ret.addSlice(line.mid(slice_start));
+fn replace(line: *const View, offset: usize, bytes: []const u8) !Ctring {
+    var ret = try Ctring.New(bytes);
+    const slice_start = line.start + offset;
+    try ret.addView(line.mid(slice_start));
     return ret;
 }
 
-fn addEng(to: *String, line: *Slice, speaking: ?Speaking) !?Speaking {
+fn addEng(to: *Ctring, line: *View, speaking: ?Speaking) !?Speaking {
     line.trimLeft(); // in case between "-en-" and "RA" there's a space
     var ret_speaking: ?Speaking = speaking;
     var added = false;
@@ -159,30 +160,34 @@ fn addEng(to: *String, line: *Slice, speaking: ?Speaking) !?Speaking {
         const ra = "RA";
         const q = "QUESTIONER";
         const jim = "JIM";
-        if (line.startsWithAscii(ra, .{})) {
+        if (line.startsWithAscii(ra)) {
             added = true;
             ret_speaking = .Ra;
-            try to.addConsume(try replace(line, ra.len, "<span class=ra_en>RA:</span>"));
-        } else if (line.startsWithAscii(q, .{})) {
+            var sr = try replace(line, ra.len, "<span class=ra_en>RA:</span>");
+            try to.addConsume(&sr);
+        } else if (line.startsWithAscii(q)) {
             added = true;
             ret_speaking = .Questioner;
-            try to.addConsume(try replace(line, q.len, "<span class=qa_en>QUESTIONER:</span>"));
-        } else if (line.startsWithAscii(jim, .{})) {
+            var sr = try replace(line, q.len, "<span class=qa_en>QUESTIONER:</span>");
+            try to.addConsume(&sr);
+        } else if (line.startsWithAscii(jim)) {
             added = true;
             ret_speaking = .Jim;
-            try to.addConsume(try replace(line, jim.len, "<span class=qa_en>JIM:</span>"));
+            var sr = try replace(line, jim.len, "<span class=qa_en>JIM:</span>");
+            try to.addConsume(&sr);
         }
     }
     
     if (!added) {
-        try to.addSlice(line.*);
+        try to.addView(line.*);
     }
 
     return ret_speaking;
 }
 
-fn addRus(to: *String, line: Slice, speaking: ?Speaking) !void {
-    var ru = String.Empty();
+fn addRus(to: *Ctring, line: View, speaking: ?Speaking) !void {
+    var ru = Ctring.Empty();
+    defer ru.deinit();
     if (speaking) |s| switch(s) {
         .Ra => {
             try ru.addUtf8("<span class=ra_ru>Ра:</span>");
@@ -195,8 +200,8 @@ fn addRus(to: *String, line: Slice, speaking: ?Speaking) !void {
         },
     };
 
-    try ru.addSlice(line);
-    try to.addConsume(ru);
+    try ru.addView(line);
+    try to.add(ru);
 }
 
 test "Translate En to Ru" {
@@ -205,28 +210,29 @@ test "Translate En to Ru" {
 
     const alloc = std.testing.allocator;
 
-    try String.Init(alloc);
-    defer String.Deinit();
+    try Ctring.Init(alloc);
+    defer Ctring.Deinit();
 
-    const dirpath = try io.getHomeAscii(alloc, "/dev/tloo/raw/");
+    var dirpath = try io.getHomeAscii2(alloc, "/dev/tloo/raw/");
     defer dirpath.deinit();
+    mtl.debug(@src(), "{f}", .{dirpath._(2)});
 
-    var dir = try io.openDir(alloc, dirpath);
+    var dir = try io.openDir2(alloc, dirpath);
     defer dir.close();
 
     const only_last = true;
-    var last_txt_name: ?String = null;
+    var last_txt_name: ?Ctring = null;
 
     if (false) {
-        const name = try String.NewAscii("session_46.txt");
+        var name = try Ctring.Ascii("session_46.txt");
         defer name.deinit();
         try Translate(alloc, dirpath, name);
         return;
     }
 
-    var filenames: ArrayList(String) = .empty;
+    var filenames: ArrayList(Ctring) = .empty;
     defer {
-        for (filenames.items) |item| {
+        for (filenames.items) |*item| {
             item.deinit();
         }
 
@@ -235,47 +241,43 @@ test "Translate En to Ru" {
 
     var dir_iter = dir.iterate();
     while (try dir_iter.next()) |entry| {
-        var txt_name = try String.New(entry.name);
+        var txt_name = try Ctring.New(entry.name);
         defer txt_name.deinit();
-        var html_name = try txt_name.Clone();
+        var html_name = try txt_name.clone(.{});
         try html_name.changeToAsciiExtension(".html");
         try filenames.append(alloc, html_name);
         if (only_last) {
-            if (last_txt_name) |ln| {
+            if (last_txt_name) |*ln| {
                 // mtl.debug(@src(), "Skipped {dt}", .{ln});
                 ln.deinit();
             }
-            last_txt_name = try txt_name.Clone();
+            last_txt_name = try txt_name.clone(.{});
         } else {
             try Translate(alloc, dirpath, txt_name);
         }
     }
 
-    if (last_txt_name) |fname| {
-        try Translate(alloc, dirpath, fname);
+    if (last_txt_name) |*fname| {
+        try Translate(alloc, dirpath, fname.*);
         fname.deinit();
     }
-
-    // for (filenames.items) |n| {
-    //     mtl.debug(@src(), "filename: {dt}", .{n});
-    // }
 
     try CreateHtmlIndex(alloc, filenames);
 }
 
-fn parseSession(name: String) !String {
+fn parseSession(name: Ctring) !Ctring {
     var idx = name.lastIndexOfAscii("_", .{}) orelse return error.Index;
-    idx.addOne(); // skipping past "_"
+    idx += 1; // skipping past "_"
     const idx2 = name.lastIndexOfAscii(".", .{}) orelse return error.Index;
 
-    const number = name.slice(idx, idx2);
-    var ret = try String.New("Сеанс ");
-    try ret.addSlice(number);
+    const number = name.view(idx, idx2);
+    var ret = try Ctring.New("Сеанс ");
+    try ret.addView(number);
     return ret;
 }
 
-fn CreateHtmlIndex(alloc: Allocator, filenames: ArrayList(String)) !void {
-    var html = String.Empty();
+fn CreateHtmlIndex(alloc: Allocator, filenames: ArrayList(Ctring)) !void {
+    var html = Ctring.Empty();
     defer html.deinit();
     try html.addUtf8(
         \\<!DOCTYPE html>
@@ -294,7 +296,7 @@ fn CreateHtmlIndex(alloc: Allocator, filenames: ArrayList(String)) !void {
     for (filenames.items) |name| {
         try html.addAscii("<a href=\"");
         try html.add(name);
-        const session = try parseSession(name);
+        var session = try parseSession(name);
         defer session.deinit();
         try html.addAscii("\">");
         try html.add(session);
@@ -324,62 +326,63 @@ fn CreateHtmlIndex(alloc: Allocator, filenames: ArrayList(String)) !void {
     );
     try html.addAscii("</body></html>");
 
-    var relative_path = try String.New(tloo_path);
+    var relative_path = try Ctring.New(tloo_path);
     defer relative_path.deinit();
     try relative_path.addAscii("index.html");
 
-    const save_to_path = try io.getHome(alloc, relative_path);
+    var save_to_path = try io.getHome2(alloc, relative_path);
     defer save_to_path.deinit();
 
-    var utf8 = try save_to_path.toUtf8(alloc);
+    var utf8 = try save_to_path.toBytes(alloc, .{});
     defer utf8.deinit(alloc);
 
     const out_file = try std.fs.createFileAbsolute(utf8.items, .{});
     defer out_file.close();
 
-    var byte_buf = try html.toUtf8(alloc);
+    var byte_buf = try html.toBytes(alloc, .{});
     defer byte_buf.deinit(alloc);
     try out_file.writeAll(byte_buf.items);
 }
 
-fn Translate(alloc: Allocator, dirpath: String, filename: String) !void {
-    const txt_fullpath = try dirpath.CloneWith(filename);
+fn Translate(alloc: Allocator, dirpath: Ctring, filename: Ctring) !void {
+    var txt_fullpath = try dirpath.clone(.{});
+    try txt_fullpath.add(filename);
     defer txt_fullpath.deinit();
     mtl.debug(@src(), "{f}", .{txt_fullpath});
-    var contents_u8 = try io.readFile(alloc, txt_fullpath);
+    var contents_u8 = try io.readFile2(alloc, txt_fullpath);
     defer contents_u8.deinit(alloc);
 
-    var contents = try String.New(contents_u8.items[0..]);
+    var contents = try Ctring.New(contents_u8.items[0..]);
     defer contents.deinit();
 
-    var lines = try contents.splitSlices("\n", .{});
-    defer {
-        lines.deinit(alloc);
-    }
-
+    const cview = contents.view(0, contents.afterLast());
+    var lines = try cview.splitAscii("\n", false);
+    defer lines.deinit(alloc);
     if (lines.items.len <= 2) {
         return;
     }
 
-    var html = String.Empty();
+    var html = Ctring.Empty();
     defer html.deinit();
     try html.addAscii(
+    // var html = try Ctring.Ascii(
         \\<!DOCTYPE html>
         \\<head>
         \\  <meta charset="UTF-8"/>
         \\  <link rel="stylesheet" href="styles.css">
     );
-    var idx1 = filename.indexOfAscii("_", .{}) orelse return error.Other;
-    idx1.addOne();
-    const idx2 = filename.indexOfAscii(".", .{}) orelse return error.Other;
-    const session_num = filename.slice(idx1, idx2);
+    // defer html.deinit();
+    var idx1 = filename.findAscii("_", .{}) orelse return error.Other;
+    idx1 += 1;
+    const idx2 = filename.findAscii(".", .{}) orelse return error.Other;
+    const session_num = filename.view(idx1, idx2);
     try html.addUtf8("\t<title>Сеанс ");
-    try html.addSlice(session_num);
+    try html.addView(session_num);
     try html.addUtf8(" - Закон Одного</title>\n</head>\n<body><div class=session>Сеанс ");
-    try html.addSlice(session_num);
+    try html.addView(session_num);
     try html.addAscii("</div>\n<div class=session_date>");
     const date = lines.orderedRemove(0);
-    try html.addSlice(date);
+    try html.addView(date);
     try html.addAscii("</div>\n");
     try html.addUtf8(all_sessions);
 
@@ -399,7 +402,7 @@ fn Translate(alloc: Allocator, dirpath: String, filename: String) !void {
             continue;
         }
 
-        if (line.startsWithAscii(new_question_prefix, .{})) {
+        if (line.startsWithAscii(new_question_prefix)) {
             who_speaks = null;
             if (last_was != null) {
                 try html.addAscii("</td>\n\t</tr>\n</table>");
@@ -407,9 +410,10 @@ fn Translate(alloc: Allocator, dirpath: String, filename: String) !void {
             last_was = .anchor;
             try html.addAscii("\n<table>\n\t<tr>\n\t\t<td>");
             // mtl.debug(@src(), "{f}, {f}", .{line._(2), session_num._(2)});
-            try html.addConsume(try buildAHref(alloc, line, try session_num.toString()));
+            var bh = try buildAHref(alloc, line, try session_num.toString());
+            try html.addConsume(&bh);
             try html.addAscii("</td>");
-        } else if (line.startsWithAscii(en_prefix, .{})) {
+        } else if (line.startsWithAscii(en_prefix)) {
             var was_anchor = false;
             if (last_was) |lastwas| {
                 if (lastwas == .ru) {
@@ -424,13 +428,13 @@ fn Translate(alloc: Allocator, dirpath: String, filename: String) !void {
                 try html.addAscii("\n\t<tr>\n\t\t<td></td>\n\t\t<td class=\"eng\">");
             }
 
-            const from: Index = line.start.plusN(en_prefix.len);
+            const from: usize = line.start + en_prefix.len;
             var en = line.mid(from);
             who_speaks = try addEng(&html, &en, who_speaks);
-        } else if (line.startsWithAscii(ru_prefix, .{})) {
+        } else if (line.startsWithAscii(ru_prefix)) {
             last_was = .ru;
             try html.addAscii("</td>\n\t</tr>\n\t<tr>\n\t\t<td></td>\n\t\t<td class=\"rus\">");
-            const from: Index = line.start.plusN(ru_prefix.len);
+            const from: usize = line.start + ru_prefix.len;
             const ru = line.mid(from);
             try addRus(&html, ru, who_speaks);
             who_speaks = null;
@@ -451,22 +455,23 @@ fn Translate(alloc: Allocator, dirpath: String, filename: String) !void {
     try html.addUtf8(all_sessions);
     try html.addAscii("</body></html>");
 
-    var html_filename = try filename.Clone();
+    var html_filename = try filename.clone(.{});
+    defer html_filename.deinit();
     try html_filename.changeToAsciiExtension(".html");
-    var relative_path = try String.New(tloo_path);
+    var relative_path = try Ctring.New(tloo_path);
     defer relative_path.deinit();
-    try relative_path.addConsume(html_filename);
+    try relative_path.add(html_filename);
 
-    const save_to_path = try io.getHome(alloc, relative_path);
+    var save_to_path = try io.getHome2(alloc, relative_path);
     defer save_to_path.deinit();
 
-    var utf8 = try save_to_path.toUtf8(alloc);
+    var utf8 = try save_to_path.toBytes(alloc, .{});
     defer utf8.deinit(alloc);
 
     const out_file = try std.fs.createFileAbsolute(utf8.items, .{});
     defer out_file.close();
 
-    var byte_buf = try html.toUtf8(alloc);
+    var byte_buf = try html.toBytes(alloc, .{});
     defer byte_buf.deinit(alloc);
 
     try out_file.writeAll(byte_buf.items);
