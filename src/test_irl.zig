@@ -4,7 +4,7 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const expect = std.testing.expect;
 const expectEqualStrings = std.testing.expectEqualStrings;
-const alloc = std.testing.allocator;
+// const alloc = std.testing.allocator;
 
 const io = @import("io.zig");
 const BitData = @import("bit_data.zig").BitData;
@@ -14,6 +14,7 @@ const Normalize = @import("Normalize");
 const CaseFold = @import("CaseFold");
 const ScriptsData = @import("ScriptsData");
 
+const Ctring = @import("Ctring.zig").Ctring;
 const String = @import("String.zig").String;
 const Slice = String.Slice;
 const CaseSensitive = String.CaseSensitive;
@@ -32,8 +33,13 @@ test "Desktop File" {
     if (true)
         return error.SkipZigTest;
 
-    try String.Init(alloc);
-    defer String.Deinit();
+    // var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    // defer if (gpa.deinit() == .leak) std.process.exit(1);
+    // const alloc = gpa.allocator();
+    const alloc = std.testing.allocator;
+       
+    try Ctring.Init(alloc);
+    defer Ctring.Deinit();
 
     var chromium = try DesktopFile.NewCstr(alloc, "/usr/share/applications/chromium-browser.desktop");
     defer chromium.deinit();
@@ -88,9 +94,9 @@ inline fn getTime() i128 {
     return std.time.microTimestamp();
 }
 
-pub fn buildAHref(numbers_str: *Slice, session_num: String) !String {
+pub fn buildAHref(alloc: Allocator, numbers_str: *Slice, session_num: String) !String {
     // Generates: <a class="anchor" id="1_0" href="#1_0">1.0</a>
-    numbers_str.shrinkRaw(2, .Left); // 2 is length of "__"
+    numbers_str.moveBy(2, .Left); // 2 is length of "__"
     var nums: ArrayList(String) = .empty;
     defer {
         for (nums.items) |item| {
@@ -197,6 +203,8 @@ test "Translate En to Ru" {
     if (false)
         return error.SkipZigTest;
 
+    const alloc = std.testing.allocator;
+
     try String.Init(alloc);
     defer String.Deinit();
 
@@ -212,7 +220,7 @@ test "Translate En to Ru" {
     if (false) {
         const name = try String.NewAscii("session_46.txt");
         defer name.deinit();
-        try Translate(dirpath, name);
+        try Translate(alloc, dirpath, name);
         return;
     }
 
@@ -239,12 +247,12 @@ test "Translate En to Ru" {
             }
             last_txt_name = try txt_name.Clone();
         } else {
-            try Translate(dirpath, txt_name);
+            try Translate(alloc, dirpath, txt_name);
         }
     }
 
     if (last_txt_name) |fname| {
-        try Translate(dirpath, fname);
+        try Translate(alloc, dirpath, fname);
         fname.deinit();
     }
 
@@ -252,7 +260,7 @@ test "Translate En to Ru" {
     //     mtl.debug(@src(), "filename: {dt}", .{n});
     // }
 
-    try CreateHtmlIndex(filenames);
+    try CreateHtmlIndex(alloc, filenames);
 }
 
 fn parseSession(name: String) !String {
@@ -266,7 +274,7 @@ fn parseSession(name: String) !String {
     return ret;
 }
 
-fn CreateHtmlIndex(filenames: ArrayList(String)) !void {
+fn CreateHtmlIndex(alloc: Allocator, filenames: ArrayList(String)) !void {
     var html = String.Empty();
     defer html.deinit();
     try html.addUtf8(
@@ -334,7 +342,7 @@ fn CreateHtmlIndex(filenames: ArrayList(String)) !void {
     try out_file.writeAll(byte_buf.items);
 }
 
-fn Translate(dirpath: String, filename: String) !void {
+fn Translate(alloc: Allocator, dirpath: String, filename: String) !void {
     const txt_fullpath = try dirpath.CloneWith(filename);
     defer txt_fullpath.deinit();
     mtl.debug(@src(), "{f}", .{txt_fullpath});
@@ -399,7 +407,7 @@ fn Translate(dirpath: String, filename: String) !void {
             last_was = .anchor;
             try html.addAscii("\n<table>\n\t<tr>\n\t\t<td>");
             // mtl.debug(@src(), "{f}, {f}", .{line._(2), session_num._(2)});
-            try html.addConsume(try buildAHref(line, try session_num.toString()));
+            try html.addConsume(try buildAHref(alloc, line, try session_num.toString()));
             try html.addAscii("</td>");
         } else if (line.startsWithAscii(en_prefix, .{})) {
             var was_anchor = false;

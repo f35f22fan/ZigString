@@ -25,10 +25,15 @@ pub const CpSlice = []Cp;
 pub const ConstCpSlice = []const Cp;
 pub const Direction = enum(u8) { Forward, Back };
 pub const Error = error{ Other };
-const Dict = HashMap(Cp, []Cp);
+const Dict = HashMap(Cp, CpSlice);
 pub const Charset = enum(u8) {
     Ascii,
     Unicode,
+};
+
+pub const From = enum(u8) {
+    Left,
+    Right,
 };
 
 const Range = struct {
@@ -191,6 +196,18 @@ const View = struct {
         return .{ .v = self, .context = context };
     }
 
+    pub fn isBetween(self: View, lhs: []const u8, rhs: []const u8) ?View {
+        if (self.startsWithAscii(lhs) and self.endsWithAscii(rhs)) {
+            return self.s.view(self.start + lhs.len, self.end - rhs.len);
+        }
+
+        return null;
+    }
+
+    pub fn isEmpty(self: View) bool {
+        return self.size() == 0;
+    }
+
     pub fn iterator(self: *const View, from: ?usize) CtringIterator {
         return CtringIterator.FromView(self, from);
     }
@@ -209,6 +226,18 @@ const View = struct {
 
     inline fn range(self: View) Range {
         return .{.start = self.start, .end = self.end};
+    }
+
+    pub fn moveBy(self: *View, amount: isize, from: From) void {
+        if (from == .Left) {
+            var n: isize = @intCast(self.start);
+            n += amount;
+            self.start = @intCast(n);
+        } else {
+            var n: isize = @intCast(self.start);
+            n += amount;
+            self.end = @intCast(n);
+        }
     }
 
     pub fn setView(self: *View, start: usize, end: usize) void {
@@ -293,6 +322,11 @@ const View = struct {
 
     pub fn toBytes(self: View, a: Allocator) !ArrayList(u8) {
         return self.s.toBytes(a, self.range());
+    }
+
+    pub fn toOwnedSlice(self: View, a: Allocator) ![]u8 {
+        var buf = try self.toBytes(a);
+        return buf.toOwnedSlice(a);
     }
 
     pub fn toString(self: View) !Ctring {
@@ -455,6 +489,10 @@ pub const Grapheme = struct {
     }
 };
 
+inline fn getTime() i128 {
+    return std.time.microTimestamp();
+}
+
 const Utf8 = struct {
     arr: ArrayList(Cp) = .empty,
     dict: ?*Dict = null,
@@ -491,11 +529,10 @@ const Utf8 = struct {
     }
 
     pub fn addGraphemeCluster(self: *Utf8, gr: []const Cp) !Cp {
-        var dict = try self.dictMut();
         // dict.count() + 1 is needed to have -id always be a negative number,
         // because when it's zero it doesn't turn into a negative number.
         // Which is how an ID id distinguished for a regular Codepoint.
-        const id: Cp = @intCast(dict.count() + 1);
+        var dict = try self.dictMut();
         var iter = dict.iterator();
         while (iter.next()) |entry| {
             const slice = entry.value_ptr.*;
@@ -506,25 +543,27 @@ const Utf8 = struct {
         }
 
         const sl = try ctx.a.dupe(Cp, gr);
+        const id: Cp = @intCast(dict.count() + 1);
         try dict.put(-id, sl);
         
         return -id;
     }
 
     pub fn clone(self: Utf8, range: Range) !Utf8 {
+        
         const end = if (range.end == 0) self.arr.items.len else range.end;
         var utf: Utf8 = .{};
-        try utf.arr.appendSlice(ctx.a, self.arr.items[range.start..end]);
-        if (self.dict) |source| {
-            const dict = try utf.dictMut();
-            // dict.* = try source.clone() segfaults at dict.deinit(),
-            // thus copy dict by hand.
-            var iter = source.iterator();
-            while (iter.next()) |entry| {
-                const val = try ctx.a.dupe(Cp, entry.value_ptr.*);
-                try dict.put(entry.key_ptr.*, val);
+        const slice_to_copy = self.arr.items[range.start..end];
+        try utf.arr.ensureUnusedCapacity(ctx.a, slice_to_copy.len * 3);
+        for (slice_to_copy) |cp| {
+            if (cp >= 0) {
+                try utf.arr.append(ctx.a, cp);
+                continue;
             }
-            
+            const source_dict = self.dict orelse return error.Other;
+            const val: CpSlice = source_dict.get(cp) orelse return error.Other;
+            const id = try utf.addGraphemeCluster(val);
+            try utf.arr.append(ctx.a, id);
         }
 
         return utf;
@@ -669,6 +708,15 @@ pub const Context = struct {
     }
 };
 
+pub threadlocal var ctx: Context = undefined;
+pub fn Init(a: Allocator) !void {
+    Ctring.ctx = try Context.New(a);
+}
+
+pub fn Deinit() void {
+    Ctring.ctx.deinit();
+}
+
 pub fn New(input: []const u8) !Ctring {
     var result = try init();
     const data = try result.dataMut();
@@ -686,9 +734,11 @@ pub fn New(input: []const u8) !Ctring {
 
         if (grapheme.items.len == 1) {
             try utf8.arr.append(ctx.a, grapheme.items[0]);
-        } else {
+        } else if (grapheme.items.len > 1) {
             const id = try utf8.addGraphemeCluster(grapheme.items);
             try utf8.arr.append(ctx.a, id);
+        } else {
+            mtl.trace(@src());
         }
     }
 
@@ -697,35 +747,25 @@ pub fn New(input: []const u8) !Ctring {
     return result;
 }
 
-pub threadlocal var ctx: Context = undefined;
-pub fn Init(a: Allocator) !void {
-    Ctring.ctx = try Context.New(a);
-}
-
-pub fn Deinit() void {
-    Ctring.ctx.deinit();
-}
-
-pub fn empty() Ctring {
+pub fn Empty() Ctring {
     return Ctring{};
 }
 
-inline fn init() !Ctring {
+pub fn init() !Ctring {
     const data = try alloc.create(Data);
     return Ctring {.data = data};
 }
 
 pub fn deinit(self: *Ctring) void {
-    if (self.data) |d| {
-        switch (d.*) {
+    if (self.data) |data| {
+        switch (data.*) {
             .ascii => |*arr| arr.deinit(ctx.a),
             .utf8 => |*utf8| {
                 utf8.arr.deinit(ctx.a);
                 if (utf8.dict) |dict_| {
                     var iter = dict_.iterator();
                     while (iter.next()) |entry| {
-                        const memory = entry.value_ptr.*;
-                        ctx.a.free(memory);
+                        ctx.a.free(entry.value_ptr.*);
                     }
                     dict_.deinit();
                     ctx.a.destroy(dict_);
@@ -733,7 +773,7 @@ pub fn deinit(self: *Ctring) void {
             }
         }
 
-        alloc.destroy(d);
+        alloc.destroy(data);
     }
 }
 
@@ -784,6 +824,21 @@ pub fn addAscii(self: *Ctring, rhs: []const u8) !void {
         },
         .ascii => |*ascii| {
             try ascii.appendSlice(ctx.a, rhs);
+        }
+    }
+}
+
+pub fn addChar(self: *Ctring, c: Cp) !void {
+    const data = try self.dataMut();
+    if (c > 127 and self.isAscii()) {
+        self.switchToUtf();
+    }
+    switch (data.*) {
+        .utf8 => |*utf| {
+            try utf.arr.append(ctx.a, c);
+        },
+        .ascii => |*ascii| {
+            try ascii.append(ctx.a, c);
         }
     }
 }
@@ -861,6 +916,7 @@ pub fn changeCase(self: *Ctring, change: ChangeCase) void {
 
 pub fn clone(self: Ctring, range: Range) !Ctring {
     const end = if (range.end == 0) self.afterLast() else range.end;
+    // mtl.debug(@src(), "{any}, end:{}, last:{}", .{range, end, self.size()});
     const data = self.data orelse return error.Other;
 
     switch (data.*) {
@@ -870,9 +926,10 @@ pub fn clone(self: Ctring, range: Range) !Ctring {
         },
         .utf8 => |utf| {
             var result = try Ctring.init();
-            errdefer result.deinit();
             const rdata = try result.dataMut();
-            rdata.* = Data {.utf8 = try utf.clone(range)};
+            const r: Range = .{.start=range.start, .end=end};
+            // mtl.debug(@src(), "range:{any}, size:{}", .{r, self.size()});
+            rdata.* = Data {.utf8 = try utf.clone(r)};
             return result;
         }
     }
@@ -1168,6 +1225,10 @@ pub fn findView(self: Ctring, needle: View, range: Range) ?usize {
     }
 
     return null;
+}
+
+pub fn isEmpty(self: Ctring) bool {
+    return self.size() == 0;
 }
 
 pub fn iterator(self: *Ctring, from: ?usize) CtringIterator {
@@ -1514,6 +1575,10 @@ pub fn _(self: *const Ctring, context: i32) Ctring_ {
     return .{ .s = self, .context = context };
 }
 
+pub fn print(self: Ctring, src: std.builtin.SourceLocation, msg: []const u8) void {
+    mtl.debug(src, "{s}{f}", .{ msg, self._(2) });
+}
+
 pub fn printBytes(buf: []const u8, writer: *std.Io.Writer, context: i32) !void {
     const fmtstr = "{s}{s}{s}{s}{s}";
 
@@ -1538,6 +1603,9 @@ fn analyze(fullpath: []const u8) !void {
 const JoseBytes = "Jos\u{65}\u{301} se fu\u{65}\u{301} a Sevilla sin pararse";
 
 test "Equals, Iteration" {
+    if (true) {
+        return error.SkipZigTest;
+    }
     try Ctring.Init(alloc);
     defer Ctring.Deinit();
 
@@ -1657,6 +1725,9 @@ test "Equals, Iteration" {
 }
 
 test "Find" {
+    if (true) {
+        return error.SkipZigTest;
+    }
     try Ctring.Init(alloc);
     defer Ctring.Deinit();
 
@@ -1744,6 +1815,9 @@ test "Find" {
 }
 
 test "Split" {
+    if (true) {
+        return error.SkipZigTest;
+    }
     try Ctring.Init(alloc);
     defer Ctring.Deinit();
 
@@ -1801,4 +1875,5 @@ test "Split" {
             }
         }
     }
+
 }

@@ -1038,13 +1038,21 @@ pub const Slice = struct {
         try printGraphemes_real(self.codepoints(data), self.graphemes(data), src, self.start);
     }
 
-    pub fn shrinkRaw(self: *Slice, by: usize, from: From) void {
+    pub fn moveBy(self: *Slice, by: isize, from: From) void {
         if (from == .Left) {
-            self.start.cp += by;
-            self.start.gr += by;
+            var n: isize = @intCast(self.start.cp);
+            n += by;
+            self.start.cp = @intCast(n);
+            n = @intCast(self.start.gr);
+            n += by;
+            self.start.gr = @intCast(n);
         } else {
-            self.end.cp -= by;
-            self.end.gr -= by;
+            var n: isize = @intCast(self.end.cp);
+            n += by;
+            self.end.cp = @intCast(n);
+            n = @intCast(self.end.gr);
+            n += by;
+            self.end.gr = @intCast(n);
         }
     }
 

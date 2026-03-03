@@ -4,33 +4,32 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const expect = std.testing.expect;
 const expectEqualStrings = std.testing.expectEqualStrings;
-const KVHash = std.StringHashMap(String);
+const KVHash = std.StringHashMap(Ctring);
 const GroupHash = std.StringHashMap(KVHash);
 
-const zigstr = @import("zigstr");
 const io = @import("io.zig");
 
 const Normalize = @import("Normalize");
 const CaseFold = @import("CaseFold");
 const ScriptsData = @import("ScriptsData");
 
-const String = @import("String.zig").String;
-const mtl = String.mtl;
-const CaseSensitive = String.CaseSensitive;
-const Codepoint = String.Codepoint;
-const CodepointSlice = String.CpSlice;
-const Context = String.Context;
-const CpSlice = String.CpSlice;
-const Error = String.Error;
-const Index = String.Index;
-const KeepEmptyParts = String.KeepEmptyParts;
+const Ctring = @import("Ctring.zig").Ctring;
+const mtl = Ctring.mtl;
+const CaseSensitive = Ctring.CaseSensitive;
+const Codepoint = Ctring.Codepoint;
+const CodepointSlice = Ctring.CpSlice;
+const Context = Ctring.Context;
+const CpSlice = Ctring.CpSlice;
+const Error = Ctring.Error;
+const Index = Ctring.Index;
+const KeepEmptyParts = Ctring.KeepEmptyParts;
 
 groups: GroupHash = undefined,
-comment: ?String = null,
-fullpath: ?String = null,
-name: ?String = null,
-exec: ?String = null,
-icon: ?String = null,
+comment: ?Ctring = null,
+fullpath: ?Ctring = null,
+name: ?Ctring = null,
+exec: ?Ctring = null,
+icon: ?Ctring = null,
 alloc: Allocator = undefined,
 
 const CstrMainGroup = "Desktop Entry";
@@ -43,19 +42,24 @@ const CstrMimeType = "MimeType";
 const CstrCategories = "Categories";
 const CstrActions = "Actions";
 
-pub fn NewCstr(a: Allocator, fullpath: []const u8) !DesktopFile {
-    return New(a, try String.New(fullpath));
+const TimeExt = "mc";
+inline fn getTime() i128 {
+    return std.time.microTimestamp();
 }
 
-pub fn New(a: Allocator, fullpath: String) !DesktopFile {
-    var df = DesktopFile{
+pub fn NewCstr(a: Allocator, fullpath: []const u8) !DesktopFile {
+    return New(a, try Ctring.New(fullpath));
+}
+
+pub fn New(a: Allocator, fullpath: Ctring) !DesktopFile {
+    var desktop_file = DesktopFile{
         .alloc = a,
         .groups = GroupHash.init(a),
     };
-    df.fullpath = fullpath;
-    try df.init();
+    desktop_file.fullpath = fullpath;
+    try desktop_file.init();
 
-    return df;
+    return desktop_file;
 }
 
 pub fn deinit(self: *DesktopFile) void {
@@ -63,51 +67,50 @@ pub fn deinit(self: *DesktopFile) void {
     var groups_iter = self.groups.iterator();
     while (groups_iter.next()) |group_kv|
     {
-        const name = group_kv.key_ptr;
-        self.alloc.free(name.*);
-        var value = group_kv.value_ptr;
-        var iter = value.iterator();
+        self.alloc.free(group_kv.key_ptr.*);
+        var value_hash = group_kv.value_ptr;
+        var iter = value_hash.iterator();
         while (iter.next()) |kv| {
             self.alloc.free(kv.key_ptr.*);
             kv.value_ptr.deinit();
         }
-        value.deinit();
+        value_hash.deinit();
     }
 
     self.groups.deinit();
     
-    if (self.fullpath) |k| {
+    if (self.fullpath) |*k| {
         k.deinit();
     }
 }
 
 fn buildKeyname(a: Allocator, name: []const u8, lang: []const u8) !ArrayList(u8) {
-    var key = try String.New(name);
+    var key = try Ctring.New(name);
     defer key.deinit();
-    try key.addChar('[');
+    try key.addAscii("[");
     try key.addAscii(lang);
-    try key.addChar(']');
-    return key.toUtf8(a);
+    try key.addAscii("]");
+    return key.toBytes(a, .{});
 }
 
-pub fn getActions(self: DesktopFile) ?*const String {
+pub fn getActions(self: DesktopFile) ?*const Ctring {
     return self.getField(CstrActions, null, null);
 }
 
-pub fn getCategories(self: DesktopFile) ?*const String {
+pub fn getCategories(self: DesktopFile) ?*const Ctring {
     return self.getField(CstrCategories, null, null);
 }
 
-pub fn getComment(self: DesktopFile, lang: ?[]const u8) ?*const String {
+pub fn getComment(self: DesktopFile, lang: ?[]const u8) ?*const Ctring {
     return self.getField(CstrComment, lang, null);
 }
 
-pub fn getExec(self: DesktopFile) ?*const String {
+pub fn getExec(self: DesktopFile) ?*const Ctring {
     return self.getField(CstrExec, null, null);
 }
 
 pub fn getField(self: DesktopFile, name: []const u8, lang: ?[]const u8,
-group_name: ?[]const u8) ?*const String {
+group_name: ?[]const u8) ?*const Ctring {
     const gn = if (group_name) |cstr| cstr else CstrMainGroup;
     const group = self.groups.getPtr(gn) orelse return null;
     if (lang) |lang_cstr| {
@@ -119,80 +122,64 @@ group_name: ?[]const u8) ?*const String {
     return group.getPtr(name);
 }
 
-pub fn getGenericName(self: DesktopFile, lang: ?[]const u8) ?*const String {
+pub fn getGenericName(self: DesktopFile, lang: ?[]const u8) ?*const Ctring {
     return self.getField(CstrGenericName, lang, null);
 }
 
-pub fn getIcon(self: DesktopFile) ?*const String {
+pub fn getIcon(self: DesktopFile) ?*const Ctring {
     return self.getField(CstrIcon, null, null);
 }
 
-pub fn getMimeTypes(self: DesktopFile) ?*const String {
+pub fn getMimeTypes(self: DesktopFile) ?*const Ctring {
     return self.getField(CstrMimeType, null, null);
 }
 
-pub fn getName(self: DesktopFile, lang: ?[]const u8) ?*const String {
+pub fn getName(self: DesktopFile, lang: ?[]const u8) ?*const Ctring {
     return self.getField(CstrName, lang, null);
 }
 
 pub fn init(self: *DesktopFile) !void {
-    const fp = self.fullpath orelse return String.Error.NotFound;
-    var file_contents = try io.readFile(self.alloc, fp);
+    const fp = self.fullpath orelse return error.NotFound;
+    var fp_buf = try fp.toBytes(self.alloc, .{});
+    defer fp_buf.deinit(self.alloc);
+    var file_contents = try io.readFileUtf8(self.alloc, fp_buf.items);
     defer file_contents.deinit(self.alloc);
 
-    const data_str = try String.New(file_contents.items);
+    var data_str = try Ctring.New(file_contents.items);
     defer data_str.deinit();
-    
-    var lines = try data_str.split("\n", .{.keep = .No});
-    defer {
-        for (lines.items) |line| {
-            line.deinit();
-        }
-        lines.deinit(self.alloc);
-    }
+    // data_str.printStats(@src());
+    const view = data_str.view(0, data_str.afterLast());
+    var lines = try view.splitAscii("\n", false);
+    defer lines.deinit(self.alloc);
 
-    var current_hash_opt: ?*KVHash = null;
-
+    var current_hash: ?*KVHash = null;
+// mtl.debug(@src(), "lines.count={}", .{lines.items.len});
     for (lines.items) |line| {
-        if (line.startsWithAscii("#", .{})) {
-            line.print(@src(), "Comment: ");
+        if (line.startsWithAscii("#")) {
             continue;
         }
         if (line.isBetween("[", "]")) |group_name| {
-            defer group_name.deinit();
             const name_cstr = try group_name.toOwnedSlice(self.alloc);
             const h = KVHash.init(self.alloc);
             try self.groups.put(name_cstr, h);
-            current_hash_opt = self.groups.getPtr(name_cstr) orelse break;
+            current_hash = self.groups.getPtr(name_cstr) orelse break;
             continue;
         }
-        var current_hash: *KVHash = current_hash_opt orelse break;
-        var kv = try line.split("=", .{});
-        defer {
-            for (kv.items) |s| {
-                s.deinit();
-            }
-            kv.deinit(self.alloc);
-        }
-
-        const key = try kv.items[0].Clone();
-        defer key.deinit();
-        const value = if (kv.items.len == 2) try kv.items[1].Clone() else String.Empty();
-        const final_key = try key.toOwnedSlice(self.alloc);
-        try current_hash.put(final_key, value);
-    }
-}
-
-fn put(a: Allocator, key: String, value: String, dest: *KVHash) !void {
-    std.debug.print("{s}(): key=\"{s}\", value=\"{}\"\n", .{ @src().fn_name, key, value });
-    if (key.isEmpty()) {
-        const cstr_key = try a.dupe(u8, "");
         
-        try dest.put(cstr_key, value);
-    } else {
-        const cstr_key = try key.dup_as_cstr_alloc(a);
-        try dest.put(cstr_key, value);
+        if (line.findAscii("=", null) == null) {
+            continue;
+        }
+            
+        var kv_hash: *KVHash = current_hash orelse {
+            mtl.trace(@src());
+            break;
+        };
+        var arr = try line.splitAscii("=", false);
+        defer arr.deinit(self.alloc);
+        if (arr.items.len == 2) {
+            const value_view = arr.items[1];
+            const key = try arr.items[0].toOwnedSlice(self.alloc);
+            try kv_hash.put(key, try value_view.toString());
+        }
     }
 }
-
-
