@@ -23,7 +23,17 @@ pub const CpSlice = []Cp;
 pub const ConstCpSlice = []const Cp;
 pub const Direction = enum(u8) { Forward, Back };
 pub const Error = error{ Other };
-const Dict = HashMap(Cp, CpSlice);
+
+const Dict = struct {
+    hash: HashMap(Cp, SliceRC),
+    last_id: Cp,
+};
+
+const SliceRC = struct {
+    count: u32,
+    slice: CpSlice,
+};
+
 pub const Charset = enum(u8) {
     Ascii,
     Unicode,
@@ -209,6 +219,10 @@ pub const View = struct {
     pub fn iterator(self: *const View, from: ?usize) CtringIterator {
         return CtringIterator.FromView(self, from);
     }
+
+    pub fn iteratorFromEnd(self: *const View) CtringIterator {
+        return CtringIterator.FromView(self, self.end - self.start - 1);
+    }
     
     pub fn lastIndexOf(self: View, needles: Ctring) ?usize {
         return self.s.lastIndexOf(needles, self.range());
@@ -342,25 +356,40 @@ pub const View = struct {
     }
 
     pub fn trimLeft(self: *View) void {
-        var index: usize = self.start;
+        var found: usize = 0;
         var iter = self.iterator(null);
         while (iter.next()) |gr| {
             const one_cp = gr.oneCp() orelse break;
-            var found = false;
-            for (CpsToTrim) |cp| {
-                if (cp == one_cp) {
-                    found = true;
-                    break;
-                }
-            }
-            if (found) {
-                index += 1;
+            if (std.mem.containsAtLeastScalar(Cp, &CpsToTrim, 1, one_cp)) {
+                found += 1;
             } else {
                 break;
             }
         }
 
-        self.start = index;
+        if (found > 0) {
+            self.start += found;
+        }
+    }
+
+    pub fn trimRight(self: *View) void {
+        if (self.end == self.start) {
+            return;
+        }
+        var found: usize = 0;
+        var iter = self.iteratorFromEnd();
+        while (iter.prev()) |gr| {
+            const one_cp = gr.oneCp() orelse break;
+            if (std.mem.containsAtLeastScalar(Cp, &CpsToTrim, 1, one_cp)) {
+                found += 1;
+            } else {
+                break;
+            }
+        }
+
+        if (found > 0) {
+            self.end -= found;
+        }
     }
 
     const View_ = struct {
@@ -523,16 +552,67 @@ inline fn getTime() i128 {
     return std.time.microTimestamp();
 }
 
+pub fn addGraphemeCluster(dict: *Dict, gr: []const Cp, count: ?u32) !Cp {
+    var iter = dict.hash.iterator();
+    const increase_by: u32 = if (count) |n| n else 1;
+    while (iter.next()) |entry| {
+        const rc = entry.value_ptr.*;
+        if (std.mem.eql(Cp, rc.slice, gr)) {
+            entry.value_ptr.count += increase_by;
+            // mtl.debug(@src(), "slice: {any} count:{}", .{entry.value_ptr.slice, entry.value_ptr.count});
+            return entry.key_ptr.*;
+        }
+    }
+
+    const rc: SliceRC = .{.count = increase_by, .slice = try ctx.a.dupe(Cp, gr)};
+    // mtl.debug(@src(), "last_id: {}", .{dict.last_id});
+    const id: Cp = @intCast(dict.last_id - 1);
+    dict.last_id = id;
+    try dict.hash.put(id, rc);
+       
+    return id;
+}
+
 const Utf8 = struct {
     arr: ArrayList(Cp) = .empty,
     dict: ?*Dict = null,
+
+    fn New(input: []const u8) !Utf8 {
+        var gc_iter = ctx.graphemes.iterator(input);
+        var grapheme: ArrayList(Cp) = .empty;
+        defer grapheme.deinit(ctx.a);
+        var utf8: Utf8 = .{};
+        try utf8.arr.ensureTotalCapacity(ctx.a, input.len * 2);
+
+        while (gc_iter.next()) |grapheme_bytes| {
+            const bytes = grapheme_bytes.bytes(input);
+            var cp_iter = zg_codepoint.Iterator{ .bytes = bytes };
+            grapheme.clearRetainingCapacity();
+            while (cp_iter.next()) |obj| {
+                try grapheme.append(ctx.a, obj.code);
+            }
+
+            if (grapheme.items.len == 1) {
+                try utf8.arr.append(ctx.a, grapheme.items[0]);
+            } else if (grapheme.items.len > 1) {
+                const dict: *Dict = try utf8.dictMut();
+                const id = try addGraphemeCluster(dict, grapheme.items, null);
+                try utf8.arr.append(ctx.a, id);
+            } else {
+                mtl.trace(@src());
+            }
+        }
+
+        return utf8;
+    }
 
     inline fn dictMut(self: *Utf8) !*Dict {
         if (self.dict) |d| {
             return d;
         }
         const d = try ctx.a.create(Dict);
-        d.* = .init(ctx.a);
+        d.hash = .init(ctx.a);
+        d.last_id = -1;
         self.dict = d;
         return d;
     }
@@ -551,36 +631,15 @@ const Utf8 = struct {
         const rdict = rhs.dict orelse return;
         for (self.arr.items[offset..]) |*cp| {
             if (cp.* < 0) {
-                const gr = rdict.get(cp.*) orelse unreachable;
-                const new_id = try self.addGraphemeCluster(gr);
+                const gr = rdict.hash.get(cp.*) orelse unreachable;
+                const dict: *Dict = try self.dictMut();
+                const new_id = try addGraphemeCluster(dict, gr.slice, null);
                 cp.* = new_id;
             }
         }
     }
 
-    pub fn addGraphemeCluster(self: *Utf8, gr: []const Cp) !Cp {
-        // dict.count() + 1 is needed to have -id always be a negative number,
-        // because when it's zero it doesn't turn into a negative number.
-        // Which is how an ID id distinguished for a regular Codepoint.
-        var dict = try self.dictMut();
-        var iter = dict.iterator();
-        while (iter.next()) |entry| {
-            const slice = entry.value_ptr.*;
-            if (std.mem.eql(Cp, slice, gr)) {
-                // mtl.debug(@src(), "slices equal: {any} vs {any}", .{slice, gr});
-                return entry.key_ptr.*;
-            }
-        }
-
-        const sl = try ctx.a.dupe(Cp, gr);
-        const id: Cp = @intCast(dict.count() + 1);
-        try dict.put(-id, sl);
-        
-        return -id;
-    }
-
     pub fn clone(self: Utf8, range: Range) !Utf8 {
-        
         const end = if (range.end == 0) self.arr.items.len else range.end;
         var utf: Utf8 = .{};
         const slice_to_copy = self.arr.items[range.start..end];
@@ -588,12 +647,12 @@ const Utf8 = struct {
         for (slice_to_copy) |cp| {
             if (cp >= 0) {
                 try utf.arr.append(ctx.a, cp);
-                continue;
+            } else {
+                const source_dict: *Dict = self.dict orelse return error.Other;
+                const rc = source_dict.hash.get(cp) orelse return error.Other;
+                const id = try addGraphemeCluster(try utf.dictMut(), rc.slice, rc.count);
+                try utf.arr.append(ctx.a, id);
             }
-            const source_dict = self.dict orelse return error.Other;
-            const val: CpSlice = source_dict.get(cp) orelse return error.Other;
-            const id = try utf.addGraphemeCluster(val);
-            try utf.arr.append(ctx.a, id);
         }
 
         return utf;
@@ -602,12 +661,13 @@ const Utf8 = struct {
     pub fn deinit(self: *Utf8) void {
         self.arr.deinit(ctx.a);
         if (self.dict) |dict_| {
-            var iter = dict_.iterator();
+            var iter = dict_.hash.iterator();
             while (iter.next()) |entry| {
-                ctx.a.free(entry.value_ptr.*);
+                const rc: *const SliceRC = entry.value_ptr;
+                ctx.a.free(rc.slice);
             }
 
-            dict_.deinit();
+            dict_.hash.deinit();
             ctx.a.destroy(dict_);
         }
     }
@@ -659,9 +719,9 @@ const Utf8 = struct {
                     }
                     const dict = self.dict orelse return null;
                     const rdict = needles_utf.dict orelse return null;
-                    const sl1 = dict.get(cp) orelse return null;
-                    const sl2 = rdict.get(rcp) orelse return null;
-                    if (!std.mem.eql(Cp, sl1, sl2)) {
+                    const rc1 = dict.hash.get(cp) orelse return null;
+                    const rc2 = rdict.hash.get(rcp) orelse return null;
+                    if (!std.mem.eql(Cp, rc1.slice, rc2.slice)) {
                         equals = false;
                         break;
                     }
@@ -688,7 +748,83 @@ const Utf8 = struct {
             return .NewCps(idx, self.arr.items[idx..idx+1]);
         }
         var dict = self.dict orelse return null;
-        return .NewCps(idx, dict.get(id) orelse return null);
+        const rc = dict.hash.get(id) orelse return null;
+        return .NewCps(idx, rc.slice);
+    }
+
+    fn removeFromDict(self: *Utf8, start: usize, end: usize) !void {
+        const dict: *Dict = try self.dictMut();
+
+        for (self.arr.items[start..end]) |cp| {
+            if (cp >= 0) {
+                continue;
+            }
+            const rc: *SliceRC = dict.hash.getPtr(cp) orelse return error.NotFound;
+            if (rc.count == 1) {
+                ctx.a.free(rc.slice);
+                _ = dict.hash.remove(cp);
+            } else {
+                rc.count -= 1;
+            }
+        }
+    }
+
+    fn replaceAscii(self: *Utf8, input: []const u8, start: usize, end: usize) !void {
+        var slice: CpSlice = &.{};
+        if (input.len > 0) {
+            slice = try ctx.a.alloc(Cp, input.len);
+            for (slice, input) |*c, d| {
+                c.* = d;
+            }
+        // } else {
+        //     mtl.debug(@src(), "Skipped!", .{});
+        }
+
+        try self.removeFromDict(start, end);
+        try self.arr.replaceRange(ctx.a, start, end-start, slice);
+        if (input.len > 0) {
+            ctx.a.free(slice);
+        }
+    }
+
+    fn replaceWith(self: *Utf8, utf: Utf8, start: usize, end: usize) !void {
+        try self.removeFromDict(start, end);
+        try self.arr.replaceRange(ctx.a, start, end - start, utf.arr.items);
+        const rdict: *const Dict = utf.dict orelse return;
+        const dest_dict: *Dict = try self.dictMut();
+        
+        const OldNew = struct {
+            old: Cp,
+            new: Cp,
+        };
+        var pairs: ArrayList(OldNew) = .empty;
+        defer pairs.deinit(ctx.a);
+        var iter = rdict.hash.iterator();
+        while (iter.next()) |entry| {
+            const old_id = entry.key_ptr.*;
+            const rc = entry.value_ptr.*;
+            const new_id = try addGraphemeCluster(dest_dict, rc.slice, rc.count);
+            try pairs.append(ctx.a, .{.old=old_id, .new=new_id});
+        }
+
+        for (self.arr.items[start..start+utf.arr.items.len]) |*cp| {
+            if (cp.* >= 0) {
+                continue;
+            }
+
+            for (pairs.items) |pair| {
+                if (pair.old == cp.*) {
+                    cp.* = pair.new;
+                    break;
+                }
+            }
+        }
+    }
+
+    fn replaceUtf8(self: *Utf8, input: []const u8, start: usize, end: usize) !void {
+        var utf = try Utf8.New(input);
+        defer utf.deinit();
+        try self.replaceWith(utf, start, end);
     }
 };
 
@@ -763,29 +899,7 @@ pub fn Deinit() void {
 pub fn New(input: []const u8) !Ctring {
     var result = try init();
     const data = try result.dataMut();
-    var gc_iter = ctx.graphemes.iterator(input);
-    var grapheme: ArrayList(Cp) = .empty;
-    defer grapheme.deinit(ctx.a);
-    var utf8: Utf8 = .{};
-    while (gc_iter.next()) |grapheme_bytes| {
-        const bytes = grapheme_bytes.bytes(input);
-        var cp_iter = zg_codepoint.Iterator{ .bytes = bytes };
-        grapheme.clearRetainingCapacity();
-        while (cp_iter.next()) |obj| {
-            try grapheme.append(ctx.a, obj.code);
-        }
-
-        if (grapheme.items.len == 1) {
-            try utf8.arr.append(ctx.a, grapheme.items[0]);
-        } else if (grapheme.items.len > 1) {
-            const id = try utf8.addGraphemeCluster(grapheme.items);
-            try utf8.arr.append(ctx.a, id);
-        } else {
-            mtl.trace(@src());
-        }
-    }
-
-    data.* = Data {.utf8 = utf8};
+    data.* = Data {.utf8 = try Utf8.New(input)};
 
     return result;
 }
@@ -849,11 +963,6 @@ pub fn add(self: *Ctring, rhs: Ctring) !void {
     }
 }
 
-pub fn addConsume(self: *Ctring, rhs: *Ctring) !void {
-    defer rhs.deinit();
-    try self.add(rhs.*);
-}
-
 pub fn addAscii(self: *Ctring, rhs: []const u8) !void {
     const data = try self.dataMut();
     switch (data.*) {
@@ -898,6 +1007,10 @@ pub inline fn afterLast(self: Ctring) usize {
     return self.size();
 }
 
+pub fn asView(self: *const Ctring) View {
+    return self.view(0, self.size());
+}
+
 pub fn at(self: Ctring, index: usize) ?Grapheme {
     const data = self.data orelse return null;
     switch (data.*) {
@@ -940,18 +1053,18 @@ pub fn changeCase(self: *Ctring, change: ChangeCase) void {
             }
 
             if (utf.dict) |dict_|{
-                var iter = dict_.iterator();
+                var iter = dict_.hash.iterator();
                 while (iter.next()) |entry| {
-                    var slice = entry.value_ptr.*;
-                    for (0..slice.len) |i| {
-                        const n: u21 = @intCast(slice[i]);
+                    var rc = entry.value_ptr.*;
+                    for (0..rc.slice.len) |i| {
+                        const n: u21 = @intCast(rc.slice[i]);
                         var n2: u21 = undefined;
                         if (change == .toLower) {
                             n2 = ctx.letter_casing.toLower(n);
                         } else {
                             n2 = ctx.letter_casing.toUpper(n);
                         }
-                        slice[i] = n2;
+                        rc.slice[i] = n2;
                     }
                 }
             }
@@ -1011,8 +1124,8 @@ pub fn codepointCount(self: Ctring) usize {
                     count += 1;
                 } else {
                     if (utf8.dict) |d| {
-                        if (d.get(cp)) |slice| {
-                            count += slice.len;
+                        if (d.get(cp)) |rc| {
+                            count += rc.slice.len;
                         }
                     }
                 }
@@ -1125,8 +1238,14 @@ pub fn eqUtf8(self: Ctring, rhs: []const u8, range: Range) bool {
 }
 
 pub fn eqView(self: Ctring, rhs: View) bool {
-    if (self.size() != rhs.size()) {
+    const sz1 = self.size();
+    const sz2 = rhs.size();
+    if (sz1 != sz2) {
         return false;
+    }
+    
+    if (sz1 == 0 and sz2 == 0) {
+        return true;
     }
 
     return self.findView(rhs, .{}) != null;
@@ -1199,17 +1318,19 @@ pub fn find(self: Ctring, needle: Ctring, range: Range) ?usize {
 pub fn findAscii(self: Ctring, needles:[]const u8, range: Range) ?usize {
     const data = self.data orelse return null;
     const start = range.start;
-    const end = if (range.end == 0) self.size() else range.end;
-    if (end - start < needles.len) {
+    const str_len = self.size();
+    const end = if (range.end == 0) str_len else range.end;
+    if (end - start < needles.len or end > str_len) {
         return null;
     }
+
     switch (data.*) {
         .ascii => |ascii| {
             return std.mem.indexOf(u8, ascii.items[start..end], needles);
         },
         .utf8 => |utf| {
-            const haystack_range = Range {.start = start, .end = end};
-            return utf.findAscii(needles, haystack_range);
+            const real_range = Range {.start = start, .end = end};
+            return utf.findAscii(needles, real_range);
         }
     }
 
@@ -1433,6 +1554,60 @@ pub fn printStats(self: Ctring, src: std.builtin.SourceLocation) void {
     std.debug.print("]\n", .{});
 }
 
+pub fn replace(self: *Ctring, input: Ctring, start: usize, end: usize) !void {
+    const rdata = input.data orelse return;
+
+    switch (rdata.*) {
+        .ascii => |*ascii| {
+            try self.replaceAscii(ascii.items, start, end);
+        },
+        .utf8 => |rutf| {
+            if (self.isAscii()) {
+                try self.switchToUtf();
+            }
+            const data = self.data orelse return;
+            switch (data.*) {
+                .ascii => {
+                    unreachable;
+                },
+                .utf8 => |*utf| {
+                    try utf.replaceWith(rutf, start, end);
+                }
+            }
+        }
+    }
+}
+
+pub fn replaceAscii(self: *Ctring, input: []const u8, start: usize, end: usize) !void {
+    const data = self.data orelse return;
+
+    switch (data.*) {
+        .ascii => |*ascii| {
+            try ascii.replaceRange(ctx.a, start, end-start, input);
+        },
+        .utf8 => |*utf| {
+            try utf.replaceAscii(input, start, end);
+        }
+    }
+}
+
+pub fn replaceUtf8(self: *Ctring, input: []const u8, start: usize, end: usize) !void {
+    const data = self.data orelse return;
+    if (self.isAscii()) {
+        try self.switchToUtf();
+    }
+
+    switch (data.*) {
+        .ascii => |*ascii| {
+            _ = ascii;
+            unreachable;
+        },
+        .utf8 => |*utf| {
+            try utf.replaceUtf8(input, start, end);
+        }
+    }
+}
+
 pub fn size(self: Ctring) usize {
     var count: usize = 0;
     if (self.data) |data_| {
@@ -1583,8 +1758,8 @@ pub fn usedMemory(self: Ctring) usize {
                 var iter = dict.iterator();
                 while (iter.next()) |entry| {
                     count += 3; // sizeof(Cp)
-                    const sl = entry.value_ptr.*;
-                    count += sl.len * 3;
+                    const rc = entry.value_ptr.*;
+                    count += rc.slice.len * 3;
                 }
             }
 
@@ -1604,8 +1779,8 @@ fn utf8_to_bytes(a: Allocator, utf8: *Utf8, start: usize, end: usize) !ArrayList
             try buf.appendSlice(a, tmp[0..len]);
         } else {
             var dict = try utf8.dictMut();
-            const val = dict.get(cp) orelse return error.Other;
-            for (val) |next_cp| {
+            const rc = dict.hash.get(cp) orelse return error.Other;
+            for (rc.slice) |next_cp| {
                 const c: u21 = @intCast(next_cp);
                 const len = try unicode.utf8Encode(c, &tmp);
                 try buf.appendSlice(a, tmp[0..len]);
@@ -1882,6 +2057,22 @@ test "Find" {
             try expect(v.lastIndexOf(s) == 5);
         }
     }
+
+    if (true) { // trim view
+        var v = top.view(0, 2);
+        try expect(v.eqUtf8("🧑‍🌾 "));
+        // mtl.debug(@src(), "before:{f}", .{v._(2)});
+        v.trimRight();
+        // mtl.debug(@src(), "after:{f}", .{v._(2)});
+        try expect(v.eqUtf8("🧑‍🌾"));
+
+        
+        v = top.view(1, 2);
+        // mtl.debug(@src(), "before:{f}, {}:{}", .{v._(2), v.start, v.end});
+        v.trimRight();
+        // mtl.debug(@src(), "after:{f}, {}:{}", .{v._(2), v.start, v.end});
+        try expect(v.eqUtf8(""));
+    }
 }
 
 test "Split" {
@@ -1946,5 +2137,52 @@ test "Split" {
             }
         }
     }
+
+}
+
+test "Replace" {
+    const alloc = std.testing.allocator;
+    try Ctring.Init(alloc);
+    defer Ctring.Deinit();
+
+    const initial = "🧑‍🌾 .橋 .5b.橋";
+    {
+        var top = try Ctring.New(initial);
+        defer top.deinit();
+
+        try top.replaceUtf8("H", 2, 4);
+        try expect(top.eqUtf8("🧑‍🌾 H .5b.橋", .{}));
+    }
+
+    {
+        var top = try Ctring.New(initial);
+        defer top.deinit();
+
+        try top.replaceAscii("H", 2, 4);
+        try expect(top.eqUtf8("🧑‍🌾 H .5b.橋", .{}));
+
+        try top.replaceAscii("", 2, 4);
+        try expect(top.eqUtf8("🧑‍🌾 .5b.橋", .{}));
+    }
+
+    {
+        var top = try Ctring.New(initial);
+        defer top.deinit();
+
+        var s = try Ctring.New("H");
+        defer s.deinit();
+        try top.replace(s, 2, 4);
+        try expect(top.eqUtf8("🧑‍🌾 H .5b.橋", .{}));
+    }
+
+    if (false) {
+        var s = try Ctring.New("Jos\u{65}\u{301}");
+        defer s.deinit();
+        mtl.debug(@src(), "Count: {} {f}", .{s.size(), s._(2)});
+        var s2 = try Ctring.New("abc\u{00010139}def\u{00010102}g");
+        defer s2.deinit();
+        mtl.debug(@src(), "Count: {} {f}", .{s2.size(), s2._(2)});
+    }
+
 
 }

@@ -16,19 +16,7 @@ const ScriptsData = @import("ScriptsData");
 
 const Ctring = @import("Ctring.zig").Ctring;
 const View = Ctring.View;
-const String = @import("String.zig").String;
-const Slice = String.Slice;
-const CaseSensitive = String.CaseSensitive;
-const Codepoint = String.Codepoint;
-const CodepointSlice = String.CpSlice;
-const Context = String.Context;
-const CpSlice = String.CpSlice;
-const Error = String.Error;
-const Index = String.Index;
-const KeepEmptyParts = String.KeepEmptyParts;
-
 const DesktopFile = @import("DesktopFile.zig").DesktopFile;
-const theme = String.Theme.Dark;
 
 test "Desktop File" {
     if (true)
@@ -118,11 +106,12 @@ pub fn buildAHref(alloc: Allocator, numbers_str: *View, session_num: Ctring) !Ct
 
     var a_href = try Ctring.Ascii("<a class=\"anchor\" id=\"");
     var sub = try nums.items[0].clone(.{});
+    defer sub.deinit();
     try sub.addChar('_');
     try sub.add(nums.items[1]);
     try a_href.add(sub);
     try a_href.addAscii("\" href=\"#");
-    try a_href.addConsume(&sub);
+    try a_href.add(sub);
     try a_href.addAscii("\">");
     if (has_both) {
         try a_href.addView(numbers_str.*);
@@ -160,21 +149,25 @@ fn addEng(to: *Ctring, line: *View, speaking: ?Speaking) !?Speaking {
         const ra = "RA";
         const q = "QUESTIONER";
         const jim = "JIM";
+        // mtl.debug(@src(), "line: \"{f}\": {}-{}", .{line._(2), line.start, line.end});
         if (line.startsWithAscii(ra)) {
             added = true;
             ret_speaking = .Ra;
             var sr = try replace(line, ra.len, "<span class=ra_en>RA:</span>");
-            try to.addConsume(&sr);
+            defer sr.deinit();
+            try to.add(sr);
         } else if (line.startsWithAscii(q)) {
             added = true;
             ret_speaking = .Questioner;
             var sr = try replace(line, q.len, "<span class=qa_en>QUESTIONER:</span>");
-            try to.addConsume(&sr);
+            defer sr.deinit();
+            try to.add(sr);
         } else if (line.startsWithAscii(jim)) {
             added = true;
             ret_speaking = .Jim;
             var sr = try replace(line, jim.len, "<span class=qa_en>JIM:</span>");
-            try to.addConsume(&sr);
+            defer sr.deinit();
+            try to.add(sr);
         }
     }
     
@@ -215,7 +208,7 @@ test "Translate En to Ru" {
 
     var dirpath = try io.getHomeAscii2(alloc, "/dev/tloo/raw/");
     defer dirpath.deinit();
-    mtl.debug(@src(), "{f}", .{dirpath._(2)});
+    // mtl.debug(@src(), "{f}", .{dirpath._(2)});
 
     var dir = try io.openDir2(alloc, dirpath);
     defer dir.close();
@@ -351,27 +344,23 @@ fn Translate(alloc: Allocator, dirpath: Ctring, filename: Ctring) !void {
     mtl.debug(@src(), "{f}", .{txt_fullpath});
     var contents_u8 = try io.readFile2(alloc, txt_fullpath);
     defer contents_u8.deinit(alloc);
-
     var contents = try Ctring.New(contents_u8.items[0..]);
     defer contents.deinit();
 
     const cview = contents.view(0, contents.afterLast());
-    var lines = try cview.splitAscii("\n", false);
+    var lines = try cview.splitAscii("\n", true);
     defer lines.deinit(alloc);
     if (lines.items.len <= 2) {
         return;
     }
 
-    var html = Ctring.Empty();
-    defer html.deinit();
-    try html.addAscii(
-    // var html = try Ctring.Ascii(
+    var html = try Ctring.Ascii(
         \\<!DOCTYPE html>
         \\<head>
         \\  <meta charset="UTF-8"/>
         \\  <link rel="stylesheet" href="styles.css">
     );
-    // defer html.deinit();
+    defer html.deinit();
     var idx1 = filename.findAscii("_", .{}) orelse return error.Other;
     idx1 += 1;
     const idx2 = filename.findAscii(".", .{}) orelse return error.Other;
@@ -411,7 +400,8 @@ fn Translate(alloc: Allocator, dirpath: Ctring, filename: Ctring) !void {
             try html.addAscii("\n<table>\n\t<tr>\n\t\t<td>");
             // mtl.debug(@src(), "{f}, {f}", .{line._(2), session_num._(2)});
             var bh = try buildAHref(alloc, line, try session_num.toString());
-            try html.addConsume(&bh);
+            defer bh.deinit();
+            try html.add(bh);
             try html.addAscii("</td>");
         } else if (line.startsWithAscii(en_prefix)) {
             var was_anchor = false;
