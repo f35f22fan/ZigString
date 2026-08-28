@@ -1,6 +1,6 @@
 # Ctring
 Ctring.zig - a Zig string class with O(1) access to graphemes.
-Tested with Zig 0.15.2
+Tested with Zig 0.16.0
 
 See the bottom of Ctring.zig for more tests/usage examples.
 
