@@ -9,11 +9,9 @@ See the bottom of Ctring.zig for more tests/usage examples.
 ---
 
  ```zig
-    // before using the string class, must create a string context per thread,
-    // it contains cached amd shared data:
+    // before using the string class, must set the allocator to be used:
     const alloc = std.testing.allocator;
-    try Ctring.Init(alloc);
-    defer Ctring.Deinit();
+    Ctring.Init(alloc);
 
     {
         var top = try Ctring.New("🧑‍🌾 橋 5b");

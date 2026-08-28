@@ -6,7 +6,7 @@ const expect = std.testing.expect;
 const expectEqualStrings = std.testing.expectEqualStrings;
 // const alloc = std.testing.allocator;
 
-const io = @import("io.zig");
+const mio = @import("io.zig");
 const BitData = @import("bit_data.zig").BitData;
 const mtl = @import("mtl.zig");
 const Num = @import("Num.zig");
@@ -26,9 +26,7 @@ test "Desktop File" {
     // defer if (gpa.deinit() == .leak) std.process.exit(1);
     // const alloc = gpa.allocator();
     const alloc = std.testing.allocator;
-       
-    try Ctring.Init(alloc);
-    defer Ctring.Deinit();
+    Ctring.Init(alloc);
 
     var chromium = try DesktopFile.NewCstr(alloc, "/usr/share/applications/chromium-browser.desktop");
     defer chromium.deinit();
@@ -202,74 +200,73 @@ test "Translate En to Ru" {
         return error.SkipZigTest;
 
     const alloc = std.testing.allocator;
+    const io = std.testing.io;
 
-    try Ctring.Init(alloc);
-    defer Ctring.Deinit();
+    Ctring.Init(alloc);
 
-    var dirpath = try io.getHomeAscii2(alloc, "/dev/tloo/raw/");
+    var subpath = try Ctring.Ascii("/dev/tloo/raw/");
+    defer subpath.deinit();
+    var dirpath = try mio.getHome2(alloc, std.testing.environ, subpath);
     defer dirpath.deinit();
     // mtl.debug(@src(), "{f}", .{dirpath._(2)});
 
-    var dir = try io.openDir2(alloc, dirpath);
-    defer dir.close();
+    var dir = try mio.openDir2(alloc, io, dirpath);
+    defer dir.close(io);
 
     const only_last = true;
-    var last_txt_name: ?Ctring = null;
+    var last_filename: ?Ctring = null;
 
     if (false) {
         var name = try Ctring.Ascii("session_46.txt");
         defer name.deinit();
-        try Translate(alloc, dirpath, name);
-        return;
+        return Translate(alloc, dirpath, name);
     }
 
-    var filenames: ArrayList(Ctring) = .empty;
+    var file_numbers: ArrayList(isize) = .empty;
     defer {
-        for (filenames.items) |*item| {
-            item.deinit();
-        }
-
-        filenames.deinit(alloc);
+        file_numbers.deinit(alloc);
     }
-
+    var greatest: ?isize = null;
     var dir_iter = dir.iterate();
-    while (try dir_iter.next()) |entry| {
-        var txt_name = try Ctring.New(entry.name);
-        defer txt_name.deinit();
-        var html_name = try txt_name.clone(.{});
-        try html_name.changeToAsciiExtension(".html");
-        try filenames.append(alloc, html_name);
+    while (try dir_iter.next(io)) |entry| {
+        var current_fname = try Ctring.New(entry.name);
+        defer current_fname.deinit();
+        
+        const num_view = GetSessionNumber(&current_fname) orelse continue;
+        const num = num_view.parseInt(isize, 10) catch continue;
+        try file_numbers.append(alloc, num);
+
         if (only_last) {
-            if (last_txt_name) |*ln| {
-                // mtl.debug(@src(), "Skipped {dt}", .{ln});
-                ln.deinit();
+            if (greatest) |gr| {
+                if (num > gr) {
+                    if (last_filename) |*ln| {
+                        ln.deinit();
+                    }
+                    last_filename = try current_fname.clone(.{});
+                    greatest = num;    
+                }
+            } else {
+                if (last_filename) |*ln| {
+                    ln.deinit();
+                }
+                last_filename = try current_fname.clone(.{});
+                greatest = num;
             }
-            last_txt_name = try txt_name.clone(.{});
         } else {
-            try Translate(alloc, dirpath, txt_name);
+            try Translate(alloc, dirpath, current_fname);
         }
     }
 
-    if (last_txt_name) |*fname| {
-        try Translate(alloc, dirpath, fname.*);
+    if (last_filename) |*fname| {
+        try Translate(alloc,io, dirpath, fname.*);
         fname.deinit();
     }
 
-    try CreateHtmlIndex(alloc, filenames);
+    std.mem.sort(isize, file_numbers.items, {}, std.sort.asc(isize));
+    try CreateHtmlIndex(alloc, io, file_numbers);
 }
 
-fn parseSession(name: Ctring) !Ctring {
-    var idx = name.lastIndexOfAscii("_", .{}) orelse return error.Index;
-    idx += 1; // skipping past "_"
-    const idx2 = name.lastIndexOfAscii(".", .{}) orelse return error.Index;
-
-    const number = name.view(idx, idx2);
-    var ret = try Ctring.New("Сеанс ");
-    try ret.addView(number);
-    return ret;
-}
-
-fn CreateHtmlIndex(alloc: Allocator, filenames: ArrayList(Ctring)) !void {
+fn CreateHtmlIndex(alloc: Allocator, io: std.Io, numbers: ArrayList(isize)) !void {
     var html = Ctring.Empty();
     defer html.deinit();
     try html.addUtf8(
@@ -286,13 +283,24 @@ fn CreateHtmlIndex(alloc: Allocator, filenames: ArrayList(Ctring)) !void {
         \\
     );
 
-    for (filenames.items) |name| {
+    var buf: [32]u8 = undefined;
+    for (numbers.items) |number| {
+        const num_str = try std.fmt.bufPrint(&buf, "{d}", .{number});
+
         try html.addAscii("<a href=\"");
-        try html.add(name);
-        var session = try parseSession(name);
-        defer session.deinit();
+        var session_en = try Ctring.Ascii("session_");
+        defer session_en.deinit();
+        try session_en.addAscii(num_str);
+        try session_en.addAscii(".html");
+
+        try html.add(session_en);
         try html.addAscii("\">");
-        try html.add(session);
+
+        var text = try Ctring.New("Сеанс ");
+        defer text.deinit();
+        try text.addAscii(num_str);
+        
+        try html.add(text);
         try html.addAscii("</a><br>\n");
     }
 
@@ -323,26 +331,32 @@ fn CreateHtmlIndex(alloc: Allocator, filenames: ArrayList(Ctring)) !void {
     defer relative_path.deinit();
     try relative_path.addAscii("index.html");
 
-    var save_to_path = try io.getHome2(alloc, relative_path);
+    var save_to_path = try mio.getHome2(alloc, std.testing.environ, relative_path);
     defer save_to_path.deinit();
 
     var utf8 = try save_to_path.toBytes(alloc, .{});
     defer utf8.deinit(alloc);
 
-    const out_file = try std.fs.createFileAbsolute(utf8.items, .{});
-    defer out_file.close();
+    const out_file = try std.Io.Dir.createFileAbsolute(io, utf8.items, .{});
+    defer out_file.close(io);
 
     var byte_buf = try html.toBytes(alloc, .{});
     defer byte_buf.deinit(alloc);
-    try out_file.writeAll(byte_buf.items);
+    try out_file.writeStreamingAll(io, byte_buf.items);
 }
 
-fn Translate(alloc: Allocator, dirpath: Ctring, filename: Ctring) !void {
+fn GetSessionNumber(filename: *const Ctring) ?Ctring.View {
+    const start = filename.findAscii("_", .{}) orelse return null;
+    const end = filename.findAscii(".", .{.start = start + 1}) orelse return null;
+    return filename.view(start + 1, end);
+}
+
+fn Translate(alloc: Allocator, io: std.Io, dirpath: Ctring, filename: Ctring) !void {
     var txt_fullpath = try dirpath.clone(.{});
     try txt_fullpath.add(filename);
     defer txt_fullpath.deinit();
     mtl.debug(@src(), "{f}", .{txt_fullpath});
-    var contents_u8 = try io.readFile2(alloc, txt_fullpath);
+    var contents_u8 = try mio.readFile2(alloc, io, txt_fullpath);
     defer contents_u8.deinit(alloc);
     var contents = try Ctring.New(contents_u8.items[0..]);
     defer contents.deinit();
@@ -361,10 +375,7 @@ fn Translate(alloc: Allocator, dirpath: Ctring, filename: Ctring) !void {
         \\  <link rel="stylesheet" href="styles.css">
     );
     defer html.deinit();
-    var idx1 = filename.findAscii("_", .{}) orelse return error.Other;
-    idx1 += 1;
-    const idx2 = filename.findAscii(".", .{}) orelse return error.Other;
-    const session_num = filename.view(idx1, idx2);
+    const session_num = GetSessionNumber(&filename) orelse return error.Other;
     try html.addUtf8("\t<title>Сеанс ");
     try html.addView(session_num);
     try html.addUtf8(" - Закон Одного</title>\n</head>\n<body><div class=session>Сеанс ");
@@ -452,17 +463,17 @@ fn Translate(alloc: Allocator, dirpath: Ctring, filename: Ctring) !void {
     defer relative_path.deinit();
     try relative_path.add(html_filename);
 
-    var save_to_path = try io.getHome2(alloc, relative_path);
+    var save_to_path = try mio.getHome2(alloc, std.testing.environ, relative_path);
     defer save_to_path.deinit();
 
     var utf8 = try save_to_path.toBytes(alloc, .{});
     defer utf8.deinit(alloc);
 
-    const out_file = try std.fs.createFileAbsolute(utf8.items, .{});
-    defer out_file.close();
+    const out_file = try std.Io.Dir.createFileAbsolute(io, utf8.items, .{});
+    defer out_file.close(io);
 
     var byte_buf = try html.toBytes(alloc, .{});
     defer byte_buf.deinit(alloc);
 
-    try out_file.writeAll(byte_buf.items);
+    try out_file.writeStreamingAll(io, byte_buf.items);
 }

@@ -2,9 +2,16 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-fn print(out: anytype, comptime fg: []const u8, src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
+fn print(out: std.Io.File, comptime fg: []const u8, src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
     var buf: [512]u8 = undefined;
-    var wr = out.writer(&buf);
+
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    const gpa = debug_allocator.allocator();
+    var threaded: std.Io.Threaded = .init(gpa, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    var wr = out.writer(io, &buf);
     var writer = &wr.interface;
     writer.print("{s}{s}{s}[{s}]{s}:{d} {s}", .{ fg, src.file, COLOR_CYAN, src.fn_name, fg, src.line, COLOR_DEFAULT }) catch {};
     writer.print(fmt, args) catch {};
@@ -13,11 +20,11 @@ fn print(out: anytype, comptime fg: []const u8, src: std.builtin.SourceLocation,
 }
 
 inline fn debug_fg(comptime fg: []const u8, src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
-    print(std.fs.File.stderr(), fg, src, fmt, args);
+    print(std.Io.File.stderr(), fg, src, fmt, args);
 }
 
 pub fn info(src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
-    print(std.fs.File.stdout(), COLOR_BLUE, src, fmt, args);
+    print(std.Io.File.stdout(), COLOR_BLUE, src, fmt, args);
 }
 
 pub fn debug(src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {

@@ -13,11 +13,53 @@ const Codepoint = String.Codepoint;
 const Context = String.Context;
 const Index = String.Index;
 const KeepEmptyParts = String.KeepEmptyParts;
+
 // Don't change this string, many tests depend on it:
 const JoseUtf8 = "Jos\u{65}\u{301} se fu\u{65}\u{301} a Sevilla sin pararse";
+
 const theme = String.Theme.Dark;
+const TestString = false;
+const TestCtring = true;
+
+test "Creation" {
+    if (!TestCtring)
+        return error.SkipZigTest;
+    
+    Ctring.Init(alloc);
+
+    mtl.debug(@src(), "Hello world {}", .{14});
+
+    {
+        const ascii = "abc";
+        var s = try Ctring.Ascii(ascii);
+        defer s.deinit();
+        try expect(s.eqAscii(ascii, .{.end=ascii.len}));
+    }
+
+    {
+        const input = "Jos\u{65}";
+        var s = try Ctring.New(input);
+        defer s.deinit();
+        try expect(s.eqUtf8(input, .{}));
+    }
+
+    {
+        var s = try Ctring.Number(15, "{d}", 2);
+        defer s.deinit();
+        try expect((s.eqAscii("15", .{})));
+    }
+
+    {
+        var s = try Ctring.Number(15, "{X}", 32);
+        defer s.deinit();
+        try expect((s.eqAscii("F", .{})));
+    }
+}
 
 test "Append Test" {
+    if (!TestString)
+        return error.SkipZigTest;
+    
     try String.Init(alloc);
     defer String.Deinit();
 
@@ -39,6 +81,9 @@ test "Append Test" {
 }
 
 test "Get Grapheme Index" {
+    if (!TestString)
+        return error.SkipZigTest;
+    
     try String.Init(alloc);
     defer String.Deinit();
 
@@ -69,6 +114,9 @@ test "Get Grapheme Index" {
 }
 
 test "Trim Left" {
+    if (!TestString)
+        return error.SkipZigTest;
+    
     try String.Init(alloc);
     defer String.Deinit();
 
@@ -96,6 +144,9 @@ test "Trim Left" {
 }
 
 test "Trim Right" {
+    if (!TestString)
+        return error.SkipZigTest;
+
     try String.Init(alloc);
     defer String.Deinit();
 
@@ -123,6 +174,10 @@ test "Trim Right" {
 }
 
 test "Substring" {
+    if (!TestString) {
+        return error.SkipZigTest;
+    }
+
     try String.Init(alloc);
     defer String.Deinit();
 
@@ -156,6 +211,10 @@ test "Substring" {
 }
 
 test "Equals" {
+    if (!TestString) {
+        return error.SkipZigTest;
+    }
+
     try String.Init(alloc);
     defer String.Deinit();
 
@@ -184,6 +243,9 @@ test "Equals" {
 }
 
 test "FindInsertRemove" {
+    if (!TestString) {
+        return error.SkipZigTest;
+    }
     try String.Init(alloc);
     defer String.Deinit();
 
@@ -265,6 +327,10 @@ test "FindInsertRemove" {
 }
 
 test "Split" {
+    if (!TestString) {
+        return error.SkipZigTest;
+    }
+
     try String.Init(alloc);
     defer String.Deinit();
 
@@ -333,6 +399,10 @@ test "Split" {
 }
 
 test "To Upper, To Lower" {
+    if (!TestString) {
+        return error.SkipZigTest;
+    }
+
     try String.Init(alloc);
     defer String.Deinit();
 
@@ -351,6 +421,10 @@ test "To Upper, To Lower" {
 }
 
 test "Char At" {
+    if (!TestString) {
+        return error.SkipZigTest;
+    }
+
     try String.Init(alloc);
     defer String.Deinit();
 
@@ -504,6 +578,10 @@ test "Char At" {
 }
 
 test "Slice functions" {
+    if (!TestString) {
+        return error.SkipZigTest;
+    }
+
     try String.Init(alloc);
     defer String.Deinit();
 
@@ -643,6 +721,10 @@ test "Slice functions" {
 test "Printing Colors" {
     if (true)
         return error.SkipZigTest;
+    
+    if (!TestString) {
+        return error.SkipZigTest;
+    }
 
     try String.Init(alloc);
     defer String.Deinit();
@@ -661,6 +743,10 @@ test "Printing Colors" {
 }
 
 test "trimming and splitting slices" {
+    if (!TestString) {
+        return error.SkipZigTest;
+    }
+
     try String.Init(alloc);
     defer String.Deinit();
     
@@ -695,17 +781,39 @@ pub fn main() !void {
     std.debug.print("\u{00a9}", .{});
 }
 
-// test "Qt chars" {
-//     String.ctx = try Context.New(alloc);
-//     defer String.ctx.deinit();
-//     {
-//         const s = try String.New("Jos\u{65}\u{301}");
-//         defer s.deinit();
-//         mtl.debug(@src(), "Count: {} {}", .{s.size(), s});
-//     }
-//     {
-//         const s = try String.New("abc\u{00010139}def\u{00010102}g");
-//         defer s.deinit();
-//         mtl.debug(@src(), "Count: {} {}", .{s.size(), s});
-//     }
-// }
+test "Qt chars" {
+    if (true) {
+        return error.SkipZigTest;
+    }
+    try String.Init(alloc);
+    defer String.Deinit();
+
+    try Ctring.Init(alloc);
+    defer Ctring.Deinit();
+
+    {
+        const s = try String.New("Jos\u{65}\u{301}");
+        defer s.deinit();
+        // mtl.debug(@src(), "Count: {} {f}", .{s.size(), s});
+        try expect(s.size() == 4);
+    }
+    {
+        const s = try String.New("abc\u{00010139}def\u{00010102}g");
+        defer s.deinit();
+        // mtl.debug(@src(), "Count: {} {f}", .{s.size(), s});
+        try expect(s.size() == 9);
+    }
+
+    {
+        var s = try Ctring.New("Jos\u{65}\u{301}");
+        defer s.deinit();
+        // mtl.debug(@src(), "Count: {} {f}", .{s.size(), s});
+        try expect(s.size() == 4);
+    }
+    {
+        var s = try Ctring.New("abc\u{00010139}def\u{00010102}g");
+        defer s.deinit();
+        // mtl.debug(@src(), "Count: {} {f}", .{s.size(), s});
+        try expect(s.size() == 9);
+    }
+}

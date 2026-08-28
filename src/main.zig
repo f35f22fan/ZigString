@@ -1,6 +1,6 @@
 const std = @import("std");
 const mtl = @import("mtl.zig");
-const io = @import("io.zig");
+const mio = @import("io.zig");
 const String = @import("String.zig").String;
 const Regex = @import("Regex.zig");
 
@@ -60,7 +60,9 @@ fn getString() struct { i64, []const u8 } {
     return .{ 5, "Hello" };
 }
 
-pub fn main() !u8 {
+pub fn main(init: std.process.Init) !u8 {
+    const io = init.io;
+    _ = &io;
     try String.Init(alloc);
     defer String.Deinit();
 

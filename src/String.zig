@@ -200,7 +200,7 @@ pub const Grapheme = struct {
             return ascii_match;
         }
 
-        return ascii_match or ctx.gencat.isLetter(cp);
+        return ascii_match or GeneralCategories.isLetter(cp);
     }
 
     pub fn isNumber(self: Grapheme) bool {
@@ -1185,21 +1185,21 @@ inline fn getTime() i128 {
 
 pub const Context = struct {
     a: Allocator = undefined,
-    graphemes: Graphemes,
-    letter_casing: LetterCasing = undefined,
-    case_folding: CaseFolding = undefined,
-    normalize: Normalize = undefined,
-    gencat: GeneralCategories = undefined,
+    // graphemes: Graphemes = undefined,
+    // letter_casing: LetterCasing = undefined,
+    // case_folding: CaseFolding = undefined,
+    // normalize: Normalize = undefined,
+    // gencat: GeneralCategories = undefined,
 
     pub fn New(alloc: Allocator) !Context {
-        const normalize = try Normalize.init(alloc);
+        // const normalize = Normalize;//try Normalize.init(alloc);
         var context = Context{
             .a = alloc,
-            .graphemes = try Graphemes.init(alloc),
-            .letter_casing = try LetterCasing.init(alloc),
-            .normalize = normalize,
-            .case_folding = try CaseFolding.initWithNormalize(alloc, normalize),
-            .gencat = try GeneralCategories.init(alloc),
+            // .graphemes = Graphemes,//try Graphemes.init(alloc),
+            // .letter_casing = LetterCasing, //try LetterCasing.init(alloc),
+            // .normalize = normalize,
+            // .case_folding = CaseFolding,//try CaseFolding.initWithNormalize(alloc, normalize),
+            // .gencat = GeneralCategories,//try GeneralCategories.init(alloc),
         };
 
         _ = &context;
@@ -1208,11 +1208,12 @@ pub const Context = struct {
     }
 
     pub fn deinit(self: *Context) void {
-        self.graphemes.deinit(self.a);
-        self.letter_casing.deinit(ctx.a);
-        self.case_folding.deinit(ctx.a);
-        self.normalize.deinit(ctx.a);
-        self.gencat.deinit(ctx.a);
+        _ = self;
+        // self.graphemes.deinit(self.a);
+        // self.letter_casing.deinit(ctx.a);
+        // self.case_folding.deinit(ctx.a);
+        // self.normalize.deinit(ctx.a);
+        // self.gencat.deinit(ctx.a);
     }
 };
 
@@ -1634,7 +1635,7 @@ pub fn endsWithCodepointSlice(self: String, needles: CpSlice, cmp: Comparison) b
     }
 
     for (sd.codepoints_.items[start_index..], needles) |l, r| {
-        if (ctx.letter_casing.toUpper(l) != ctx.letter_casing.toUpper(r)) {
+        if (LetterCasing.toUpper(l) != LetterCasing.toUpper(r)) {
             return false;
         }
     }
@@ -1688,7 +1689,7 @@ fn findCaseless(graphemes: GraphemeSlice, haystack: ConstCpSlice, needles: Const
     for (0..till) |i| {
         index = i;
         for (needles, haystack[i .. i + needles.len]) |l, r| {
-            if (ctx.letter_casing.toUpper(l) != ctx.letter_casing.toUpper(r)) {
+            if (LetterCasing.toUpper(l) != LetterCasing.toUpper(r)) {
                 index = null;
                 break;
             }
@@ -1853,7 +1854,7 @@ pub fn init(self: *String, input: []const u8, clear: Clear) !void {
     const approx = @max(input.len / 2, 2);
     try data.codepoints_.ensureTotalCapacity(ctx.a, approx);
     try data.graphemes_.ensureTotalCapacity(ctx.a, approx);
-    var gc_iter = ctx.graphemes.iterator(input);
+    var gc_iter = Graphemes.iterator(input);
     while (gc_iter.next()) |grapheme| {
         data.grapheme_count += 1;
         var new_grapheme = true;
@@ -2401,7 +2402,7 @@ pub fn startsWithSlice(self: String, needles: CpSlice, cmp: Comparison) bool {
     }
 
     for (sd.codepoints_.items[0..needles.len], needles) |l, r| {
-        if (ctx.letter_casing.toUpper(l) != ctx.letter_casing.toUpper(r)) {
+        if (LetterCasing.toUpper(l) != LetterCasing.toUpper(r)) {
             return false;
         }
     }
@@ -2470,12 +2471,12 @@ pub fn toLower(self: *String) !void {
 
 pub fn toLower2(list: CpSlice) !void {
     for (list) |*k| {
-        k.* = ctx.letter_casing.toLower(k.*);
+        k.* = LetterCasing.toLower(k.*);
     }
 }
 
 pub inline fn toLowerCp(cp: Codepoint) Codepoint {
-    return ctx.letter_casing.toLower(cp);
+    return LetterCasing.toLower(cp);
 }
 
 pub fn toOwnedSlice(self: String, a: Allocator) ![]u8 {
@@ -2495,12 +2496,12 @@ pub fn toUpper(self: *String) !void {
 
 pub fn toUpper2(list: CpSlice) !void {
     for (list) |*k| {
-        k.* = ctx.letter_casing.toUpper(k.*);
+        k.* = LetterCasing.toUpper(k.*);
     }
 }
 
 pub inline fn toUpperCp(cp: Codepoint) Codepoint {
-    return ctx.letter_casing.toUpper(cp);
+    return LetterCasing.toUpper(cp);
 }
 
 pub fn trim(self: *String) !void {
@@ -2613,7 +2614,7 @@ fn equalsCodepointSlice_real(codepoints: ConstCpSlice, cp_slice: ConstCpSlice, c
     }
 
     for (codepoints, cp_slice) |l, r| {
-        if (ctx.letter_casing.toUpper(l) != ctx.letter_casing.toUpper(r)) {
+        if (LetterCasing.toUpper(l) != LetterCasing.toUpper(r)) {
             return false;
         }
     }
@@ -2878,8 +2879,8 @@ fn lastIndexGeneric_real(codepoints: ConstCpSlice, graphemes: GraphemeSlice, gra
             found = true;
             const end: usize = at + needles.len;
             for (codepoints[at..end], needles) |cp, n| {
-                const l = if (sensitive) cp else ctx.letter_casing.toUpper(cp);
-                const r = if (sensitive) n else ctx.letter_casing.toUpper(n);
+                const l = if (sensitive) cp else LetterCasing.toUpper(cp);
+                const r = if (sensitive) n else LetterCasing.toUpper(n);
                 if (l != r) {
                     found = false;
                     break;
@@ -2915,13 +2916,13 @@ fn lastIndexOfCp_real(codepoints: ConstCpSlice, graphemes: GraphemeSlice, graphe
     var from: isize = @intCast(from_u);
     var skip_gr: usize = 0;
     const sensitive = args.cs == .Yes;
-    const r = if (sensitive) needle else ctx.letter_casing.toUpper(needle);
+    const r = if (sensitive) needle else LetterCasing.toUpper(needle);
     while (from >= 0) {
         const at: usize = @intCast(from);
         if (graphemes[at] == 1) {
             skip_gr += 1;
             const cp = codepoints[at];
-            const l = if (sensitive) cp else ctx.letter_casing.toUpper(cp);
+            const l = if (sensitive) cp else LetterCasing.toUpper(cp);
             if (l == r) {
                 if (at < from_pos) { // make sure this grapheme length == 1,
                     // which is the case if it's at the end of the string

@@ -70,6 +70,7 @@ pub fn build(b: *std.Build) void {
     AddNewTest(b, target, optimize, zg, "src/test_default.zig", "test", "Run Default Test");
     AddNewTest(b, target, optimize, zg, "src/test_speed.zig", "test_speed", "Test Speed");
     AddNewTest(b, target, optimize, zg, "src/test_irl.zig", "test_irl", "Test IRL");
+    AddNewTest(b, target, optimize, zg, "src/test_zip.zig", "test_zip", "Test Zip");
     AddNewTest(b, target, optimize, zg, "src/Regex.zig", "test_regex", "Test Regex");
 
     AddNewTest(b, target, optimize, zg, "src/Ctring.zig", "test_ctring", "Test Ctring");
@@ -93,7 +94,7 @@ zg: *std.Build.Dependency, path: []const u8, name: []const u8, description: []co
             .optimize = optimize,
         }),
     });
-    new_test.linkLibC();
+    // new_test.linkLibC();
     addZgImport(new_test, zg);
     const test_run = b.addRunArtifact(new_test);
 

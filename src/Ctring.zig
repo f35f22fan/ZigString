@@ -256,6 +256,20 @@ pub const View = struct {
         }
     }
 
+    /// parseInt tries to parse this string as an integer of type `T` in base `radix`.
+    pub fn parseInt(self: View, comptime T: type, radix: u8) !T {
+        var buf = try self.toBytes(ctring_a);
+        defer buf.deinit(ctring_a);
+        return std.fmt.parseInt(T, buf.items, radix);
+    }
+
+    /// parseFloat tries to parse this string as an floating point number of type `T`.
+    pub fn parseFloat(self: View, comptime T: type) !T {
+        var buf = try self.toBytes(ctring_a);
+        defer buf.deinit(ctring_a);
+        return std.fmt.parseFloat(T, buf.items);
+    }
+
     pub fn setView(self: *View, start: usize, end: usize) void {
         self.start = start;
         self.end = end;
@@ -267,7 +281,7 @@ pub const View = struct {
 
     pub fn split(self: View, sep: Ctring, keep_empty_parts: bool) !ArrayList(View) {
         var arr: ArrayList(View) = .empty;
-        errdefer arr.deinit(ctx.a);
+        errdefer arr.deinit(ctring_a);
         var at_idx: usize = self.start;
         const sep_size = sep.size();
         while (at_idx < self.end) {
@@ -276,12 +290,12 @@ pub const View = struct {
                 const new_view = self.s.view(at_idx, idx);
                 const is_empty = (new_view.end - new_view.start == 0);
                 if (keep_empty_parts or !is_empty) {
-                    try arr.append(ctx.a, new_view);
+                    try arr.append(ctring_a, new_view);
                 }
                 at_idx = idx + sep_size;
             } else {
                 const new_view = self.s.view(at_idx, self.end);
-                try arr.append(ctx.a, new_view);
+                try arr.append(ctring_a, new_view);
                 break;
             }
         }
@@ -291,7 +305,7 @@ pub const View = struct {
 
     pub fn splitAscii(self: View, sep: []const u8, keep_empty_parts: bool) !ArrayList(View) {
         var arr: ArrayList(View) = .empty;
-        errdefer arr.deinit(ctx.a);
+        errdefer arr.deinit(ctring_a);
         var at_idx: usize = self.start;
         const sep_size = sep.len;
         while (at_idx < self.end) {
@@ -300,12 +314,12 @@ pub const View = struct {
                 const new_view = self.s.view(at_idx, idx);
                 const is_empty = (new_view.end - new_view.start == 0);
                 if (keep_empty_parts or !is_empty) {
-                    try arr.append(ctx.a, new_view);
+                    try arr.append(ctring_a, new_view);
                 }
                 at_idx = idx + sep_size;
             } else {
                 const new_view = self.s.view(at_idx, self.end);
-                try arr.append(ctx.a, new_view);
+                try arr.append(ctring_a, new_view);
                 break;
             }
         }
@@ -402,8 +416,8 @@ pub const View = struct {
                         try printBytes(buf.items[self.v.start..self.v.end], writer, self.context);
                     },
                     .utf8 => |*utf8| {
-                        var buf = utf8_to_bytes(ctx.a, utf8, self.v.start, self.v.end) catch return std.Io.Writer.Error.WriteFailed;
-                        defer buf.deinit(ctx.a);
+                        var buf = utf8_to_bytes(ctring_a, utf8, self.v.start, self.v.end) catch return std.Io.Writer.Error.WriteFailed;
+                        defer buf.deinit(ctring_a);
                         try printBytes(buf.items, writer, self.context);
                     },
                 }
@@ -422,12 +436,12 @@ const Grapheme_ = struct {
             },
             .cps => |cps| {
                 var buf: ArrayList(u8) = .empty;
-                defer buf.deinit(ctx.a);
+                defer buf.deinit(ctring_a);
                 var tmp: [4]u8 = undefined;
                 for (cps) |cp| {
                     const c: u21 = @intCast(cp);
                     const len = unicode.utf8Encode(c, &tmp) catch return std.Io.Writer.Error.WriteFailed;
-                    buf.appendSlice(ctx.a, tmp[0..len]) catch return std.Io.Writer.Error.WriteFailed;
+                    buf.appendSlice(ctring_a, tmp[0..len]) catch return std.Io.Writer.Error.WriteFailed;
                 }
                 
                 try printBytes(buf.items, writer, self.context);
@@ -459,14 +473,14 @@ pub const Grapheme = struct {
     }
 
     pub fn eqUtf8(self: Grapheme, str: []const u8) bool {
-        var gc_iter = ctx.graphemes.iterator(str);
+        var gc_iter = Graphemes.iterator(str);
         var graphemes: ArrayList(Cp) = .empty;
-        defer graphemes.deinit(ctx.a);
+        defer graphemes.deinit(ctring_a);
         while (gc_iter.next()) |grapheme_bytes| {
             const bytes = grapheme_bytes.bytes(str);
             var cp_iter = zg_codepoint.Iterator{ .bytes = bytes };
             while (cp_iter.next()) |obj| {
-                graphemes.append(ctx.a, obj.code) catch return false;
+                graphemes.append(ctring_a, obj.code) catch return false;
             }
         }
 
@@ -504,7 +518,7 @@ pub const Grapheme = struct {
             return ascii_match;
         }
 
-        return ascii_match or ctx.gencat.isLetter(cp);
+        return ascii_match or GeneralCategories.isLetter(cp);
     }
 
     pub fn isDigit(self: Grapheme) bool {
@@ -564,7 +578,7 @@ pub fn addGraphemeCluster(dict: *Dict, gr: []const Cp, count: ?u32) !Cp {
         }
     }
 
-    const rc: SliceRC = .{.count = increase_by, .slice = try ctx.a.dupe(Cp, gr)};
+    const rc: SliceRC = .{.count = increase_by, .slice = try ctring_a.dupe(Cp, gr)};
     // mtl.debug(@src(), "last_id: {}", .{dict.last_id});
     const id: Cp = @intCast(dict.last_id - 1);
     dict.last_id = id;
@@ -578,26 +592,26 @@ const Utf8 = struct {
     dict: ?*Dict = null,
 
     fn New(input: []const u8) !Utf8 {
-        var gc_iter = ctx.graphemes.iterator(input);
+        var gc_iter = Graphemes.iterator(input);
         var grapheme: ArrayList(Cp) = .empty;
-        defer grapheme.deinit(ctx.a);
+        defer grapheme.deinit(ctring_a);
         var utf8: Utf8 = .{};
-        try utf8.arr.ensureTotalCapacity(ctx.a, input.len * 2);
+        try utf8.arr.ensureTotalCapacity(ctring_a, input.len * 2);
 
         while (gc_iter.next()) |grapheme_bytes| {
             const bytes = grapheme_bytes.bytes(input);
             var cp_iter = zg_codepoint.Iterator{ .bytes = bytes };
             grapheme.clearRetainingCapacity();
             while (cp_iter.next()) |obj| {
-                try grapheme.append(ctx.a, obj.code);
+                try grapheme.append(ctring_a, obj.code);
             }
 
             if (grapheme.items.len == 1) {
-                try utf8.arr.append(ctx.a, grapheme.items[0]);
+                try utf8.arr.append(ctring_a, grapheme.items[0]);
             } else if (grapheme.items.len > 1) {
                 const dict: *Dict = try utf8.dictMut();
                 const id = try addGraphemeCluster(dict, grapheme.items, null);
-                try utf8.arr.append(ctx.a, id);
+                try utf8.arr.append(ctring_a, id);
             } else {
                 mtl.trace(@src());
             }
@@ -610,15 +624,15 @@ const Utf8 = struct {
         if (self.dict) |d| {
             return d;
         }
-        const d = try ctx.a.create(Dict);
-        d.hash = .init(ctx.a);
+        const d = try ctring_a.create(Dict);
+        d.hash = .init(ctring_a);
         d.last_id = -1;
         self.dict = d;
         return d;
     }
 
     pub fn addAscii(self: *Utf8, arr: []const u8) !void {
-        const slice = try self.arr.addManyAsSlice(ctx.a, arr.len);
+        const slice = try self.arr.addManyAsSlice(ctring_a, arr.len);
         for (slice, arr) |*a, b| {
             a.* = b;
         }
@@ -626,7 +640,7 @@ const Utf8 = struct {
 
     pub fn addUtf(self: *Utf8, rhs: *const Utf8) !void {
         const offset: usize = self.arr.items.len;
-        try self.arr.appendSlice(ctx.a, rhs.arr.items);
+        try self.arr.appendSlice(ctring_a, rhs.arr.items);
 
         const rdict = rhs.dict orelse return;
         for (self.arr.items[offset..]) |*cp| {
@@ -643,15 +657,15 @@ const Utf8 = struct {
         const end = if (range.end == 0) self.arr.items.len else range.end;
         var utf: Utf8 = .{};
         const slice_to_copy = self.arr.items[range.start..end];
-        try utf.arr.ensureUnusedCapacity(ctx.a, slice_to_copy.len * 3);
+        try utf.arr.ensureUnusedCapacity(ctring_a, slice_to_copy.len * 3);
         for (slice_to_copy) |cp| {
             if (cp >= 0) {
-                try utf.arr.append(ctx.a, cp);
+                try utf.arr.append(ctring_a, cp);
             } else {
                 const source_dict: *Dict = self.dict orelse return error.Other;
                 const rc = source_dict.hash.get(cp) orelse return error.Other;
                 const id = try addGraphemeCluster(try utf.dictMut(), rc.slice, rc.count);
-                try utf.arr.append(ctx.a, id);
+                try utf.arr.append(ctring_a, id);
             }
         }
 
@@ -659,16 +673,16 @@ const Utf8 = struct {
     }
 
     pub fn deinit(self: *Utf8) void {
-        self.arr.deinit(ctx.a);
+        self.arr.deinit(ctring_a);
         if (self.dict) |dict_| {
             var iter = dict_.hash.iterator();
             while (iter.next()) |entry| {
                 const rc: *const SliceRC = entry.value_ptr;
-                ctx.a.free(rc.slice);
+                ctring_a.free(rc.slice);
             }
 
             dict_.hash.deinit();
-            ctx.a.destroy(dict_);
+            ctring_a.destroy(dict_);
         }
     }
 
@@ -761,7 +775,7 @@ const Utf8 = struct {
             }
             const rc: *SliceRC = dict.hash.getPtr(cp) orelse return error.NotFound;
             if (rc.count == 1) {
-                ctx.a.free(rc.slice);
+                ctring_a.free(rc.slice);
                 _ = dict.hash.remove(cp);
             } else {
                 rc.count -= 1;
@@ -772,7 +786,7 @@ const Utf8 = struct {
     fn replaceAscii(self: *Utf8, input: []const u8, start: usize, end: usize) !void {
         var slice: CpSlice = &.{};
         if (input.len > 0) {
-            slice = try ctx.a.alloc(Cp, input.len);
+            slice = try ctring_a.alloc(Cp, input.len);
             for (slice, input) |*c, d| {
                 c.* = d;
             }
@@ -781,15 +795,15 @@ const Utf8 = struct {
         }
 
         try self.removeFromDict(start, end);
-        try self.arr.replaceRange(ctx.a, start, end-start, slice);
+        try self.arr.replaceRange(ctring_a, start, end-start, slice);
         if (input.len > 0) {
-            ctx.a.free(slice);
+            ctring_a.free(slice);
         }
     }
 
     fn replaceWith(self: *Utf8, utf: Utf8, start: usize, end: usize) !void {
         try self.removeFromDict(start, end);
-        try self.arr.replaceRange(ctx.a, start, end - start, utf.arr.items);
+        try self.arr.replaceRange(ctring_a, start, end - start, utf.arr.items);
         const rdict: *const Dict = utf.dict orelse return;
         const dest_dict: *Dict = try self.dictMut();
         
@@ -798,13 +812,13 @@ const Utf8 = struct {
             new: Cp,
         };
         var pairs: ArrayList(OldNew) = .empty;
-        defer pairs.deinit(ctx.a);
+        defer pairs.deinit(ctring_a);
         var iter = rdict.hash.iterator();
         while (iter.next()) |entry| {
             const old_id = entry.key_ptr.*;
             const rc = entry.value_ptr.*;
             const new_id = try addGraphemeCluster(dest_dict, rc.slice, rc.count);
-            try pairs.append(ctx.a, .{.old=old_id, .new=new_id});
+            try pairs.append(ctring_a, .{.old=old_id, .new=new_id});
         }
 
         for (self.arr.items[start..start+utf.arr.items.len]) |*cp| {
@@ -838,8 +852,8 @@ const Ctring_ = struct {
                     try printBytes(buf.items, writer, self.context);
                 },
                 .utf8 => |*utf8| {
-                    var buf = utf8_to_bytes(ctx.a, utf8, 0, utf8.arr.items.len) catch return std.Io.Writer.Error.WriteFailed;
-                    defer buf.deinit(ctx.a);
+                    var buf = utf8_to_bytes(ctring_a, utf8, 0, utf8.arr.items.len) catch return std.Io.Writer.Error.WriteFailed;
+                    defer buf.deinit(ctring_a);
                     try printBytes(buf.items, writer, self.context);
                 },
             }
@@ -853,86 +867,61 @@ const Data = union(enum) {
 };
 
 data: ?*Data = null,
+var ctring_a: Allocator = undefined;
 
-pub const Context = struct {
-    a: Allocator = undefined,
-    graphemes: Graphemes,
-    letter_casing: LetterCasing = undefined,
-    case_folding: CaseFolding = undefined,
-    normalize: Normalize = undefined,
-    gencat: GeneralCategories = undefined,
-
-    pub fn New(a: Allocator) !Context {
-        const normalize = try Normalize.init(a);
-        var context = Context{
-            .a = a,
-            .graphemes = try Graphemes.init(a),
-            .letter_casing = try LetterCasing.init(a),
-            .normalize = normalize,
-            .case_folding = try CaseFolding.initWithNormalize(a, normalize),
-            .gencat = try GeneralCategories.init(a),
-        };
-
-        _ = &context;
-
-        return context;
-    }
-
-    pub fn deinit(self: *Context) void {
-        self.graphemes.deinit(self.a);
-        self.letter_casing.deinit(ctx.a);
-        self.case_folding.deinit(ctx.a);
-        self.normalize.deinit(ctx.a);
-        self.gencat.deinit(ctx.a);
-    }
-};
-
-pub threadlocal var ctx: Context = undefined;
-pub fn Init(a: Allocator) !void {
-    Ctring.ctx = try Context.New(a);
+pub fn Init(a: Allocator) void {
+    Ctring.ctring_a = a;
 }
 
-pub fn Deinit() void {
-    Ctring.ctx.deinit();
+pub fn Ascii(ascii: []const u8) !Ctring {
+    var arr: ArrayList(u8) = .empty;
+    try arr.appendSlice(ctring_a, ascii);
+    const s = try init();
+    if (s.data) |data_| {
+        data_.* = Data {.ascii = arr};
+    }
+
+    return s;
 }
 
 pub fn New(input: []const u8) !Ctring {
-    var result = try init();
-    const data = try result.dataMut();
-    data.* = Data {.utf8 = try Utf8.New(input)};
+    const s = try init();
+    if (s.data) |d| {
+        d.* = Data {.utf8 = try Utf8.New(input)};
+    }
 
-    return result;
+    return s;
+}
+
+pub fn Number(num: anytype, comptime fmt_str: []const u8, comptime max_strlen: usize) !Ctring {
+    // example usage:
+    // const number: isize = 27;
+    // var num_str = try Ctring.Number(number, "{d}", 40);
+    // defer num_str.deinit();
+
+    var buf: [max_strlen]u8 = undefined;
+    const ascii_buf = try std.fmt.bufPrint(&buf, fmt_str, .{num}); //"0x{X}"
+    return Ctring.Ascii(ascii_buf);
 }
 
 pub fn Empty() Ctring {
     return Ctring{};
 }
 
-fn init() !Ctring {
-    const data = try ctx.a.create(Data);
+inline fn init() !Ctring {
+    const data = try ctring_a.create(Data);
     return Ctring {.data = data};
 }
 
 pub fn deinit(self: *Ctring) void {
     if (self.data) |data| {
         switch (data.*) {
-            .ascii => |*arr| arr.deinit(ctx.a),
+            .ascii => |*arr| arr.deinit(ctring_a),
             .utf8 => |*utf8| utf8.deinit(),
         }
 
-        ctx.a.destroy(data);
+        ctring_a.destroy(data);
     }
-}
-
-pub fn Ascii(s: []const u8) !Ctring {
-    var arr: ArrayList(u8) = .empty;
-    try arr.appendSlice(ctx.a, s);
-    const result = try init();
-    if (result.data) |data_| {
-        data_.* = Data {.ascii = arr};
-    }
-
-    return result;
 }
 
 pub fn add(self: *Ctring, rhs: Ctring) !void {
@@ -955,7 +944,7 @@ pub fn add(self: *Ctring, rhs: Ctring) !void {
         .ascii => |*ascii| {
             switch (rdata.*) {
                 .ascii => |*rascii| {
-                    try ascii.appendSlice(ctx.a, rascii.items);
+                    try ascii.appendSlice(ctring_a, rascii.items);
                 },
                 else => unreachable,
             }
@@ -970,7 +959,7 @@ pub fn addAscii(self: *Ctring, rhs: []const u8) !void {
             try utf.addAscii(rhs);
         },
         .ascii => |*ascii| {
-            try ascii.appendSlice(ctx.a, rhs);
+            try ascii.appendSlice(ctring_a, rhs);
         }
     }
 }
@@ -982,11 +971,11 @@ pub fn addChar(self: *Ctring, c: Cp) !void {
     }
     switch (data.*) {
         .utf8 => |*utf| {
-            try utf.arr.append(ctx.a, c);
+            try utf.arr.append(ctring_a, c);
         },
         .ascii => |*ascii| {
             const b: u8 = @intCast(c);
-            try ascii.append(ctx.a, b);
+            try ascii.append(ctring_a, b);
         }
     }
 }
@@ -1048,7 +1037,7 @@ pub fn changeCase(self: *Ctring, change: ChangeCase) void {
             for (utf.arr.items) |*cp| {
                 if (cp.* >= 0) {
                     const n: u21 = @intCast(cp.*);
-                    cp.* = ctx.letter_casing.toLower(n);
+                    cp.* = LetterCasing.toLower(n);
                 }
             }
 
@@ -1060,9 +1049,9 @@ pub fn changeCase(self: *Ctring, change: ChangeCase) void {
                         const n: u21 = @intCast(rc.slice[i]);
                         var n2: u21 = undefined;
                         if (change == .toLower) {
-                            n2 = ctx.letter_casing.toLower(n);
+                            n2 = LetterCasing.toLower(n);
                         } else {
-                            n2 = ctx.letter_casing.toUpper(n);
+                            n2 = LetterCasing.toUpper(n);
                         }
                         rc.slice[i] = n2;
                     }
@@ -1107,7 +1096,7 @@ inline fn dataMut(self: *Ctring) !*Data {
         return d;
     }
 
-    const data = try ctx.a.create(Data);
+    const data = try ctring_a.create(Data);
     data.* = Data {.utf8 = .{}};
     self.data = data;
     return data;
@@ -1204,7 +1193,8 @@ pub fn endsWithUtf8(self: Ctring, rhs: []const u8) bool {
 
 pub fn eq(self: Ctring, rhs: Ctring, range: Range) bool {
     const end = if (range.end == 0) self.afterLast() else range.end;
-    if (end - range.start != rhs.size()) {
+    const count = end - range.start;
+    if (count != rhs.size() or count > self.size()) {
         return false;
     }
 
@@ -1214,7 +1204,8 @@ pub fn eq(self: Ctring, rhs: Ctring, range: Range) bool {
 pub fn eqAscii(self: Ctring, rhs: []const u8, range: Range) bool {
     const start = range.start;
     const end = if (range.end == 0) self.afterLast() else range.end;
-    if (end - start != rhs.len) {
+    const count = end - start;
+    if (count != rhs.len or count > self.size()) {
         return false;
     }
 
@@ -1508,6 +1499,20 @@ pub fn lastIndexOfUtf8(self: Ctring, needles: []const u8, range: Range) ?usize {
     return self.lastIndexOf(s, range);
 }
 
+/// parseInt tries to parse this string as an integer of type `T` in base `radix`.
+pub fn parseInt(self: Ctring, comptime T: type, radix: u8) !T {
+    var buf = try self.toUtf8(ctring_a);
+    defer buf.deinit(ctring_a);
+    return std.fmt.parseInt(T, buf.items, radix);
+}
+
+/// parseFloat tries to parse this string as an floating point number of type `T`.
+pub fn parseFloat(self: Ctring, comptime T: type) !T {
+    var buf = try self.toUtf8(ctring_a);
+    defer buf.deinit(ctring_a);
+    return std.fmt.parseFloat(T, buf.items);
+}
+
 pub fn printStats(self: Ctring, src: std.builtin.SourceLocation) void {
     const used_memory = self.usedMemory();
     const used_mem: f128 = @floatFromInt(used_memory);
@@ -1516,7 +1521,7 @@ pub fn printStats(self: Ctring, src: std.builtin.SourceLocation) void {
     
     const max: usize = @min(36, self.size());
     var grapheme: ArrayList(Cp) = .empty;
-    defer grapheme.deinit(ctx.a);
+    defer grapheme.deinit(ctring_a);
 
     if (self.size() <= max) {
         mtl.debug(src, "{f} [STATS]:", .{self._(2)});
@@ -1530,10 +1535,10 @@ pub fn printStats(self: Ctring, src: std.builtin.SourceLocation) void {
         const gr = self.at(i) orelse break;
         switch (gr.data) {
             .cps => |cps| {
-                grapheme.appendSlice(ctx.a, cps) catch return;
+                grapheme.appendSlice(ctring_a, cps) catch return;
             },
             .ascii => |byte| {
-                grapheme.append(ctx.a, byte) catch return;
+                grapheme.append(ctring_a, byte) catch return;
             }
         }
         
@@ -1583,7 +1588,7 @@ pub fn replaceAscii(self: *Ctring, input: []const u8, start: usize, end: usize) 
 
     switch (data.*) {
         .ascii => |*ascii| {
-            try ascii.replaceRange(ctx.a, start, end-start, input);
+            try ascii.replaceRange(ctring_a, start, end-start, input);
         },
         .utf8 => |*utf| {
             try utf.replaceAscii(input, start, end);
@@ -1626,7 +1631,7 @@ pub fn switchToUtf(self: *Ctring) !void {
     switch (data.*) {
         .ascii => |*ascii| {
             try utf8.addAscii(ascii.items);
-            ascii.deinit(ctx.a);
+            ascii.deinit(ctring_a);
         },
         .utf8 => return,
     }
@@ -1662,7 +1667,7 @@ pub fn toBytes(self: Ctring, a: Allocator, range: Range) !ArrayList(u8) {
         .ascii => |*ascii| {
             const end = if (range.end == 0) ascii.items.len else range.end;
             var ret: ArrayList(u8) = .empty;
-            try ret.appendSlice(ctx.a, ascii.items[range.start..end]);
+            try ret.appendSlice(ctring_a, ascii.items[range.start..end]);
             return ret;
         },
         .utf8 => |*utf8| {
@@ -1701,7 +1706,7 @@ fn trimArrayLeft(T: type, arr: *ArrayList(T)) void {
 
     if (drop > 0) {
         const new_items: []const T = &[_]T{};
-        arr.replaceRange(ctx.a, 0, drop, new_items) catch {};
+        arr.replaceRange(ctring_a, 0, drop, new_items) catch {};
     }
 }
 
@@ -1720,7 +1725,7 @@ fn trimArrayRight(T: type, arr: *ArrayList(T)) void {
     }
 
     if (drop_from < arr.items.len) {
-        arr.shrinkAndFree(ctx.a, drop_from);
+        arr.shrinkAndFree(ctring_a, drop_from);
     }
 }
 
@@ -1793,13 +1798,13 @@ fn utf8_to_bytes(a: Allocator, utf8: *Utf8, start: usize, end: usize) !ArrayList
 
 fn cps_to_bytes(cps: ConstCpSlice) !ArrayList(u8) {
     var buf: ArrayList(u8) = .empty;
-    errdefer buf.deinit(ctx.a);
+    errdefer buf.deinit(ctring_a);
     var tmp: [4]u8 = undefined;
     for (cps) |cp| {
         if (cp >= 0) {
             const c: u21 = @intCast(cp);
             const len = try unicode.utf8Encode(c, &tmp);
-            try buf.appendSlice(ctx.a, tmp[0..len]);
+            try buf.appendSlice(ctring_a, tmp[0..len]);
         }
     }
 
@@ -1835,8 +1840,8 @@ pub fn printBytes(buf: []const u8, writer: *std.Io.Writer, context: i32) !void {
 }
 
 fn analyze(fullpath: []const u8) !void {
-    var arr = try io.readFileUtf8(ctx.a, fullpath);
-    defer arr.deinit(ctx.a);
+    var arr = try io.readFileUtf8(ctring_a, fullpath);
+    defer arr.deinit(ctring_a);
     var s = try Ctring.New(arr.items);
     defer s.deinit();
     s.printStats(@src());
@@ -1849,13 +1854,15 @@ test "Equals, Iteration" {
     if (false) {
         return error.SkipZigTest;
     }
+    // const io = std.testing.io;
+    // _ = &io;
     const alloc = std.testing.allocator;
-    try Ctring.Init(alloc);
-    defer Ctring.Deinit();
+    Ctring.Init(alloc);
 
     {
         var top = try Ctring.New("🧑‍🌾 橋 5b");
         defer top.deinit();
+        // mtl.debug(@src(), "{f}", .{top._(2)});
 
         {
             var v = top.view(0, 3);
@@ -1973,8 +1980,7 @@ test "Find" {
         return error.SkipZigTest;
     }
     const alloc = std.testing.allocator;
-    try Ctring.Init(alloc);
-    defer Ctring.Deinit();
+    Ctring.Init(alloc);
 
     var top = try Ctring.New("🧑‍🌾 .橋 .5b.橋");
     defer top.deinit();
@@ -2080,8 +2086,7 @@ test "Split" {
         return error.SkipZigTest;
     }
     const alloc = std.testing.allocator;
-    try Ctring.Init(alloc);
-    defer Ctring.Deinit();
+    Ctring.Init(alloc);
 
     var top = try Ctring.New(JoseBytes);
     defer top.deinit();
@@ -2093,7 +2098,7 @@ test "Split" {
         var sep = try Ctring.Ascii(" ");
         defer sep.deinit();
         var arr = try top_view.split(sep, true);
-        defer arr.deinit(ctx.a);
+        defer arr.deinit(ctring_a);
         const correct = [_][]const u8{"Jos\u{65}\u{301}", "se", "fu\u{65}\u{301}",
         "a", "Sevilla", "sin", "pararse"};
         for (arr.items, correct) |a, b| {
@@ -2103,7 +2108,7 @@ test "Split" {
 
     {
         var arr = try top_view.splitAscii(" ", true);
-        defer arr.deinit(ctx.a);
+        defer arr.deinit(ctring_a);
         const correct = [_][]const u8{"Jos\u{65}\u{301}", "se", "fu\u{65}\u{301}",
         "a", "Sevilla", "sin", "pararse"};
         for (arr.items, correct) |a, b| {
@@ -2117,7 +2122,7 @@ test "Split" {
         const rootv = root.view(0, root.size());
         {
             var arr = try rootv.splitAscii(" ", true);
-            defer arr.deinit(ctx.a);
+            defer arr.deinit(ctring_a);
 
             const correct = [_][]const u8{"Hello,", "", "world!", "Again!"};
             for (arr.items, correct) |a, b| {
@@ -2128,7 +2133,7 @@ test "Split" {
 
         {
             var arr = try rootv.splitAscii(" ", false);
-            defer arr.deinit(ctx.a);
+            defer arr.deinit(ctring_a);
 
             const correct = [_][]const u8{"Hello,", "world!", "Again!"};
             for (arr.items, correct) |a, b| {
@@ -2142,8 +2147,7 @@ test "Split" {
 
 test "Replace" {
     const alloc = std.testing.allocator;
-    try Ctring.Init(alloc);
-    defer Ctring.Deinit();
+    Ctring.Init(alloc);
 
     const initial = "🧑‍🌾 .橋 .5b.橋";
     {

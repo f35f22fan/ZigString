@@ -12,11 +12,16 @@ pub const Folder = enum(u8) {
     Config,
 };
 
+pub const Truncate = enum(u8) {
+    Yes,
+    No,
+};
+
 const FileEntry = struct {
     kind: std.fs.File.Kind,
     name: []const u8,
 
-    pub fn From(alloc: Allocator, entry: std.fs.Dir.Entry) !FileEntry {
+    pub fn From(alloc: Allocator, entry: std.Io.Dir.Entry) !FileEntry {
         return .{ .kind = entry.kind, .name = try alloc.dupe(u8, entry.name) };
     }
 
@@ -25,18 +30,22 @@ const FileEntry = struct {
     }
 };
 
-pub fn getEnv(a: Allocator, folder: Folder) ![]const u8 {
+pub fn getEnv(gpa: Allocator, env: std.process.Environ, folder: Folder) ![]const u8 {
     const var_name = switch (folder) {
         Folder.Home => "HOME",
         else => return Error.NotFound,
     };
 
-    return std.process.getEnvVarOwned(a, var_name) catch return Error.NotFound;
+    const value = try env.getAlloc(gpa, var_name);
+    // const value = try std.testing.environ.getAlloc(a, var_name);
+    // mtl.debug(@src(), "Value: {s}", .{value});
+
+    return value;
 }
 
-pub fn getHome2(alloc: Allocator, subpath: ?Ctring) !Ctring {
-    const home = try getEnv(alloc, Folder.Home);
-    defer alloc.free(home);
+pub fn getHome2(gpa: Allocator, env: std.process.Environ, subpath: ?Ctring) !Ctring {
+    const home = try getEnv(gpa, env, Folder.Home);
+    defer gpa.free(home);
     if (subpath) |s| {
         var ret = try Ctring.New(home);
         // mtl.debug(@src(), "inital ret:{f}", .{ret._(2)});
@@ -48,9 +57,9 @@ pub fn getHome2(alloc: Allocator, subpath: ?Ctring) !Ctring {
     }
 }
 
-pub fn getHome(alloc: Allocator, subpath: ?Str) !Str {
-    const home = try getEnv(alloc, Folder.Home);
-    defer alloc.free(home);
+pub fn getHome(gpa: Allocator, env: std.process.Environ, subpath: ?Str) !Str {
+    const home = try getEnv(gpa, env, Folder.Home);
+    defer gpa.free(home);
     if (subpath) |s| {
         var ret = try Str.NewAscii(home);
         try ret.add(s);
@@ -60,42 +69,15 @@ pub fn getHome(alloc: Allocator, subpath: ?Str) !Str {
     }
 }
 
-pub fn getHomeAscii(alloc: Allocator, subpath: ?[]const u8) !Str {
-    if (subpath) |ascii| {
-        var s = try Str.NewAscii(ascii);
-        defer s.deinit();
-        return try getHome(alloc, s);
-    }
-    return try getHome(alloc, null);
-}
-
-pub fn getHomeAscii2(alloc: Allocator, subpath: ?[]const u8) !Ctring {
-    if (subpath) |ascii| {
-        var s = try Ctring.New(ascii);
-        defer s.deinit();
-        return try getHome2(alloc, s);
-    }
-    return try getHome2(alloc, null);
-}
-
-pub fn getHomeUtf8(alloc: Allocator, subpath: ?[]const u8) !Str {
-    if (subpath) |utf8| {
-        var s = try Str.New(utf8);
-        defer s.deinit();
-        return try getHome(alloc, s);
-    }
-    return try getHome(alloc, null);
-}
-
-pub fn listFiles(alloc: Allocator, folder: ?Folder, subdir: ?Str) !std.ArrayList(FileEntry) {
-    var dir: std.fs.Dir = undefined;
+pub fn listFiles(gpa: Allocator, folder: ?Folder, subdir: ?Str) !std.ArrayList(FileEntry) {
+    var dir: std.Io.Dir = undefined;
 
     var fullpath: Str = Str.New();
     defer fullpath.deinit();
 
     if (folder) |f| {
         fullpath = switch (f) {
-            .Home => try getHome(alloc, null),
+            .Home => try getHome(gpa, null),
             .Config => return error.BadArg, // to be implemented!
         };
 
@@ -117,23 +99,23 @@ pub fn listFiles(alloc: Allocator, folder: ?Folder, subdir: ?Str) !std.ArrayList
     dir = try openDirUtf8(bytes.items);
     defer dir.close();
     var iter = dir.iterate();
-    var list = std.ArrayList(FileEntry).init(alloc);
+    var list = std.ArrayList(FileEntry).init(gpa);
     errdefer {
         for (list.items) |item| {
-            item.deinit(alloc);
+            item.deinit(gpa);
         }
         list.deinit();
     }
 
     while (try iter.next()) |entry| {
-        try list.append(try FileEntry.From(alloc, entry));
+        try list.append(try FileEntry.From(gpa, entry));
         // mtl.debug(@src(), "\"{s}\", kind={}", .{entry.name, entry.kind});
     }
 
     return list;
 }
 
-pub fn listFilesUtf8(alloc: Allocator, folder: ?Folder, subdir: ?[]const u8) !std.ArrayList(FileEntry) {
+pub fn listFilesUtf8(gpa: Allocator, folder: ?Folder, subdir: ?[]const u8) !std.ArrayList(FileEntry) {
     var subpath: ?Str = null;
     defer {
         if (subpath) |sp| {
@@ -143,55 +125,85 @@ pub fn listFilesUtf8(alloc: Allocator, folder: ?Folder, subdir: ?[]const u8) !st
     if (subdir) |sd| {
         subpath = try Str.From(sd);
     }
-    return listFiles(alloc, folder, subpath);
+    return listFiles(gpa, folder, subpath);
 }
 
-pub fn openDir(a: Allocator, fullpath: Str) !std.fs.Dir {
-    var bytes = try fullpath.toUtf8(a);
-    defer bytes.deinit(a);
-    return openDirUtf8(bytes.items);
+pub fn openDir(gpa: Allocator, io: std.Io, fullpath: Str) !std.Io.Dir {
+    var bytes = try fullpath.toUtf8(gpa);
+    defer bytes.deinit(gpa);
+    return openDirUtf8(io, bytes.items);
 }
 
-pub fn openDir2(a: Allocator, fullpath: Ctring) !std.fs.Dir {
-    var bytes = try fullpath.toBytes(a, .{});
-    defer bytes.deinit(a);
-    return openDirUtf8(bytes.items);
+pub fn openDir2(gpa: Allocator, io: std.Io, fullpath: Ctring) !std.Io.Dir {
+    var bytes = try fullpath.toBytes(gpa, .{});
+    defer bytes.deinit(gpa);
+    return openDirUtf8(io, bytes.items);
 }
 
-pub fn openDirUtf8(fullpath: []const u8) !std.fs.Dir {
-    const dir = try std.fs.openDirAbsolute(fullpath, .{ .iterate = true, .no_follow = true });
+pub fn openDirUtf8(io: std.Io, fullpath: []const u8) !std.Io.Dir {
+    const dir = try std.Io.Dir.openDirAbsolute(io, fullpath, .{ .iterate = true, .follow_symlinks = false });
     return dir;
 }
 
-pub fn readFile(alloc: Allocator, full_path: Str) !ArrayList(u8) {
-    var bytes = try full_path.toUtf8(alloc);
-    defer bytes.deinit(alloc);
-    return readFileUtf8(alloc, bytes.items);
+pub fn readFile(gpa: Allocator, io: std.Io, full_path: Str) !ArrayList(u8) {
+    var bytes = try full_path.toUtf8(gpa);
+    defer bytes.deinit(gpa);
+    return readFileUtf8(gpa, io, bytes.items);
 }
 
-pub fn readFile2(alloc: Allocator, full_path: Ctring) !ArrayList(u8) {
-    var bytes = try full_path.toBytes(alloc, .{});
-    defer bytes.deinit(alloc);
-    return readFileUtf8(alloc, bytes.items);
+pub fn readFile2(gpa: Allocator, io: std.Io, full_path: Ctring) !ArrayList(u8) {
+    var bytes = try full_path.toBytes(gpa, .{});
+    defer bytes.deinit(gpa);
+    return readFileUtf8(gpa, io, bytes.items);
 }
 
-pub fn readFileUtf8(alloc: Allocator, full_path: []const u8) !ArrayList(u8) {
-    const file = try std.fs.openFileAbsolute(full_path, .{});
-    defer file.close();
+pub fn readFileUtf8(gpa: Allocator, io: std.Io, full_path: []const u8) !ArrayList(u8) {
+    const file = try std.Io.Dir.openFileAbsolute(io, full_path, .{});
+    defer file.close(io);
     // return file.reader().readAllAlloc(alloc, std.math.maxInt(usize));
     var buf_in: [4096]u8 = undefined;
     var dest_buf: [4096]u8 = undefined;
-    var r = file.reader(&buf_in);
-    var reader = &r.interface;
+    var file_reader = file.reader(io, &buf_in);
+    var iface = &file_reader.interface;
     var arr: ArrayList(u8) = .empty;
 
     while (true) {
-        const num = try reader.readSliceShort(&dest_buf);
+        const num = try iface.readSliceShort(&dest_buf);
         if (num == 0) {
             break;
         }
-        try arr.appendSlice(alloc, dest_buf[0..num]);
+        try arr.appendSlice(gpa, dest_buf[0..num]);
     }
 
     return arr;
+}
+
+pub fn toNewFile(io: std.Io, path: []const u8, data: []const u8, truncate: Truncate) !void {
+    const out_file = try std.Io.Dir.openFileAbsolute(io, path, .{.mode = .write_only,});
+    defer out_file.close(io);
+
+    try writeAll(io, out_file, data, truncate);
+}
+
+pub fn writeAll(io: std.Io, out: std.Io.File, data: []const u8, truncate: Truncate) !void {
+    var file_buf: [4096]u8 = undefined;
+    var writer = out.writer(io, &file_buf);
+    if (truncate == .No) { // workaround for https://github.com/ziglang/zig/issues/14375
+        // The downside is that this is not atomic.
+        const stat = try out.stat(io);
+        try writer.seekTo(stat.size);
+    }
+    
+    var at: usize = 0;
+    while (true) {
+        const num = try writer.interface.write(data[at..]);
+        if (num == 0) {
+            mtl.debug(@src(), "Reached the end", .{});
+            break;
+        }
+        mtl.debug(@src(), "Wrote {} bytes", .{num});
+        at += num;
+    }
+
+    try writer.interface.flush();
 }
