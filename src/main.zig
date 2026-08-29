@@ -63,8 +63,6 @@ fn getString() struct { i64, []const u8 } {
 pub fn main(init: std.process.Init) !u8 {
     const io = init.io;
     _ = &io;
-    try String.Init(alloc);
-    defer String.Deinit();
 
     const s = try String.New("Hello, World!");
     defer s.deinit();

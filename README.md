@@ -9,8 +9,8 @@ See the bottom of Ctring.zig for more tests/usage examples.
 ---
 
  ```zig
-    // before using the string class, must set the allocator to be used:
     const alloc = std.testing.allocator;
+    // Ctring uses std.heap.page_allocator by defualt, or you can set your own with:
     Ctring.Init(alloc);
 
     {

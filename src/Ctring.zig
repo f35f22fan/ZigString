@@ -867,7 +867,7 @@ const Data = union(enum) {
 };
 
 data: ?*Data = null,
-var ctring_a: Allocator = undefined;
+var ctring_a: Allocator = std.heap.page_allocator;
 
 pub fn Init(a: Allocator) void {
     Ctring.ctring_a = a;
@@ -893,14 +893,14 @@ pub fn New(input: []const u8) !Ctring {
     return s;
 }
 
-pub fn Number(num: anytype, comptime fmt_str: []const u8, comptime max_strlen: usize) !Ctring {
+pub fn Number(buf: []u8, comptime fmt_str: []const u8, num: anytype) !Ctring {
     // example usage:
-    // const number: isize = 27;
-    // var num_str = try Ctring.Number(number, "{d}", 40);
-    // defer num_str.deinit();
+    // const n: isize = 27;
+    // var buf: [256]u8 = undefined;
+    // var s = try Ctring.Number(n, "{d}", &buf);
+    // defer s.deinit();
 
-    var buf: [max_strlen]u8 = undefined;
-    const ascii_buf = try std.fmt.bufPrint(&buf, fmt_str, .{num}); //"0x{X}"
+    const ascii_buf = try std.fmt.bufPrint(buf, fmt_str, .{num});
     return Ctring.Ascii(ascii_buf);
 }
 
@@ -1857,7 +1857,7 @@ test "Equals, Iteration" {
     // const io = std.testing.io;
     // _ = &io;
     const alloc = std.testing.allocator;
-    Ctring.Init(alloc);
+    // Ctring.Init(alloc);
 
     {
         var top = try Ctring.New("🧑‍🌾 橋 5b");

@@ -1184,16 +1184,16 @@ inline fn getTime() i128 {
 }
 
 pub const Context = struct {
-    a: Allocator = undefined,
+    a: Allocator = std.heap.page_allocator,
     // graphemes: Graphemes = undefined,
     // letter_casing: LetterCasing = undefined,
     // case_folding: CaseFolding = undefined,
     // normalize: Normalize = undefined,
     // gencat: GeneralCategories = undefined,
 
-    pub fn New(alloc: Allocator) !Context {
+    pub fn New(alloc: Allocator) Context {
         // const normalize = Normalize;//try Normalize.init(alloc);
-        var context = Context{
+        return Context{
             .a = alloc,
             // .graphemes = Graphemes,//try Graphemes.init(alloc),
             // .letter_casing = LetterCasing, //try LetterCasing.init(alloc),
@@ -1201,23 +1201,10 @@ pub const Context = struct {
             // .case_folding = CaseFolding,//try CaseFolding.initWithNormalize(alloc, normalize),
             // .gencat = GeneralCategories,//try GeneralCategories.init(alloc),
         };
-
-        _ = &context;
-
-        return context;
-    }
-
-    pub fn deinit(self: *Context) void {
-        _ = self;
-        // self.graphemes.deinit(self.a);
-        // self.letter_casing.deinit(ctx.a);
-        // self.case_folding.deinit(ctx.a);
-        // self.normalize.deinit(ctx.a);
-        // self.gencat.deinit(ctx.a);
     }
 };
 
-pub threadlocal var ctx: Context = undefined;
+var ctx: Context = .{};
 
 const Data = struct {
     codepoints_: ArrayList(Codepoint) = .empty,
@@ -1300,12 +1287,8 @@ pub fn NewAscii(input: []const u8) !String {
     return s;
 }
 
-pub fn Init(a: Allocator) !void {
-    String.ctx = try Context.New(a);
-}
-
-pub fn Deinit() void {
-    String.ctx.deinit();
+pub fn Init(a: Allocator) void {
+    String.ctx = Context.New(a);
 }
 
 pub fn deinit(self: String) void {

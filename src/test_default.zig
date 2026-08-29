@@ -18,16 +18,12 @@ const KeepEmptyParts = String.KeepEmptyParts;
 const JoseUtf8 = "Jos\u{65}\u{301} se fu\u{65}\u{301} a Sevilla sin pararse";
 
 const theme = String.Theme.Dark;
-const TestString = false;
+const TestString = true;
 const TestCtring = true;
 
 test "Creation" {
     if (!TestCtring)
         return error.SkipZigTest;
-    
-    Ctring.Init(alloc);
-
-    mtl.debug(@src(), "Hello world {}", .{14});
 
     {
         const ascii = "abc";
@@ -43,14 +39,15 @@ test "Creation" {
         try expect(s.eqUtf8(input, .{}));
     }
 
+    var buf: [256]u8 = undefined;
     {
-        var s = try Ctring.Number(15, "{d}", 2);
+        var s = try Ctring.Number(&buf, "{d}", 15);
         defer s.deinit();
         try expect((s.eqAscii("15", .{})));
     }
 
     {
-        var s = try Ctring.Number(15, "{X}", 32);
+        var s = try Ctring.Number(&buf, "{X}", 15);
         defer s.deinit();
         try expect((s.eqAscii("F", .{})));
     }
@@ -60,8 +57,7 @@ test "Append Test" {
     if (!TestString)
         return error.SkipZigTest;
     
-    try String.Init(alloc);
-    defer String.Deinit();
+    // String.Init(alloc);
 
     const additional = "[Ещё]";
     const correct_cstr = JoseUtf8 ++ additional;
@@ -84,8 +80,7 @@ test "Get Grapheme Index" {
     if (!TestString)
         return error.SkipZigTest;
     
-    try String.Init(alloc);
-    defer String.Deinit();
+    String.Init(alloc);
 
     const main_str = try String.New(JoseUtf8);
     defer main_str.deinit();
@@ -117,8 +112,7 @@ test "Trim Left" {
     if (!TestString)
         return error.SkipZigTest;
     
-    try String.Init(alloc);
-    defer String.Deinit();
+    String.Init(alloc);
 
     const trim_left_str = "  \t Привет!";
     var main_str = try String.New(trim_left_str);
@@ -147,8 +141,7 @@ test "Trim Right" {
     if (!TestString)
         return error.SkipZigTest;
 
-    try String.Init(alloc);
-    defer String.Deinit();
+    String.Init(alloc);
 
     const trim_right_str = "Привет! \t  ";
     var main_str = try String.New(trim_right_str);
@@ -178,8 +171,7 @@ test "Substring" {
         return error.SkipZigTest;
     }
 
-    try String.Init(alloc);
-    defer String.Deinit();
+    String.Init(alloc);
 
     const main_str = try String.New("Jos\u{65}\u{301} se fu\u{65}\u{301}");
     defer main_str.deinit();
@@ -215,8 +207,7 @@ test "Equals" {
         return error.SkipZigTest;
     }
 
-    try String.Init(alloc);
-    defer String.Deinit();
+    String.Init(alloc);
 
     const c_str = "my file.desktop";
     const filename = try String.New(c_str);
@@ -246,8 +237,7 @@ test "FindInsertRemove" {
     if (!TestString) {
         return error.SkipZigTest;
     }
-    try String.Init(alloc);
-    defer String.Deinit();
+    String.Init(alloc);
 
     const html_ascii = "<human><name>Jos\u{65}\u{301}</name><age>27</age></human>\u{65}\u{301}";
     const html_str = try String.New(html_ascii);
@@ -331,8 +321,7 @@ test "Split" {
         return error.SkipZigTest;
     }
 
-    try String.Init(alloc);
-    defer String.Deinit();
+    String.Init(alloc);
 
     const main_str = try String.New(JoseUtf8);
     defer main_str.deinit();
@@ -403,8 +392,7 @@ test "To Upper, To Lower" {
         return error.SkipZigTest;
     }
 
-    try String.Init(alloc);
-    defer String.Deinit();
+    String.Init(alloc);
 
     const normal = [_][]const u8{ "Hello, World!", "Привет!", "Jos\u{65}\u{301}" };
     const upper = [_][]const u8{ "HELLO, WORLD!", "ПРИВЕТ!", "JOS\u{45}\u{301}" };
@@ -425,8 +413,7 @@ test "Char At" {
         return error.SkipZigTest;
     }
 
-    try String.Init(alloc);
-    defer String.Deinit();
+    String.Init(alloc);
 
     const str = try String.New(JoseUtf8);
     defer str.deinit();
@@ -582,8 +569,7 @@ test "Slice functions" {
         return error.SkipZigTest;
     }
 
-    try String.Init(alloc);
-    defer String.Deinit();
+    String.Init(alloc);
 
     const heap = try String.New(JoseUtf8);
     defer heap.deinit();
@@ -726,8 +712,7 @@ test "Printing Colors" {
         return error.SkipZigTest;
     }
 
-    try String.Init(alloc);
-    defer String.Deinit();
+    String.Init(alloc);
 
     const s = try String.New("Hello, World!");
     defer s.deinit();
@@ -747,8 +732,7 @@ test "trimming and splitting slices" {
         return error.SkipZigTest;
     }
 
-    try String.Init(alloc);
-    defer String.Deinit();
+    // String.Init(alloc);
     
     {
         const heap = try String.New("  Hello, World!   ");
@@ -785,11 +769,6 @@ test "Qt chars" {
     if (true) {
         return error.SkipZigTest;
     }
-    try String.Init(alloc);
-    defer String.Deinit();
-
-    try Ctring.Init(alloc);
-    defer Ctring.Deinit();
 
     {
         const s = try String.New("Jos\u{65}\u{301}");
